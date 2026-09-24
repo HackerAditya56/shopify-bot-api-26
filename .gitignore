@@ -34,3 +34,11 @@ Thumbs.db
 # ── Logs / dumps ────────────────────────────────────────
 *.log
 logs/
+
+# ── Large archive / dump files (NEVER commit) ─────────────
+*.har
+*.zip
+*.tar.gz
+*.tgz
+*.dump
+
