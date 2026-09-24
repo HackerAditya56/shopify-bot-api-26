@@ -1,0 +1,10 @@
+{
+  "name": "whop-checkout-worker",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "wrangler": "^4.118.0"
+  }
+}

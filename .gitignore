@@ -1,0 +1,36 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ── Node.js ─────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json.bak
+
+# ── Cloudflare Workers / Wrangler ───────────────────────
+.wrangler/
+.dev.vars
+
+# ── Environment / secrets ───────────────────────────────
+.env
+.env.local
+*.env
+
+# ── OS / editor ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ── Logs / dumps ────────────────────────────────────────
+*.log
+logs/

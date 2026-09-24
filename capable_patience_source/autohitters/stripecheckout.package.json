@@ -1,0 +1,10 @@
+{
+  "name": "stripe-3ds-worker",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "wrangler": "^4.118.0"
+  }
+}
