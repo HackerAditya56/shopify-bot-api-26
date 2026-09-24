@@ -14,6 +14,9 @@ from aiogram import types, F, Router, Bot
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
 
+_SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -31,7 +34,7 @@ API_TIMEOUT = 30
 # Proxy List - Rotated randomly for each check
 PROXY_LIST = []
 try:
-    with open("/home/zirconium/Desktop/shopify/proxy.txt", "r", encoding="utf-8", errors="ignore") as _pf:
+    with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
         PROXY_LIST = [line.strip() for line in _pf if line.strip()]
 except Exception:
     pass
@@ -125,9 +128,9 @@ def is_admin(user_id):
 
 def read_sites():
     """Read sites from sites.txt file - returns list without duplicates"""
-    if not os.path.exists("/home/zirconium/Desktop/shopify/site.txt"):
+    if not os.path.exists(os.path.join(_SHOPIFY_DIR, "site.txt")):
         return []
-    with open("/home/zirconium/Desktop/shopify/site.txt", "r", encoding="utf-8") as f:
+    with open(os.path.join(_SHOPIFY_DIR, "site.txt"), "r", encoding="utf-8") as f:
         # Automatically remove duplicates when reading
         sites = list(set([line.strip() for line in f if line.strip()]))
     return sites
@@ -137,7 +140,7 @@ def write_sites(sites_list):
     # Convert to set to remove duplicates, then back to list
     unique_sites = list(set(sites_list))
     
-    with open("/home/zirconium/Desktop/shopify/site.txt", "w", encoding="utf-8") as f:
+    with open(os.path.join(_SHOPIFY_DIR, "site.txt"), "w", encoding="utf-8") as f:
         for site in unique_sites:
             f.write(f"{site}\n")
     
@@ -757,7 +760,7 @@ async def removeall_command(message: types.Message):
 
     try:
         def _clear_file():
-            with open("/home/zirconium/Desktop/shopify/site.txt", "w", encoding="utf-8") as f:
+            with open(os.path.join(_SHOPIFY_DIR, "site.txt"), "w", encoding="utf-8") as f:
                 pass
         
         await asyncio.to_thread(_clear_file)

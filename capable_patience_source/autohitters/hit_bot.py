@@ -1,3 +1,4 @@
+import os
 # hit_bot.py — /hit + /co command: Stripe/Whop checkout hitter (worker 3DS bypass)
 
 import asyncio
@@ -15,7 +16,7 @@ from autohitters.hitter import AsyncStripeChecker, test_proxy
 router = Router()
 
 MAX_CARDS = 10
-PROXY_FILE = "/home/zirconium/Desktop/shopify/proxy.txt"
+PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")
 
 user_last_command_time = {}
 
@@ -231,6 +232,9 @@ async def _update_proc(proc, results, total):
 # /whop — Whop checkout (Basis Theory -> Whop -> Stripe), via whop.worker.js for 3DS
 # ---------------------------------------------------------------------------
 from autohitters.whop import run_whop_check
+
+_SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 
 @router.message(F.text.startswith("/whop"))

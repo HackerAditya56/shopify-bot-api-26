@@ -29,6 +29,9 @@ from database import is_gate_enabled, get_user_credits, update_credits, update_u
 from bin import get_bin_info
 from sub import get_premium_status
 
+_SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION & URLS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -571,7 +574,7 @@ async def get_user_proxies(user_id):
         logging.error(f"Error fetching proxies for user {user_id}: {e}")
     if not proxies:
         try:
-            with open("/home/zirconium/Desktop/shopify/proxy.txt", "r", encoding="utf-8", errors="ignore") as _pf:
+            with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
                 proxies = [line.strip() for line in _pf if line.strip()]
         except Exception as e:
             logging.error(f"Error loading fallback proxies from file: {e}")
@@ -611,8 +614,8 @@ def is_expired(mm: str, yy: str) -> bool:
 def get_sites():
     sites = []
     try:
-        if os.path.exists("/home/zirconium/Desktop/shopify/site.txt"):
-            with open("/home/zirconium/Desktop/shopify/site.txt", "r", encoding="utf-8", errors="ignore") as f:
+        if os.path.exists(os.path.join(_SHOPIFY_DIR, "site.txt")):
+            with open(os.path.join(_SHOPIFY_DIR, "site.txt"), "r", encoding="utf-8", errors="ignore") as f:
                 sites = [line.strip() for line in f if line.strip()]
     except Exception as e:
         logging.error(f"Error reading sites.txt: {e}")

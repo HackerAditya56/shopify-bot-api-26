@@ -25,6 +25,9 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 
+_SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 router = Router()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -33,11 +36,11 @@ router = Router()
 
 API_URL = "http://127.0.0.1:8080/shopii"
 
-SITES_FILE = "/home/zirconium/Desktop/shopify/site.txt"
+SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 
 PROXY_LIST = []
 try:
-    with open("/home/zirconium/Desktop/shopify/proxy.txt", "r", encoding="utf-8", errors="ignore") as _pf:
+    with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
         PROXY_LIST = [line.strip() for line in _pf if line.strip()]
 except Exception:
     pass

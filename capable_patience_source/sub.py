@@ -544,11 +544,13 @@ async def sub_command(message: types.Message):
         except Exception as e:
             logging.error(f"Could not DM user {target_id}: {e}")
 
+    async def _reply():
+        await message.reply(f"✅ Premium granted to {target_id} for {days} days with {credits:,} credits.")
+
     await asyncio.gather(
         _dm_user(),
-        message.bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_text, parse_mode="HTML", #reply_markup=log_kb
-        ),
-        message.reply(f"✅ Premium granted to {target_id} for {days} days with {credits:,} credits."),
+        message.bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_text, parse_mode="HTML"),
+        _reply(),
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -615,13 +617,16 @@ async def adcr_command(message: types.Message):
         except Exception as e:
             logging.error(f"Could not DM user {target_id}: {e}")
 
-    await asyncio.gather(
-        _dm_user(),
-        message.reply(
+    async def _reply():
+        await message.reply(
             f"✅ Added <b>{add_credits:,}</b> credits to {user_link}.\n"
             f"𝐍𝐞𝐰 𝐓𝐨𝐭𝐚𝐥 ➠ <b>{new_total:,}</b>",
             parse_mode="HTML"
-        ),
+        )
+
+    await asyncio.gather(
+        _dm_user(),
+        _reply(),
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -685,9 +690,12 @@ async def rsub_command(message: types.Message):
         except Exception as e:
             logging.error(f"Could not DM user {target_id}: {e}")
 
+    async def _reply():
+        await message.reply(f"✅ Premium removed from {target_id} and credits reset to 150.")
+
     await asyncio.gather(
         _dm_user(),
-        message.reply(f"✅ Premium removed from {target_id} and credits reset to 150."),
+        _reply(),
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
