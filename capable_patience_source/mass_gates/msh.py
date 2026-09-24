@@ -1485,16 +1485,9 @@ async def handle_stop_callback(callback: types.CallbackQuery, callback_data: Msh
         print(f"🛑 [MSH] Stop signal sent")
         logging.info(f"🛑 [MSH] Stop signal sent")
 
-        cancelled_count = 0
-        for task in session.get('tasks', []):
-            if not task.done():
-                task.cancel()
-                cancelled_count += 1
-
-        await _safe_answer(callback, "🛑 Stopping...", show_alert=False)
-
-        print(f"🛑 [MSH] Cancelled {cancelled_count} tasks")
-        logging.info(f"🛑 [MSH] Cancelled {cancelled_count} tasks")
+        # Graceful stop: set the flag — workers check is_session_stopped() and
+        # bail on their own (in-flight cards finish, no new cards start).
+        await _safe_answer(callback, "🛑 Stopping... in-flight cards will finish", show_alert=False)
 
         proxy_manager = session.get('proxy_manager')
         if proxy_manager:

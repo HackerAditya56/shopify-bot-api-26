@@ -151,11 +151,8 @@ async def stop_command(message: types.Message):
     # 6. SET STOPPED STATUS
     session['status'] = "𝗦𝘁𝗼𝗽𝗽𝗲𝗱"
 
-    # 7. INSTANTLY CANCEL ONGOING REQUESTS
-    active_tasks = session.get('tasks', [])
-    for task in active_tasks:
-        if not task.done():
-            task.cancel()
+    # 7. Graceful stop: set the flag only — workers check is_session_stopped()
+    # and bail on their own (in-flight cards finish, no new cards start).
 
     # 8. Update the Progress Message immediately
     if update_func:

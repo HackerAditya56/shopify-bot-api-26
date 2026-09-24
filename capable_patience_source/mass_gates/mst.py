@@ -690,14 +690,8 @@ async def handle_stop_callback(callback: types.CallbackQuery, callback_data: Mst
         session['status'] = "𝗦𝘁𝗼𝗽𝗽𝗲𝗱"
         print(f"🛑 [MST] Stop signal sent")
 
-        cancelled_count = 0
-        for task in session.get('tasks', []):
-            if not task.done():
-                task.cancel()
-                cancelled_count += 1
-
-        await _safe_answer(callback, "🛑 Stopping...", show_alert=False)
-        print(f"🛑 [MST] Cancelled {cancelled_count} tasks")
+        # Graceful stop: workers check is_session_stopped() and bail on their own.
+        await _safe_answer(callback, "🛑 Stopping... in-flight cards will finish", show_alert=False)
 
         session['last_text'] = ""
         await update_progress_message(callback.bot, session_id)

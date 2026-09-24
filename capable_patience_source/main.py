@@ -270,6 +270,8 @@ def _status_sync(user_id):
     cur = conn.cursor()
     plan, credits_str, joined_str = "Trial", "0", "N/A"
     is_owner = user_id in ADMIN_IDS
+    if is_owner:
+        plan = "OWNER"
     try:
         cur.execute("SELECT is_premium, premium_expiry, joined_at FROM users WHERE user_id = %s", (user_id,))
         row = cur.fetchone()

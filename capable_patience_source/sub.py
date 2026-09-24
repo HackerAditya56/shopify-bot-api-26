@@ -145,6 +145,8 @@ def mask_receipt_id(receipt_id):
 
 def get_premium_status(user_id):
     import time as _t
+    if user_id == ADMIN_ID:
+        return True, None
     if _USE_POOL:
         now = _t.monotonic()
         cached = _premium_cache.get(user_id)
