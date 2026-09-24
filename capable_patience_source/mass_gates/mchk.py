@@ -21,7 +21,7 @@ from aiogram.filters.callback_data import CallbackData
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LOCAL IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic
+from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
 
@@ -866,8 +866,8 @@ async def mchk_command(message: types.Message):
         return
 
     valid_cards = []
-    is_owner = (user_id == OWNER_ID)
-    MAX_VALID_CARDS = 50000 if is_owner else (10000 if is_premium else 2000)
+    is_owner = is_owner_user(user_id)
+    MAX_VALID_CARDS = 50000 if (is_owner or is_premium) else 1000
     for card_string in extracted_cards:
         if len(valid_cards) >= MAX_VALID_CARDS:
             break

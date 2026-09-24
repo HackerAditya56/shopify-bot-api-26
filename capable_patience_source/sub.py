@@ -19,7 +19,7 @@ router = Router()
 # CONFIGURATION & IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 try:
-    from database import DB_CONFIG, PooledConn, _premium_cache, _premium_cache_ttl
+    from database import DB_CONFIG, PooledConn, _premium_cache, _premium_cache_ttl, is_owner_user, set_owner_flag
     _USE_POOL = True
 except ImportError:
     DB_CONFIG = {"dbname": "your_db", "user": "your_user", "password": "your_pass", "host": "localhost"}
@@ -145,7 +145,7 @@ def mask_receipt_id(receipt_id):
 
 def get_premium_status(user_id):
     import time as _t
-    if user_id == ADMIN_ID:
+    if is_owner_user(user_id):
         return True, None
     if _USE_POOL:
         now = _t.monotonic()
@@ -500,6 +500,13 @@ async def sub_command(message: types.Message):
         logging.error(f"Error updating subscription: {e}")
         await message.reply("❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
         return
+
+    # "owner" plan -> flag the target as owner (unlimited credits + bypass premium gate)
+    if plan == "owner":
+        try:
+            await asyncio.to_thread(set_owner_flag, target_id, 1)
+        except Exception as e:
+            logging.error(f"Error setting owner flag: {e}")
 
     masked_id = mask_receipt_id(receipt_id)
 

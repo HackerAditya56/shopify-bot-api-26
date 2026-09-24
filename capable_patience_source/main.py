@@ -13,7 +13,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 # [Your existing imports remain unchanged]
-from database import get_user, create_user, get_user_credits, update_credits, DB_CONFIG
+from database import get_user, create_user, get_user_credits, update_credits, DB_CONFIG, is_owner_user
 from gate import on_command, off_command
 from fb import setup_feedback_handler, feedback_cmd, router as fb_router
 from stats import stats_command
@@ -269,7 +269,7 @@ def _status_sync(user_id):
     conn = _db_conn()
     cur = conn.cursor()
     plan, credits_str, joined_str = "Trial", "0", "N/A"
-    is_owner = user_id in ADMIN_IDS
+    is_owner = is_owner_user(user_id)
     if is_owner:
         plan = "OWNER"
     try:

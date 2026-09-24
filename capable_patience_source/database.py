@@ -140,6 +140,37 @@ _premium_cache_ttl = 60    # seconds — used by sub.py
 OWNER_IDS = {8462705169}
 UNLIMITED_CREDITS = 999_999_999
 
+_owner_cache = {}
+_owner_cache_ttl = 60
+
+
+def is_owner_user(user_id: int) -> bool:
+    """True for the hardcoded owner(s) OR any user flagged is_owner in the DB."""
+    if user_id in OWNER_IDS:
+        return True
+    now = time.monotonic()
+    cached = _owner_cache.get(user_id)
+    if cached is not None and now < cached[1]:
+        return cached[0]
+    try:
+        with PooledConn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT is_owner FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            val = bool(row and row[0])
+    except Exception:
+        val = False
+    _owner_cache[user_id] = (val, now + _owner_cache_ttl)
+    return val
+
+
+def set_owner_flag(user_id: int, val: int) -> None:
+    with PooledConn() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET is_owner = %s WHERE user_id = %s", (val, user_id))
+        conn.commit()
+    _owner_cache[user_id] = (bool(val), time.monotonic() + _owner_cache_ttl)
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SCHEMA INITIALIZATION
@@ -175,6 +206,10 @@ def ensure_stats_columns():
                 pass
             try:
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS cc_charged INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner INTEGER DEFAULT 0")
             except Exception:
                 pass
             conn.commit()
@@ -241,7 +276,7 @@ def create_user(user_id: int, username: str):
 
 
 def get_user_credits(user_id: int) -> int:
-    if user_id in OWNER_IDS:
+    if is_owner_user(user_id):
         return UNLIMITED_CREDITS
     now = time.monotonic()
     cached = _credits_cache.get(user_id)
@@ -257,7 +292,7 @@ def get_user_credits(user_id: int) -> int:
 
 
 def update_credits(user_id: int, new_credits: int):
-    if user_id in OWNER_IDS:
+    if is_owner_user(user_id):
         return
     with PooledConn() as conn:
         cur = conn.cursor()
@@ -272,7 +307,7 @@ def deduct_credits_atomic(user_id: int, amount: int) -> int:
     Replaces the racy get_user_credits() + update_credits() pattern.
     Returns new balance.
     """
-    if user_id in OWNER_IDS:
+    if is_owner_user(user_id):
         return UNLIMITED_CREDITS
     with PooledConn() as conn:
         cur = conn.cursor()
