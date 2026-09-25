@@ -167,7 +167,16 @@ def is_owner_user(user_id: int) -> bool:
 def set_owner_flag(user_id: int, val: int) -> None:
     with PooledConn() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE users SET is_owner = %s WHERE user_id = %s", (val, user_id))
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner INTEGER DEFAULT 0")
+        except Exception:
+            conn.rollback()
+        cur.execute(
+            "INSERT INTO users (user_id, credits, joined_at, is_owner) "
+            "VALUES (%s, 0, NOW(), %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET is_owner = EXCLUDED.is_owner",
+            (user_id, val),
+        )
         conn.commit()
     _owner_cache[user_id] = (bool(val), time.monotonic() + _owner_cache_ttl)
 

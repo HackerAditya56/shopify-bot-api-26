@@ -56,6 +56,7 @@ def init_db():
         ("username",        "TEXT"),
         ("credits",         "INTEGER DEFAULT 0"),
         ("is_premium",      "INTEGER DEFAULT 0"),
+        ("is_owner",        "INTEGER DEFAULT 0"),
         ("premium_expiry",  "TIMESTAMP"),
         ("joined_at",       "TIMESTAMP DEFAULT NOW()"),
     ]

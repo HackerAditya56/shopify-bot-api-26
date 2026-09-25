@@ -83,7 +83,7 @@ def _selection_text(charged: bool, approved: bool, total: int) -> str:
         f"<tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged_s}</b>\n"
         f"<tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved_s}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Tap the buttons to toggle what is sent to your DM, then press ▶ 𝐒𝐭𝐚𝐫𝐭.</i>"
+        f"<i>Tap the buttons to toggle what is sent to your DM, then press 𝐒𝐭𝐚𝐫𝐭.</i>"
     )
 
 
@@ -91,13 +91,13 @@ def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKey
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ✓" if charged else "💎 𝐂𝐡𝐚𝐫𝐠𝐞𝐝",
+                text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝",
                 callback_data=MshSelCallback(sel_id=sel_id, action="charged").pack(),
                 style="success" if charged else "primary",
                 icon_custom_emoji_id=CUSTOM_CHARGED_EMOJI_ID,
             ),
             InlineKeyboardButton(
-                text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ✓" if approved else "✅ 𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝",
+                text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝",
                 callback_data=MshSelCallback(sel_id=sel_id, action="approved").pack(),
                 style="success" if approved else "primary",
                 icon_custom_emoji_id=CUSTOM_APPROVED_EMOJI_ID,
@@ -105,7 +105,7 @@ def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKey
         ],
         [
             InlineKeyboardButton(
-                text="▶ 𝐒𝐭𝐚𝐫𝐭",
+                text="𝐒𝐭𝐚𝐫𝐭",
                 callback_data=MshSelCallback(sel_id=sel_id, action="start").pack(),
                 style="primary",
             ),
