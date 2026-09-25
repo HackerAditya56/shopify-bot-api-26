@@ -68,6 +68,50 @@ BUTTON_LOCK_SECONDS = 30
 MSH_SESSIONS = {}
 SESSION_LOCKS = {}
 
+# Pending /msh selection state (before the user taps ▶ Start)
+MSH_PENDING = {}   # sel_id -> {"user_id","cards","user_obj","proxies","is_group","charged","approved","msg_id","chat_id"}
+
+
+def _selection_text(charged: bool, approved: bool, total: int) -> str:
+    charged_s = "✅ 𝗢𝗡" if charged else "❌ 𝗢𝗙𝗙"
+    approved_s = "✅ 𝗢𝗡" if approved else "❌ 𝗢𝗙𝗙"
+    return (
+        f"<b>🎛 𝐒𝐄𝐋𝐄𝐂𝐓𝐈𝐎𝐍</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>𝐓𝐨𝐭𝐚𝐥 𝐂𝐚𝐫𝐝𝐬 ➠</b> <code>{total}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged_s}</b>\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved_s}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Tap the buttons to toggle what is sent to your DM, then press ▶ 𝐒𝐭𝐚𝐫𝐭.</i>"
+    )
+
+
+def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="💎 𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ✓" if charged else "💎 𝐂𝐡𝐚𝐫𝐠𝐞𝐝",
+                callback_data=MshSelCallback(sel_id=sel_id, action="charged").pack(),
+                style="success" if charged else "primary",
+                icon_custom_emoji_id=CUSTOM_CHARGED_EMOJI_ID,
+            ),
+            InlineKeyboardButton(
+                text="✅ 𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ✓" if approved else "✅ 𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝",
+                callback_data=MshSelCallback(sel_id=sel_id, action="approved").pack(),
+                style="success" if approved else "primary",
+                icon_custom_emoji_id=CUSTOM_APPROVED_EMOJI_ID,
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="▶ 𝐒𝐭𝐚𝐫𝐭",
+                callback_data=MshSelCallback(sel_id=sel_id, action="start").pack(),
+                style="primary",
+            ),
+        ],
+    ])
+
 # ── Shared HTTP session for MSH API calls (avoids per-card session creation) ──
 _MSH_HTTP_SESSION = None
 
@@ -131,6 +175,10 @@ class MshResultCallback(CallbackData, prefix="mshr"):
 
 class MshStopCallback(CallbackData, prefix="mshs"):
     session_id: str
+
+class MshSelCallback(CallbackData, prefix="mshsel"):
+    sel_id: str
+    action: str   # "charged" | "approved" | "start"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PROXY MANAGER CLASS
@@ -930,7 +978,7 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
 
     # Always send to user's DM
     try:
-        await bot.send_animation(
+        sent = await bot.send_animation(
             chat_id=user_obj.id,
             animation=gif_url,
             caption=caption,
@@ -938,6 +986,10 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
             #reply_markup=reply_markup
             #disable_web_page_preview=True
         )
+        try:
+            await bot.pin_chat_message(chat_id=user_obj.id, message_id=sent.message_id)
+        except Exception as e:
+            logging.warning(f"[MSH] Could not pin charged DM: {e}")
     except (TelegramForbiddenError, TelegramBadRequest) as e:
         logging.warning(f"[MSH] Could not DM charged hit to user {user_obj.id}: {e}")
     except Exception as e:
@@ -1322,10 +1374,10 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if is_session_stopped(session_id):
             return
 
-        await asyncio.gather(
-            send_hit_log_to_group(bot, response_msg, user_obj, plan_name, proxy_status_formatted, api_price),
-            send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name),
-        )
+        dm_tasks = [send_hit_log_to_group(bot, response_msg, user_obj, plan_name, proxy_status_formatted, api_price)]
+        if session.get('send_charged', True):
+            dm_tasks.append(send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name))
+        await asyncio.gather(*dm_tasks)
 
     elif result_status == "APPROVED":
         session['approved'] += 1
@@ -1339,7 +1391,8 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if is_session_stopped(session_id):
             return
 
-        await send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
+        if session.get("send_approved", False):
+            await send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
     elif result_status == "DEAD":
         session['dead'] += 1
         session['dead_cards'].append(card_result_data)
@@ -1356,7 +1409,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
     if is_session_stopped(session_id):
         return
 
-    if session['checked'] % 50 == 0 or session['checked'] == session['total']:
+    if session['checked'] % 30 == 0 or session['checked'] == session['total']:
         await update_progress_message(bot, session_id)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1505,6 +1558,60 @@ async def handle_stop_callback(callback: types.CallbackQuery, callback_data: Msh
         except:
             pass
 
+
+@router.callback_query(MshSelCallback.filter())
+async def handle_selection_callback(callback: types.CallbackQuery, callback_data: MshSelCallback):
+    try:
+        sel_id = callback_data.sel_id
+        action = callback_data.action
+        pending = MSH_PENDING.get(sel_id)
+
+        if not pending:
+            await _safe_answer(callback, "⚠️ Selection expired — run /msh again.", show_alert=True)
+            return
+        if callback.from_user.id != pending.get("user_id"):
+            await _safe_answer(callback, "❌ No permission", show_alert=True)
+            return
+
+        if action == "charged":
+            pending["charged"] = not pending["charged"]
+        elif action == "approved":
+            pending["approved"] = not pending["approved"]
+        elif action == "start":
+            MSH_PENDING.pop(sel_id, None)
+            charged = pending.get("charged", True)
+            approved = pending.get("approved", False)
+            try:
+                await callback.message.edit_text("🚀 Starting mass check...", parse_mode="HTML")
+            except Exception:
+                pass
+            await _safe_answer(callback, "🚀 Starting...")
+            asyncio.create_task(process_mass_check_background(
+                callback.message, callback.bot, pending["cards"], pending["user_obj"],
+                pending["proxies"], pending.get("is_group", False),
+                send_approved=approved, send_charged=charged,
+            ))
+            return
+
+        charged = pending.get("charged", True)
+        approved = pending.get("approved", False)
+        try:
+            await callback.message.edit_text(
+                _selection_text(charged, approved, len(pending.get("cards", []))),
+                parse_mode="HTML",
+                reply_markup=_selection_keyboard(sel_id, charged, approved),
+            )
+        except Exception as e:
+            logging.error(f"Selection edit error: {e}")
+        await _safe_answer(callback, "✅ Updated")
+    except Exception as e:
+        logging.error(f"Error handling selection callback: {e}", exc_info=True)
+        try:
+            await _safe_answer(callback, "❌ Error", show_alert=True)
+        except Exception:
+            pass
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MAIN COMMAND
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1647,13 +1754,31 @@ async def msh_command(message: types.Message):
     # Detect if the command was sent from a group or supergroup
     is_group = message.chat.type in ("group", "supergroup", "channel")
 
-    asyncio.create_task(process_mass_check_background(message, bot, valid_cards, user, user_proxies, is_group))
+    # ── Selection UI: ask which hits to DM before starting ──
+    sel_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    MSH_PENDING[sel_id] = {
+        "user_id": user_id,
+        "cards": valid_cards,
+        "user_obj": user,
+        "proxies": user_proxies,
+        "is_group": is_group,
+        "charged": True,
+        "approved": False,
+        "msg_id": None,
+        "chat_id": message.chat.id,
+    }
+    sel_msg = await message.reply(
+        _selection_text(True, False, total_cards),
+        parse_mode="HTML",
+        reply_markup=_selection_keyboard(sel_id, True, False),
+    )
+    MSH_PENDING[sel_id]["msg_id"] = sel_msg.message_id
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BACKGROUND PROCESSING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def process_mass_check_background(message: types.Message, bot: Bot, valid_cards: list, user_obj, user_proxies, is_group: bool = False):
+async def process_mass_check_background(message: types.Message, bot: Bot, valid_cards: list, user_obj, user_proxies, is_group: bool = False, send_approved: bool = False, send_charged: bool = True):
     """
     Receives a pre-validated list of (card_string, cc_num) tuples.
     Card extraction, Luhn/expiry validation, and credit checks are all
@@ -1721,6 +1846,8 @@ async def process_mass_check_background(message: types.Message, bot: Bot, valid_
         "user_obj": user_obj,
         "plan_name": plan_name,
         "is_group": is_group,  # Track whether started from a group
+        "send_approved": send_approved,
+        "send_charged": send_charged,
     }
 
     print(f"🚀 [MSH] Started - {total_cards} cards - User: {user_id} - Proxies: {len(user_proxies)} - Group: {is_group}")
@@ -1746,7 +1873,7 @@ async def recheck_error_cards(bot: Bot, session_id, user_obj, plan_name):
     session['error_cards'] = []
     session['errors'] = 0
 
-    sem = asyncio.Semaphore(30)
+    sem = asyncio.Semaphore(60)
 
     async def worker(cd):
         cc = cd.get('card', '')
@@ -1784,7 +1911,7 @@ async def run_mass_checker(bot: Bot, session_id, cards, user_obj, plan_name):
     session = MSH_SESSIONS.get(session_id)
     if not session: return
 
-    sem = asyncio.Semaphore(30)
+    sem = asyncio.Semaphore(60)
 
     async def worker(cc_formatted, cc_num):
         if is_session_stopped(session_id):
