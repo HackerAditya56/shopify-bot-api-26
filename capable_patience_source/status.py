@@ -13,6 +13,8 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+from database import is_owner_user
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -237,7 +239,7 @@ def _collect_status() -> Tuple[str, dict]:
 async def status_command(message: types.Message):
     """Handle /status command - displays VPS and bot status."""
     # Admin check
-    if message.from_user.id != ADMIN_ID:
+    if not is_owner_user(message.from_user.id):
         await message.reply(
             f"{BULLET_LINK} <tg-emoji emoji-id='5247149163132493357'>⛔️</tg-emoji> <b>Admin only command.</b>",
             parse_mode="HTML"

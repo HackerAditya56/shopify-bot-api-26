@@ -1,5 +1,5 @@
 from aiogram import types, Router
-from database import set_gate_status
+from database import set_gate_status, is_owner_user
 
 # 🔴 Replace with your Telegram user ID(s)
 ADMINS = [8462705169]
@@ -8,7 +8,7 @@ router = Router()
 
 @router.message(lambda message: message.text and message.text.startswith("/on"))
 async def on_command(message: types.Message):
-    if message.from_user.id not in ADMINS:
+    if not is_owner_user(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -29,7 +29,7 @@ async def on_command(message: types.Message):
 
 @router.message(lambda message: message.text and message.text.startswith("/off"))
 async def off_command(message: types.Message):
-    if message.from_user.id not in ADMINS:
+    if not is_owner_user(message.from_user.id):
         return
 
     parts = message.text.split()

@@ -22,7 +22,9 @@ _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ADD YOUR TELEGRAM ID HERE
-ADMIN_IDS = [8462705169] 
+ADMIN_IDS = [8462705169]
+
+from database import is_owner_user 
 
 # Test card to verify site functionality
 TEST_CARD = "4000223372377978|05|29|651"
@@ -124,7 +126,7 @@ router = Router()
 
 def is_admin(user_id):
     """Check if user is admin"""
-    return user_id in ADMIN_IDS
+    return is_owner_user(user_id)
 
 def read_sites():
     """Read sites from sites.txt file - returns list without duplicates"""

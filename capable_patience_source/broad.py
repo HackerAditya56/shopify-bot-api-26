@@ -5,7 +5,7 @@ import psycopg2
 from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
-from database import DB_CONFIG
+from database import DB_CONFIG, is_owner_user
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -59,7 +59,7 @@ def _status_text(total: int, done: int, sent: int, blocked: int, failed: int, fi
 async def broad_command(message: types.Message):
     global _broadcast_running
 
-    if message.from_user.id != ADMIN_ID:
+    if not is_owner_user(message.from_user.id):
         await message.reply("⛔ Admin only.")
         return
 

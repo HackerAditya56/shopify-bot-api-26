@@ -453,7 +453,7 @@ async def plan_command(message: types.Message):
 @router.message(F.text.startswith("/sub"))
 async def sub_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
         return
 
@@ -569,7 +569,7 @@ async def sub_command(message: types.Message):
 @router.message(F.text.startswith("/adcr"))
 async def adcr_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         await message.reply("❌ 𝐘𝐨𝐮 𝐚𝐫𝐞 𝐧𝐨𝐭 𝐚𝐮𝐭𝐡𝐨𝐫𝐢𝐬𝐞𝐝.")
         return
 
@@ -645,7 +645,7 @@ async def adcr_command(message: types.Message):
 @router.message(F.text.startswith("/rsub"))
 async def rsub_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
         return
 
@@ -714,7 +714,7 @@ async def rsub_command(message: types.Message):
 @router.message(F.text.startswith("/rc"))
 async def rc_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
         return
 
@@ -822,7 +822,7 @@ async def info_command(message: types.Message):
 @router.message(F.text.startswith("/suball"))
 async def suball_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         return
 
     rows = await asyncio.to_thread(_suball_db_sync)
@@ -856,7 +856,7 @@ async def suball_command(message: types.Message):
 @router.message(F.text.startswith("/g_code"))
 async def g_code_command(message: types.Message):
     user = message.from_user
-    if user.id != ADMIN_ID:
+    if not is_owner_user(user.id):
         await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
         return
 

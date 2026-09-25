@@ -4,7 +4,7 @@ import psycopg2
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import Router, types, BaseMiddleware
 from aiogram.filters import Command
-from database import DB_CONFIG
+from database import DB_CONFIG, is_owner_user
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -76,7 +76,7 @@ def _unban_user_sync(user_id: int) -> bool:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.message(Command("ban"))
 async def ban_command(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+    if not is_owner_user(message.from_user.id):
         await message.reply("⛔ Admin only.")
         return
 
@@ -86,7 +86,7 @@ async def ban_command(message: types.Message):
         return
 
     target_id = int(parts[1])
-    if target_id == ADMIN_ID:
+    if is_owner_user(target_id):
         await message.reply("❌ Cannot ban the admin.")
         return
 
@@ -101,7 +101,7 @@ async def ban_command(message: types.Message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.message(Command("unban"))
 async def unban_command(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+    if not is_owner_user(message.from_user.id):
         await message.reply("⛔ Admin only.")
         return
 
@@ -142,7 +142,7 @@ class BanMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         user = event.from_user
-        if not user or user.id == ADMIN_ID:
+        if not user or is_owner_user(user.id):
             return await handler(event, data)
 
         banned = await asyncio.to_thread(_is_banned_sync, user.id)
