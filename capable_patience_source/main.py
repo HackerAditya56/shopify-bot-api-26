@@ -95,7 +95,7 @@ MAIN_SCREEN_TEXT = (
     "\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
     "\n"
-    "<tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> 𝐕𝐞𝐫𝐬𝐢𝐨𝐧 ➠ 𝐯𝟑\n"
+    "<tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> 𝐕𝐞𝐫𝐬𝐢𝐨𝐧 ➠ 𝐯𝟒\n"
     "<tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> 𝐃𝐞𝐯 ➠ <a href='https://t.me/Enchanted_linux_0x'>Enchanted_linux_0x</a>\n"
     "\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -590,7 +590,7 @@ async def _edit(msg: types.Message, text: str, kb: InlineKeyboardMarkup):
             logging.warning(f"_edit: {e}")
 
 
-async def _safe_answer(cb: types.CallbackQuery, text: str = "", **kw):
+async def _safe_answer(cb: types.CallbackQuery, text: str = None, **kw):
     try:
         await cb.answer(text, **kw)
     except Exception:
