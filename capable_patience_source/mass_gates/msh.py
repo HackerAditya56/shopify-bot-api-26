@@ -1873,7 +1873,7 @@ async def recheck_error_cards(bot: Bot, session_id, user_obj, plan_name):
     session['error_cards'] = []
     session['errors'] = 0
 
-    sem = asyncio.Semaphore(60)
+    sem = asyncio.Semaphore(40)
 
     async def worker(cd):
         cc = cd.get('card', '')
@@ -1911,7 +1911,7 @@ async def run_mass_checker(bot: Bot, session_id, cards, user_obj, plan_name):
     session = MSH_SESSIONS.get(session_id)
     if not session: return
 
-    sem = asyncio.Semaphore(60)
+    sem = asyncio.Semaphore(40)
 
     async def worker(cc_formatted, cc_num):
         if is_session_stopped(session_id):
