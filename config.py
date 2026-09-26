@@ -14,7 +14,7 @@ PORT = int(os.environ.get("CHECKER_PORT", os.environ.get("PORT", "8080")))
 REQUEST_TIMEOUT = int(os.environ.get("CHECKER_TIMEOUT", "120"))
 
 # Uvicorn workers. Keep 1 by default (cheap Railway plans, in-memory caches).
-WORKERS = int(os.environ.get("CHECKER_WORKERS", "1"))
+WORKERS = int(os.environ.get("CHECKER_WORKERS", "8"))
 
 # Keep-alive for long-lived connections (499s usually come from the client /
 # load balancer giving up, so we tune this to be forgiving)
