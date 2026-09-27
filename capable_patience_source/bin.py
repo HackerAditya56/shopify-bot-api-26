@@ -1,12 +1,24 @@
 import aiohttp
 import time
-
-_bin_cache = {}          # bin -> (result, timestamp)
-_BIN_CACHE_TTL = 3600    # successful lookups cached 1h
-_BIN_ERROR_TTL = 60      # failed lookups retried after 60s
+import csv
+import os
+import logging
+import threading
 
 ANTIPUBLIC_URL = "https://bins.antipublic.cc/bins/{}"
 CHARGEBLAST_URL = "https://api.chargeblast.com/bin/{}"
+
+_BIN_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin_cache.csv")
+
+# in-memory fast cache
+_bin_cache = {}          # bin -> (result, timestamp)
+_BIN_CACHE_TTL = 3600    # successful lookups cached 1h in memory
+_BIN_ERROR_TTL = 60      # failed lookups retried after 60s
+
+# persistent CSV cache: bin -> full result dict
+_csv_data = {}
+_csv_loaded = False
+_csv_lock = threading.Lock()
 
 
 def _flag_from_country_code(code: str) -> str:
@@ -61,15 +73,70 @@ async def _fetch_json(session, url: str):
         return None
 
 
+def _now_str() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _load_csv() -> dict:
+    """Load bin_cache.csv into {bin: result}. Empty dict if missing."""
+    data = {}
+    if not os.path.exists(_BIN_CSV_PATH):
+        return data
+    try:
+        with open(_BIN_CSV_PATH, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                b = (row.get("bin") or "").strip()
+                if not b:
+                    continue
+                data[b] = {
+                    "bin": b,
+                    "scheme": row.get("scheme") or "N/A",
+                    "type": row.get("type") or "N/A",
+                    "brand": row.get("brand") or "N/A",
+                    "bank": row.get("bank") or "N/A",
+                    "country": row.get("country") or "N/A",
+                    "country_emoji": row.get("country_emoji") or "",
+                    "last_update": row.get("last_update") or "",
+                }
+    except Exception as e:
+        logging.warning(f"[BIN] CSV load error: {e}")
+    return data
+
+
+def _write_csv(data: dict):
+    fieldnames = ["bin", "scheme", "type", "brand", "bank", "country", "country_emoji", "last_update"]
+    try:
+        with open(_BIN_CSV_PATH, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for b in sorted(data.keys()):
+                r = data[b]
+                writer.writerow({
+                    "bin": b,
+                    "scheme": r.get("scheme", "N/A"),
+                    "type": r.get("type", "N/A"),
+                    "brand": r.get("brand", "N/A"),
+                    "bank": r.get("bank", "N/A"),
+                    "country": r.get("country", "N/A"),
+                    "country_emoji": r.get("country_emoji", ""),
+                    "last_update": r.get("last_update", ""),
+                })
+    except Exception as e:
+        logging.warning(f"[BIN] CSV write error: {e}")
+
+
 async def get_bin_info(bin_number: str) -> dict:
-    """Fetch BIN info. Primary: antipublic.cc. Falls back to chargeblast.com
-    on rate-limit / failure so a 429 never blanks the result card.
-    Results are cached (1h success / 60s failure) so mass checks with
-    repeated BINs don't hammer the free BIN APIs into rate-limiting."""
+    """Fetch BIN info. Persistent CSV cache (bin_cache.csv) is the source of
+    truth: if a BIN is already in the CSV it is returned without any API call.
+    New BINs are fetched from antipublic.cc (full detail incl. level) and fall
+    back to chargeblast.com (unlimited, no rate limit) on failure, then the
+    result + last_update is written to the CSV."""
     if not bin_number.isdigit() or len(bin_number) < 6:
         return {"error": "Invalid BIN. Must be at least 6 digits."}
 
     now = time.time()
+
+    # 1) in-memory fast cache
     cached = _bin_cache.get(bin_number)
     if cached:
         result, ts = cached
@@ -77,27 +144,44 @@ async def get_bin_info(bin_number: str) -> dict:
         if now - ts < ttl:
             return result
 
+    # 2) persistent CSV cache (lazy load once)
+    global _csv_data, _csv_loaded
+    if not _csv_loaded:
+        with _csv_lock:
+            if not _csv_loaded:
+                _csv_data = _load_csv()
+                _csv_loaded = True
+
+    row = _csv_data.get(bin_number)
+    if row is not None:
+        _bin_cache[bin_number] = (row, now)
+        return row
+
+    # 3) fetch from APIs (antipublic primary, chargeblast unlimited fallback)
     async with aiohttp.ClientSession() as session:
-        # 1) antipublic (primary)
         try:
             data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number))
         except Exception:
             data = None
         if data is not None:
             result = _normalize_antipublic(data)
-            _bin_cache[bin_number] = (result, time.time())
-            return result
+        else:
+            try:
+                data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number))
+            except Exception:
+                data = None
+            if data is not None:
+                result = _normalize_chargeblast(data)
+            else:
+                result = {"error": "BIN lookup failed (both APIs unavailable)."}
 
-        # 2) chargeblast (fallback)
-        try:
-            data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number))
-        except Exception:
-            data = None
-        if data is not None:
-            result = _normalize_chargeblast(data)
-            _bin_cache[bin_number] = (result, time.time())
-            return result
+    _bin_cache[bin_number] = (result, time.time())
 
-        result = {"error": "BIN lookup failed (both APIs unavailable)."}
-        _bin_cache[bin_number] = (result, time.time())
-        return result
+    # persist successful results to CSV (with last_update); errors are retried
+    if "error" not in result:
+        result["last_update"] = _now_str()
+        with _csv_lock:
+            _csv_data[bin_number] = result
+            _write_csv(_csv_data)
+
+    return result
