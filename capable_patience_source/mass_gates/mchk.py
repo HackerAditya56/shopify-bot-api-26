@@ -24,6 +24,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
+from mass_gates._tg_helpers import send_hit, send_message_safe
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STRIPE AUTH IMPORT (Handles its own proxy internally)
@@ -50,6 +51,40 @@ CUSTOM_DECLINED_EMOJI_ID = "5893081007153746175"
 
 MCHK_SESSIONS = {}
 MCHK_SESSION_LOCKS = {}
+
+MCHK_PENDING = {}
+
+class MchkSelCallback(CallbackData, prefix="mchksel"):
+    sel_id: str
+    action: str
+
+
+def _selection_text(charged: bool, approved: bool, total: int) -> str:
+    charged_s = "✅ 𝗢𝗡" if charged else "❌ 𝗢𝗙𝗙"
+    approved_s = "✅ 𝗢𝗡" if approved else "❌ 𝗢𝗙𝗙"
+    return (
+        f"<b><tg-emoji emoji-id=\"5361734213370396027\">⚙️</tg-emoji> 𝐒𝐄𝐋𝐄𝐂𝐓𝐈𝐎𝐍</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>𝐓𝐨𝐭𝐚𝐥 𝐂𝐚𝐫𝐝𝐬 ➠</b> <code>{total}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged_s}</b>\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved_s}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Tap the buttons to toggle what is sent to your DM, then press 𝐒𝐭𝐚𝐫𝐭.</i>"
+    )
+
+
+def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝", callback_data=MchkSelCallback(sel_id=sel_id, action="charged").pack()),
+            InlineKeyboardButton(text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝", callback_data=MchkSelCallback(sel_id=sel_id, action="approved").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="𝐒𝐭𝐚𝐫𝐭", callback_data=MchkSelCallback(sel_id=sel_id, action="start").pack()),
+        ],
+    ])
+
 
 # ── Session GC: prune stale sessions every 10 min to prevent memory leaks ─────
 import threading as _mchk_threading
@@ -225,7 +260,7 @@ async def get_anime_gif():
     api_url = f"https://api.otakugifs.xyz/gif?reaction={reaction}"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, timeout=10) as resp:
+            async with session.get(api_url, timeout=3) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("url")
@@ -284,15 +319,8 @@ async def send_hit_log_to_group(bot: Bot, response_msg, user_obj, plan_name, hit
         f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{response_msg}</b>\n"
         f"𝗨𝘀𝗲𝗿 ➠ <b>{user_link} [{plan_name}]</b>\n"
     )
-    try:
-        await bot.send_message(
-            chat_id=HIT_LOG_GROUP_ID,
-            text=caption,
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        logging.error(f"Error sending hit log: {e}")
+    await send_message_safe(bot, HIT_LOG_GROUP_ID, caption, parse_mode="HTML",
+                             disable_web_page_preview=True)
 
 async def send_user_hit_notification(bot: Bot, session, cc_formatted, cc_num, response_msg, user_obj, plan_name, hit_type):
     """
@@ -333,28 +361,10 @@ async def send_user_hit_notification(bot: Bot, session, cc_formatted, cc_num, re
             f"𝐃𝐞𝐯 ➠ {dev_link}"
         )
 
-        try:
-            await bot.send_animation(
-                chat_id=user_obj.id,
-                animation=gif_url,
-                caption=caption,
-                parse_mode="HTML",
-            )
-        except (TelegramForbiddenError, TelegramBadRequest) as e:
-            logging.warning(f"[MCHK] Could not DM {hit_type} hit to user {user_obj.id}: {e}")
-        except Exception as e:
-            logging.error(f"[MCHK] Error sending {hit_type} DM: {e}")
+        await send_hit(bot, user_obj.id, caption, gif_url)
 
         if hit_type == "CHARGED":
-            try:
-                await bot.send_animation(
-                    chat_id=EXTRA_CHARGED_GROUP_ID,
-                    animation=gif_url,
-                    caption=caption,
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                logging.error(f"Error sending to EXTRA_CHARGED_GROUP_ID: {e}")
+            await send_hit(bot, EXTRA_CHARGED_GROUP_ID, caption, gif_url)
 
     except Exception as e:
         logging.error(f"Error sending user HIT message: {e}")
@@ -770,10 +780,8 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if is_session_stopped(session_id):
             return
 
-        await asyncio.gather(
-            send_hit_log_to_group(bot, response_msg, user_obj, plan_name, "CHARGED"),
-            send_user_hit_notification(bot, session, cc_formatted, cc_num, response_msg, user_obj, plan_name, "CHARGED"),
-        )
+        if session.get('send_charged', True):
+            await send_user_hit_notification(bot, session, cc_formatted, cc_num, response_msg, user_obj, plan_name, "CHARGED")
 
     elif result_status == "DECLINED":
         session['dead'] += 1
@@ -895,9 +903,44 @@ async def mchk_command(message: types.Message):
         )
         return
 
-    session_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     plan_name = await get_user_plan_name(user_id)
 
+    # ── Selection UI: ask which hits to DM before starting ──
+    sel_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    MCHK_PENDING[sel_id] = {
+        "user_id": user_id,
+        "cards": valid_cards,
+        "user_obj": user,
+        "plan_name": plan_name,
+        "charged": True,
+        "approved": False,
+        "chat_id": message.chat.id,
+    }
+    sel_msg = await message.reply(
+        _selection_text(True, False, total_cards),
+        parse_mode="HTML",
+        reply_markup=_selection_keyboard(sel_id, True, False),
+    )
+    MCHK_PENDING[sel_id]["msg_id"] = sel_msg.message_id
+
+
+async def _start_mchk(callback: types.CallbackQuery, pending: dict):
+    bot = callback.bot
+    message = callback.message
+    user = pending["user_obj"]
+    user_id = pending["user_id"]
+    valid_cards = pending["cards"]
+    plan_name = pending.get("plan_name")
+    send_charged = pending.get("charged", True)
+    send_approved = pending.get("approved", False)
+
+    try:
+        await message.edit_text("🚀 Starting mass check...", parse_mode="HTML")
+    except Exception:
+        pass
+    await callback.answer("🚀 Starting...")
+
+    session_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     initial_text = (
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠</b> 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴... <tg-emoji emoji-id=\"6253754970349243649\">✨</tg-emoji>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐈𝐃 ➠</b> <code>{session_id}</code>\n"                
@@ -938,12 +981,48 @@ async def mchk_command(message: types.Message):
         "user_obj": user,
         "plan_name": plan_name,
         "is_group": message.chat.type in ("group", "supergroup", "channel"),
+        "send_charged": send_charged,
+        "send_approved": send_approved,
     }
 
     print(f"🚀 [MCHK] Started - {total_cards} cards - User: {user_id}")
     logging.info(f"🚀 [MCHK] Started - {total_cards} cards - User: {user_id}")
 
     asyncio.create_task(run_mass_checker(bot, session_id, valid_cards, user, plan_name))
+
+
+@router.callback_query(MchkSelCallback.filter())
+async def handle_selection_callback(callback: types.CallbackQuery, callback_data: MchkSelCallback):
+    sel_id = callback_data.sel_id
+    action = callback_data.action
+    pending = MCHK_PENDING.get(sel_id)
+    if not pending:
+        await callback.answer("⚠️ Selection expired — run /mchk again.", show_alert=True)
+        return
+    if callback.from_user.id != pending.get("user_id"):
+        await callback.answer("❌ No permission", show_alert=True)
+        return
+    if action == "charged":
+        pending["charged"] = not pending["charged"]
+    elif action == "approved":
+        pending["approved"] = not pending["approved"]
+    elif action == "start":
+        if MCHK_PENDING.pop(sel_id, None) is None:
+            await callback.answer("Already starting...")
+            return
+        asyncio.create_task(_start_mchk(callback, pending))
+        return
+    charged = pending.get("charged", True)
+    approved = pending.get("approved", False)
+    try:
+        await callback.message.edit_text(
+            _selection_text(charged, approved, len(pending.get("cards", []))),
+            parse_mode="HTML",
+            reply_markup=_selection_keyboard(sel_id, charged, approved),
+        )
+    except Exception as e:
+        logging.error(f"[mchk] selection edit error: {e}")
+    await callback.answer("✅ Updated")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MASS CHECKER WORKER

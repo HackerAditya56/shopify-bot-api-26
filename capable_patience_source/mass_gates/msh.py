@@ -28,6 +28,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
+from mass_gates._tg_helpers import send_hit, send_message_safe
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -76,7 +77,7 @@ def _selection_text(charged: bool, approved: bool, total: int) -> str:
     charged_s = "✅ 𝗢𝗡" if charged else "❌ 𝗢𝗙𝗙"
     approved_s = "✅ 𝗢𝗡" if approved else "❌ 𝗢𝗙𝗙"
     return (
-        f"<b>🎛 𝐒𝐄𝐋𝐄𝐂𝐓𝐈𝐎𝐍</b>\n"
+        f"<b><tg-emoji emoji-id=\"5361734213370396027\">⚙️</tg-emoji> 𝐒𝐄𝐋𝐄𝐂𝐓𝐈𝐎𝐍</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>𝐓𝐨𝐭𝐚𝐥 𝐂𝐚𝐫𝐝𝐬 ➠</b> <code>{total}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -581,7 +582,7 @@ async def get_anime_gif():
     api_url = f"https://api.otakugifs.xyz/gif?reaction={reaction}"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, timeout=10) as resp:
+            async with session.get(api_url, timeout=3) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("url")
@@ -872,16 +873,8 @@ async def send_hit_log_to_group(bot: Bot, response_msg, user_obj, plan_name, pro
         #[InlineKeyboardButton(text="𝑪𝑯𝑶𝑹 𝑷𝑨𝑳𝑻𝑨𝑵 ", url="https://t.me/CARDXV4_BOT")]
     #])
 
-    try:
-        await bot.send_message(
-            chat_id=HIT_LOG_GROUP_ID,
-            text=caption,
-            parse_mode="HTML",
-            #reply_markup=reply_markup,
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        logging.error(f"Error sending hit log: {e}")
+    await send_message_safe(bot, HIT_LOG_GROUP_ID, caption, parse_mode="HTML",
+                             disable_web_page_preview=True)
 
 async def send_approved_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name):
     """Always sends the approved hit to the user's DM (private chat)."""
@@ -922,20 +915,8 @@ async def send_approved_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_da
         #[InlineKeyboardButton(text="𝑪𝑯𝑶𝑹 𝑷𝑨𝑳𝑻𝑨𝑵 ", url="https://t.me/CARDXV4_BOT")]
     #])
 
-    # Always send to user's DM
-    try:
-        await bot.send_animation(
-            chat_id=user_obj.id,
-            animation=gif_url,
-            caption=caption,
-            parse_mode="HTML",
-            #reply_markup=reply_markup
-            #disable_web_page_preview=True
-        )
-    except (TelegramForbiddenError, TelegramBadRequest) as e:
-        logging.warning(f"[MSH] Could not DM approved hit to user {user_obj.id}: {e}")
-    except Exception as e:
-        logging.error(f"Error sending approved message to DM: {e}")
+    # Always send to user's DM (reliable: GIF + text fallback)
+    await send_hit(bot, user_obj.id, caption, gif_url)
 
 async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name):
     """Always sends the charged hit to the user's DM (private chat) + extra charged group."""
@@ -976,37 +957,16 @@ async def send_charged_msg_to_user(bot: Bot, cc_formatted, response_msg, bin_dat
         #[InlineKeyboardButton(text="𝑪𝑯𝑶𝑹 𝑷𝑨𝑳𝑻𝑨𝑵 ", url="https://t.me/CARDXV4_BOT")]
     #])
 
-    # Always send to user's DM
-    try:
-        sent = await bot.send_animation(
-            chat_id=user_obj.id,
-            animation=gif_url,
-            caption=caption,
-            parse_mode="HTML",
-            #reply_markup=reply_markup
-            #disable_web_page_preview=True
-        )
+    # Always send to user's DM (reliable: GIF + text fallback)
+    sent = await send_hit(bot, user_obj.id, caption, gif_url)
+    if sent is not None:
         try:
             await bot.pin_chat_message(chat_id=user_obj.id, message_id=sent.message_id)
         except Exception as e:
             logging.warning(f"[MSH] Could not pin charged DM: {e}")
-    except (TelegramForbiddenError, TelegramBadRequest) as e:
-        logging.warning(f"[MSH] Could not DM charged hit to user {user_obj.id}: {e}")
-    except Exception as e:
-        logging.error(f"Error sending charged DM: {e}")
 
-    # Also send to extra charged group log
-    try:
-        await bot.send_animation(
-            chat_id=EXTRA_CHARGED_GROUP_ID,
-            animation=gif_url,
-            caption=caption,
-            parse_mode="HTML",
-            #reply_markup=reply_markup
-            #disable_web_page_preview=True
-        )
-    except Exception as e:
-        logging.error(f"Error sending HIT to extra group: {e}")
+    # Also send to extra charged group log (reliable fallback)
+    await send_hit(bot, EXTRA_CHARGED_GROUP_ID, caption, gif_url)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BUTTONS & PROGRESS MESSAGE
@@ -1374,10 +1334,8 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         if is_session_stopped(session_id):
             return
 
-        dm_tasks = [send_hit_log_to_group(bot, response_msg, user_obj, plan_name, proxy_status_formatted, api_price)]
         if session.get('send_charged', True):
-            dm_tasks.append(send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name))
-        await asyncio.gather(*dm_tasks)
+            await send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
 
     elif result_status == "APPROVED":
         session['approved'] += 1

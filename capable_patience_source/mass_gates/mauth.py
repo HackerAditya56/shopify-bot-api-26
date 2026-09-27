@@ -7,7 +7,7 @@ from aiogram import types, F, Router
 
 from database import is_gate_enabled, get_user_credits
 from sub import get_premium_status
-from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback
+from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback, show_selection
 from gates.auth import check_cc
 
 router = Router()
@@ -136,7 +136,7 @@ async def mauth_command(message: types.Message):
 
     plan_name = "PREMIUM" if is_premium else "FREE"
 
-    asyncio.create_task(run_batch_check(message, valid, check_cc, "𝐒𝐭𝐫𝐢𝐩𝐞 𝐀𝐮𝐭𝐡", user_id, user, "mauth", plan_name))
+    await show_selection(message, valid, check_cc, "𝐒𝐭𝐫𝐢𝐩𝐞 𝐀𝐮𝐭𝐡", user_id, user, "mauth", plan_name)
 
 @router.callback_query(F.data.startswith("mauth_res_"))
 async def mauth_result_handler(callback: types.CallbackQuery):

@@ -7,12 +7,14 @@ from io import BytesIO
 from html import escape as html_escape
 
 import aiohttp
-from aiogram import types
+from aiogram import types, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram.filters.callback_data import CallbackData
 
 from database import get_user_credits, update_credits, update_user_stats
 from bin import get_bin_info
+from mass_gates._tg_helpers import send_hit
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PREMIUM EMOJI IDs (same set as msh/mchk/mst mass gates)
@@ -36,6 +38,108 @@ HIT_LOG_GROUP_ID = -1004453592223
 # Session registry: session_id -> session dict (for callback handlers)
 BATCH_SESSIONS = {}
 
+# Pending selection state (before the user taps ▶ Start)
+BATCH_PENDING = {}
+
+
+class BatchSelCallback(CallbackData, prefix="batchsel"):
+    sel_id: str
+    action: str   # "charged" | "approved" | "start"
+
+
+def _selection_text(charged: bool, approved: bool, total: int) -> str:
+    charged_s = "✅ 𝗢𝗡" if charged else "❌ 𝗢𝗙𝗙"
+    approved_s = "✅ 𝗢𝗡" if approved else "❌ 𝗢𝗙𝗙"
+    return (
+        f"<b><tg-emoji emoji-id=\"5361734213370396027\">⚙️</tg-emoji> 𝐒𝐄𝐋𝐄𝐂𝐓𝐈𝐎𝐍</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>𝐓𝐨𝐭𝐚𝐥 𝐂𝐚𝐫𝐝𝐬 ➠</b> <code>{total}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged_s}</b>\n"
+        f"<tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved_s}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Tap the buttons to toggle what is sent to your DM, then press 𝐒𝐭𝐚𝐫𝐭.</i>"
+    )
+
+
+def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝", callback_data=BatchSelCallback(sel_id=sel_id, action="charged").pack()),
+            InlineKeyboardButton(text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝", callback_data=BatchSelCallback(sel_id=sel_id, action="approved").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="𝐒𝐭𝐚𝐫𝐭", callback_data=BatchSelCallback(sel_id=sel_id, action="start").pack()),
+        ],
+    ])
+
+
+async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name):
+    """Show the charged/approved selection window before starting a batch check."""
+    sel_id = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
+    BATCH_PENDING[sel_id] = {
+        "user_id": user_id,
+        "cards": cards,
+        "check_fn": check_fn,
+        "gateway": gateway,
+        "user_obj": user_obj,
+        "prefix": prefix,
+        "plan_name": plan_name,
+        "charged": True,
+        "approved": False,
+    }
+    msg = await message.reply(
+        _selection_text(True, False, len(cards)),
+        parse_mode="HTML",
+        reply_markup=_selection_keyboard(sel_id, True, False),
+    )
+    BATCH_PENDING[sel_id]["msg_id"] = msg.message_id
+    BATCH_PENDING[sel_id]["chat_id"] = message.chat.id
+
+
+async def handle_selection_callback(callback: types.CallbackQuery, callback_data: BatchSelCallback):
+    sel_id = callback_data.sel_id
+    action = callback_data.action
+    pending = BATCH_PENDING.get(sel_id)
+    if not pending:
+        await callback.answer("⚠️ Selection expired — run the command again.", show_alert=True)
+        return
+    if callback.from_user.id != pending.get("user_id"):
+        await callback.answer("❌ No permission", show_alert=True)
+        return
+    if action == "charged":
+        pending["charged"] = not pending["charged"]
+    elif action == "approved":
+        pending["approved"] = not pending["approved"]
+    elif action == "start":
+        if BATCH_PENDING.pop(sel_id, None) is None:
+            await callback.answer("Already starting...")
+            return
+        charged = pending.get("charged", True)
+        approved = pending.get("approved", False)
+        try:
+            await callback.message.edit_text("🚀 Starting mass check...", parse_mode="HTML")
+        except Exception:
+            pass
+        await callback.answer("🚀 Starting...")
+        asyncio.create_task(run_batch_check(
+            callback.message, pending["cards"], pending["check_fn"], pending["gateway"],
+            pending["user_id"], pending["user_obj"], pending["prefix"], pending["plan_name"],
+            send_charged=charged, send_approved=approved,
+        ))
+        return
+    charged = pending.get("charged", True)
+    approved = pending.get("approved", False)
+    try:
+        await callback.message.edit_text(
+            _selection_text(charged, approved, len(pending.get("cards", []))),
+            parse_mode="HTML",
+            reply_markup=_selection_keyboard(sel_id, charged, approved),
+        )
+    except Exception as e:
+        logging.error(f"[BATCH] selection edit error: {e}")
+    await callback.answer("✅ Updated")
+
 REACTIONS = [
     "airkiss", "blush", "brofist", "celebrate", "cheers", "clap",
     "cool", "cuddle", "dance", "handhold", "happy", "hug",
@@ -51,7 +155,7 @@ async def get_anime_gif():
     api_url = f"https://api.otakugifs.xyz/gif?reaction={reaction}"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, timeout=10) as resp:
+            async with session.get(api_url, timeout=3) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("url")
@@ -231,20 +335,10 @@ async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gatewa
         f"{EMOJI_DEV} 𝐃𝐞𝐯 ➠ {DEV_LINK}"
     )
 
-    try:
-        await bot.send_animation(
-            chat_id=user_obj.id,
-            animation=gif_url,
-            caption=caption,
-            parse_mode="HTML",
-        )
-    except (TelegramForbiddenError, TelegramBadRequest) as e:
-        logging.warning(f"[BATCH] Could not DM result to {user_obj.id}: {e}")
-    except Exception as e:
-        logging.error(f"[BATCH] Error sending GIF result: {e}")
+    await send_hit(bot, user_obj.id, caption, gif_url)
 
 
-async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name):
+async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False):
     """
     Full mass checker matching the shopify (msh) mass-gate result flow:
     - semaphore(30) concurrency (never checks all cards at once)
@@ -279,6 +373,8 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "declined_cards": [],
         "error_cards": [],
         "tasks": [],
+        "send_charged": send_charged,
+        "send_approved": send_approved,
     }
 
     # Send the initial progress message (with result + stop buttons)
@@ -371,10 +467,11 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
 
             should_update = session["checked"] % 50 == 0 or session["checked"] == total
 
-        # send GIF result for approved/charged hits (outside the lock)
-        if kind in ("approved", "charged"):
-            status_label = "CHARGED" if kind == "charged" else "APPROVED"
-            await send_gif_result(bot, user_obj, card, msg, brand, bin_data, gateway, status_label, plan_name)
+        # send result for approved/charged hits (respect the DM toggles)
+        if kind == "charged" and session.get("send_charged", True):
+            await send_gif_result(bot, user_obj, card, msg, brand, bin_data, gateway, "CHARGED", plan_name)
+        elif kind == "approved" and session.get("send_approved", False):
+            await send_gif_result(bot, user_obj, card, msg, brand, bin_data, gateway, "APPROVED", plan_name)
 
         if should_update:
             await update_progress()
@@ -504,3 +601,12 @@ async def handle_stop_callback(callback: types.CallbackQuery):
         await callback.message.edit_text(text=text, parse_mode="HTML", reply_markup=get_result_buttons(session["prefix"], session_id, session, is_running=False))
     except Exception as e:
         logging.error(f"[BATCH] stop edit error: {e}")
+
+
+# ── Shared selection router (registered once in main.py) ──
+sel_router = Router()
+
+
+@sel_router.callback_query(BatchSelCallback.filter())
+async def _selection_cb(callback: types.CallbackQuery, callback_data: BatchSelCallback):
+    await handle_selection_callback(callback, callback_data)
