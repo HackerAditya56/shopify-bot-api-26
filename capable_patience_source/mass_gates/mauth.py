@@ -5,7 +5,7 @@ from datetime import datetime
 
 from aiogram import types, F, Router
 
-from database import is_gate_enabled, get_user_credits
+from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback, show_selection
 from gates.auth import check_cc
@@ -134,7 +134,7 @@ async def mauth_command(message: types.Message):
         )
         return
 
-    plan_name = "PREMIUM" if is_premium else "FREE"
+    plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
     await show_selection(message, valid, check_cc, "𝐒𝐭𝐫𝐢𝐩𝐞 𝐀𝐮𝐭𝐡", user_id, user, "mauth", plan_name)
 

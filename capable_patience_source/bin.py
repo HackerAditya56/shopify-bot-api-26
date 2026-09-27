@@ -1,4 +1,9 @@
 import aiohttp
+import time
+
+_bin_cache = {}          # bin -> (result, timestamp)
+_BIN_CACHE_TTL = 3600    # successful lookups cached 1h
+_BIN_ERROR_TTL = 60      # failed lookups retried after 60s
 
 ANTIPUBLIC_URL = "https://bins.antipublic.cc/bins/{}"
 CHARGEBLAST_URL = "https://api.chargeblast.com/bin/{}"
@@ -58,9 +63,19 @@ async def _fetch_json(session, url: str):
 
 async def get_bin_info(bin_number: str) -> dict:
     """Fetch BIN info. Primary: antipublic.cc. Falls back to chargeblast.com
-    on rate-limit / failure so a 429 never blanks the result card."""
+    on rate-limit / failure so a 429 never blanks the result card.
+    Results are cached (1h success / 60s failure) so mass checks with
+    repeated BINs don't hammer the free BIN APIs into rate-limiting."""
     if not bin_number.isdigit() or len(bin_number) < 6:
         return {"error": "Invalid BIN. Must be at least 6 digits."}
+
+    now = time.time()
+    cached = _bin_cache.get(bin_number)
+    if cached:
+        result, ts = cached
+        ttl = _BIN_ERROR_TTL if "error" in result else _BIN_CACHE_TTL
+        if now - ts < ttl:
+            return result
 
     async with aiohttp.ClientSession() as session:
         # 1) antipublic (primary)
@@ -69,7 +84,9 @@ async def get_bin_info(bin_number: str) -> dict:
         except Exception:
             data = None
         if data is not None:
-            return _normalize_antipublic(data)
+            result = _normalize_antipublic(data)
+            _bin_cache[bin_number] = (result, time.time())
+            return result
 
         # 2) chargeblast (fallback)
         try:
@@ -77,6 +94,10 @@ async def get_bin_info(bin_number: str) -> dict:
         except Exception:
             data = None
         if data is not None:
-            return _normalize_chargeblast(data)
+            result = _normalize_chargeblast(data)
+            _bin_cache[bin_number] = (result, time.time())
+            return result
 
-        return {"error": "BIN lookup failed (both APIs unavailable)."}
+        result = {"error": "BIN lookup failed (both APIs unavailable)."}
+        _bin_cache[bin_number] = (result, time.time())
+        return result

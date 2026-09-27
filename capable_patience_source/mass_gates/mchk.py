@@ -269,6 +269,8 @@ async def get_anime_gif():
     return "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3Z6eXF6eXF6eXF6eXF6eXF6eXF6eXF6SZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/LdOyjZ7h5xS3yCjQ8I/giphy.gif"
 
 async def get_user_plan_name(user_id):
+    if user_id == OWNER_ID:
+        return "OWNER"
     is_premium, _ = get_premium_status(user_id)
     if is_premium:
         try:
