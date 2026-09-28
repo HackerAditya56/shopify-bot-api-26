@@ -47,6 +47,7 @@ PAGES = [
             {"gate": "Stripe Mass 0.50$",  "cmd": "/mst",  "limit": "2000", "premium": True},
             {"gate": "Shopify Single 1$",  "cmd": "/sh",   "limit": None,   "premium": False},
             {"gate": "Stripe Hitter Auto", "cmd": "/stco", "limit": None,   "premium": False},
+            {"gate": "Jio Recharge 19₹",    "cmd": "/jio",  "limit": None,   "premium": True},
         ],
     },
     {

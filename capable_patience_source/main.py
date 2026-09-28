@@ -50,6 +50,7 @@ from gates.cl import cl_command
 # ── HITTER COMMANDS (OFF — files moved; reintroduce later) ──────────
 # from autohitters.stco import stco_command, stco_callback_handler
 # from autohitters.hit_bot import router as hit_router, hit_command
+from autohitters.jio_bot import router as jio_router
 
 from gates.auth_bot import router as auth_router, auth_command
 from gates.stripe_bot import router as stripe_router, stripe_command
@@ -151,6 +152,7 @@ dp.include_router(ban_router)
 dp.include_router(broad_router)
 dp.include_router(status_router)
 # dp.include_router(hit_router)   # hitter OFF
+dp.include_router(jio_router)
 
 router = Router()
 dp.include_router(router)

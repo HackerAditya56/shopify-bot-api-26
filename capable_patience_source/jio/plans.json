@@ -1,0 +1,126 @@
+{
+ "19": {
+  "id": "1019863",
+  "amount": "19",
+  "name": "MRP 19",
+  "exact": true
+ },
+ "29": {
+  "id": "1019864",
+  "amount": "29",
+  "name": "MRP 29",
+  "exact": true
+ },
+ "49": {
+  "id": "1017901",
+  "amount": "49",
+  "name": "MRP 49",
+  "exact": true
+ },
+ "69": {
+  "id": "1019974",
+  "amount": "69",
+  "name": "MRP 69",
+  "exact": true
+ },
+ "98": {
+  "id": "1031181",
+  "amount": "98",
+  "name": "Rs98-7D-GamesCloud",
+  "exact": true
+ },
+ "129": {
+  "id": "1016380",
+  "amount": "123",
+  "name": "JB 123-1M-0.5GB/D",
+  "exact": false,
+  "note": "no exact plan, using closest \u20b9123"
+ },
+ "155": {
+  "id": "1019113",
+  "amount": "151",
+  "name": "151-3Month 5G Upgrade",
+  "exact": false,
+  "note": "no exact plan, using closest \u20b9151"
+ },
+ "199": {
+  "id": "1019008",
+  "amount": "199",
+  "name": "Rs 199_18D_1.5GB/D",
+  "exact": true
+ },
+ "219": {
+  "id": "1019041",
+  "amount": "219",
+  "name": "MRP 219",
+  "exact": true
+ },
+ "239": {
+  "id": "1018968",
+  "amount": "239",
+  "name": "Rs 239_22D_1.5GB/D",
+  "exact": true
+ },
+ "299": {
+  "id": "1018966",
+  "amount": "299",
+  "name": "Rs 299_28D_1.5GB/D",
+  "exact": true
+ },
+ "349": {
+  "id": "1018982",
+  "amount": "349",
+  "name": "Rs 349_28D_2GB/D",
+  "exact": true
+ },
+ "399": {
+  "id": "1032068",
+  "amount": "399",
+  "name": "Rs 399_28D_2.5GB/D_3OTT",
+  "exact": true
+ },
+ "449": {
+  "id": "1019004",
+  "amount": "449",
+  "name": "Rs 449_28D_3GB/D",
+  "exact": true
+ },
+ "499": {
+  "id": "1032084",
+  "amount": "500",
+  "name": "Rs 500_28D_2GB/D_14OTTs",
+  "exact": false,
+  "note": "no exact plan, using closest \u20b9500"
+ },
+ "599": {
+  "id": "1031379",
+  "amount": "599",
+  "name": "IR Data Pack-Rs. 599",
+  "exact": true
+ },
+ "719": {
+  "id": "1019030",
+  "amount": "719",
+  "name": "Rs 719_70D_2GB/D",
+  "exact": true
+ },
+ "839": {
+  "id": "1019027",
+  "amount": "859",
+  "name": "Rs 859_84D_2GB/D",
+  "exact": false,
+  "note": "no exact plan, using closest \u20b9859"
+ },
+ "999": {
+  "id": "1019090",
+  "amount": "999",
+  "name": "Rs 999_98D_2GB/D",
+  "exact": true
+ },
+ "1499": {
+  "id": "1019966",
+  "amount": "1499",
+  "name": "IR World Pack - Rs. 1499",
+  "exact": true
+ }
+}
