@@ -19,15 +19,13 @@ from pydantic import BaseModel
 
 from checker import RechargeChecker
 
-PROXIES_FILE = _os.environ.get("PROXIES_FILE", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "proxies.txt"))
-
 app = FastAPI(
     title="Jio Recharge Checker",
     version="1.2",
     description="Checks a card against the Jio recharge flow. Proxy is mandatory.",
 )
 
-checker = RechargeChecker(PROXIES_FILE)
+checker = RechargeChecker()
 _executor = ThreadPoolExecutor(max_workers=8)
 
 AMOUNTS = ["19", "29", "49", "69", "98", "129", "155", "199", "219", "239",

@@ -27,50 +27,13 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 JIO_PLAN_ID_19 = "1019863"  # verified live via recharge/search
 
 
-@dataclass
-class ProxyPool:
-    """Rotating pool of tested working proxies (host:port:user:pass)."""
-    entries: list[str] = field(default_factory=list)
-    _i: int = 0
-    _lock: object = field(default_factory=lambda: __import__("threading").Lock())
-
-    @classmethod
-    def from_file(cls, path: str) -> "ProxyPool":
-        lines = [l.strip() for l in open(path) if l.strip() and ":" in l]
-        return cls(entries=lines)
-
-    def _url(self, e: str) -> str:
-        parts = e.split(":")
-        if len(parts) == 4:
-            host, port, user, pw = parts
-            return f"http://{user}:{pw}@{host}:{port}"
-        if len(parts) == 2:
-            return f"http://{parts[0]}:{parts[1]}"
-        return f"http://{e}"
-
-    def next(self) -> str:
-        if not self.entries:
-            return ""
-        with self._lock:
-            p = self.entries[self._i % len(self.entries)]
-            self._i += 1
-        return self._url(p)
-
-    def __len__(self) -> int:
-        return len(self.entries)
-
-
 class SessionFactory:
-    """curl_cffi Session with impersonation + proxy, keeps cookies (pool)."""
-
-    def __init__(self, pool: ProxyPool | None = None):
-        self.pool = pool
+    """curl_cffi Session with impersonation + proxy (proxy passed per-request)."""
 
     def make(self, proxy: str | None = None) -> creq.Session:
         s = creq.Session(impersonate=CHROME, timeout=15)
-        p = proxy if proxy is not None else (self.pool.next() if self.pool else None)
-        if p:
-            s.proxies = {"http": p, "https": p}
+        if proxy:
+            s.proxies = {"http": proxy, "https": proxy}
         return s
 
 

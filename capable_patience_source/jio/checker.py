@@ -11,7 +11,7 @@ import re
 import time
 from urllib.parse import parse_qs, urlparse
 
-from client import JioClient, PayGlocalClient, ProxyPool
+from client import JioClient, PayGlocalClient
 import gateways
 from crypto import decrypt_public_key
 
@@ -85,8 +85,7 @@ def parse_cc(cc: str) -> dict | None:
 
 
 class RechargeChecker:
-    def __init__(self, proxies_file: str, plans_file: str | None = None):
-        self.pool = ProxyPool.from_file(proxies_file)
+    def __init__(self, plans_file: str | None = None):
         import os as _os
         _pf = plans_file or _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "plans.json")
         try:
