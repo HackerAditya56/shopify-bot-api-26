@@ -127,12 +127,19 @@ def _run_pw_flow(xgl: str, zipc: str, proxy: str, card: dict | None = None) -> d
 
 
 def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> tuple:
-    """PayGlocal check. curl_cffi only — Playwright is disabled because it
-    completes the 3DS challenge and returns a terminal "declined", whereas
-    3DS-required cards must classify as "3d"."""
-    # (Playwright flow intentionally skipped: it mislabels 3DS challenges as "declined")
+    """PayGlocal: Playwright (stealth) full flow for the REAL verdict,
+    curl_cffi fallback on failure."""
+    # 1) Playwright full flow (real declined/charged/insufficient/3d)
+    try:
+        zipc = _get_zip(xgl, proxy)
+        out = _run_pw_flow(xgl, zipc, proxy, card)
+        cat = out.get("category")
+        if cat and cat != "error":
+            return cat, out.get("real-response", "")
+    except Exception:
+        pass
 
-    # curl_cffi (3DS -> '3d'; terminal results still classified correctly)
+    # 2) curl_cffi fallback (non-3DS cards still get a terminal; 3DS -> '3d')
     proxies = [proxy]
     for fp in (fallback_proxies or []):
         if fp and fp not in proxies:
