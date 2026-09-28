@@ -1,5 +1,6 @@
 import aiohttp
 import time
+import random
 import csv
 import os
 import logging
@@ -9,6 +10,8 @@ ANTIPUBLIC_URL = "https://bins.antipublic.cc/bins/{}"
 CHARGEBLAST_URL = "https://api.chargeblast.com/bin/{}"
 
 _BIN_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin_cache.csv")
+_SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")
 _CSV_TTL = 3 * 86400   # re-fetch stale CSV entries after 3 days
 
 # in-memory fast cache
@@ -64,18 +67,38 @@ def _normalize_chargeblast(data: dict) -> dict:
     }
 
 
-async def _fetch_json(session, url: str):
-    async with session.get(url, timeout=10) as resp:
-        if resp.status == 200:
-            try:
-                return await resp.json()
-            except Exception:
-                return None
+async def _fetch_json(session, url: str, proxy=None):
+    try:
+        async with session.get(url, timeout=10, proxy=proxy) as resp:
+            if resp.status == 200:
+                try:
+                    return await resp.json()
+                except Exception:
+                    return None
+            return None
+    except Exception:
         return None
 
 
 def _now_str() -> str:
     return str(int(time.time()))  # unix seconds (for TTL comparison)
+
+
+def _normalize_proxy(p: str):
+    p = (p or "").strip()
+    if not p:
+        return None
+    if "://" not in p:
+        p = "http://" + p
+    return p
+
+
+def _load_proxies() -> list:
+    try:
+        with open(_PROXY_FILE, encoding="utf-8", errors="ignore") as f:
+            return [x for x in (_normalize_proxy(ln) for ln in f if ln.strip() and not ln.strip().startswith("#")) if x]
+    except Exception:
+        return []
 
 
 def _load_csv() -> dict:
@@ -165,19 +188,25 @@ async def get_bin_info(bin_number: str) -> dict:
             _bin_cache[bin_number] = (row, now)
             return row
 
-    # 3) fetch from APIs (antipublic primary, chargeblast unlimited fallback)
+    # 3) fetch from APIs via proxies (datacenter IPs are blocked by both APIs)
+    proxies = _load_proxies()
+    trial = random.sample(proxies, min(3, len(proxies))) if proxies else []
+    trial.append(None)  # direct as a last resort
+
+    result = None
     async with aiohttp.ClientSession() as session:
-        try:
-            data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number))
-        except Exception:
-            data = None
+        data = None
+        for proxy in trial:
+            data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number), proxy)
+            if data is not None:
+                break
         if data is not None:
             result = _normalize_antipublic(data)
         else:
-            try:
-                data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number))
-            except Exception:
-                data = None
+            for proxy in trial:
+                data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number), proxy)
+                if data is not None:
+                    break
             if data is not None:
                 result = _normalize_chargeblast(data)
             else:
