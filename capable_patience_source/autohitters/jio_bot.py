@@ -53,8 +53,8 @@ RESPONSE_MAP = {
     "error":        ("ERROR",         E_DECLINED,  "❌", "𝐄𝐑𝐑𝐎𝐑"),
 }
 
-# results worth DM-ing individually (live-ish)
-HIT_CATEGORIES = {"charged", "approved", "insufficient", "3d"}
+# results worth DM-ing individually — everything except the common "declined"
+NOTIFY_CATEGORIES = {"charged", "approved", "insufficient", "3d", "3d_timeout", "blocked", "cvv", "invalid", "expired", "cancelled", "error"}
 
 
 def _load_proxies():
@@ -161,7 +161,7 @@ async def jio_command(message: types.Message):
             r = await _check_card(session, c, number, proxy, amount)
             results.append(r)
             cat = str(r.get("response", "error")).lower()
-            if cat in HIT_CATEGORIES:
+            if cat in NOTIFY_CATEGORIES:
                 try:
                     await message.reply(_format_result(r), parse_mode="HTML")
                 except Exception:
