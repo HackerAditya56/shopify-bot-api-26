@@ -9,6 +9,7 @@ ANTIPUBLIC_URL = "https://bins.antipublic.cc/bins/{}"
 CHARGEBLAST_URL = "https://api.chargeblast.com/bin/{}"
 
 _BIN_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin_cache.csv")
+_CSV_TTL = 3 * 86400   # re-fetch stale CSV entries after 3 days
 
 # in-memory fast cache
 _bin_cache = {}          # bin -> (result, timestamp)
@@ -74,7 +75,7 @@ async def _fetch_json(session, url: str):
 
 
 def _now_str() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+    return str(int(time.time()))  # unix seconds (for TTL comparison)
 
 
 def _load_csv() -> dict:
@@ -154,8 +155,15 @@ async def get_bin_info(bin_number: str) -> dict:
 
     row = _csv_data.get(bin_number)
     if row is not None:
-        _bin_cache[bin_number] = (row, now)
-        return row
+        try:
+            last = int(float(row.get("last_update") or "0"))
+        except (TypeError, ValueError):
+            last = 0
+        # re-fetch stale rows (old blank/rate-limited data) and blank rows (all N/A)
+        blank = row.get("scheme", "N/A") == "N/A" and row.get("bank", "N/A") == "N/A"
+        if not blank and (now - last) < _CSV_TTL:
+            _bin_cache[bin_number] = (row, now)
+            return row
 
     # 3) fetch from APIs (antipublic primary, chargeblast unlimited fallback)
     async with aiohttp.ClientSession() as session:
@@ -174,6 +182,7 @@ async def get_bin_info(bin_number: str) -> dict:
                 result = _normalize_chargeblast(data)
             else:
                 result = {"error": "BIN lookup failed (both APIs unavailable)."}
+                logging.warning(f"[BIN] lookup failed for {bin_number} (both APIs down/rate-limited)")
 
     _bin_cache[bin_number] = (result, time.time())
 
