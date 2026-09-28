@@ -376,19 +376,18 @@ _KB_GATES = InlineKeyboardMarkup(inline_keyboard=[
         colored_button(text="CʜᴀƦɢᴇ", callback_data="menu_charge_section", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
         colored_button(text="3ᴅs Lᴏᴏᴋᴜᴘ", callback_data="menu_3ds_section", style="primary", icon_custom_emoji_id=EMOJI_TOP)
     ],
-    # [colored_button(text="Hɪᴛᴛᴇʀ", callback_data="menu_hitter", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)],  # hitter OFF
+    [colored_button(text="Hɪᴛᴛᴇʀ", callback_data="menu_hitter", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)],
     [colored_button(text="« Bᴀᴄᴋ", callback_data="back_main", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
 ])
 
 
-# ── HITTER SECTION (OFF) ──────────────────────────────────────────────
-# _KB_HITTER = InlineKeyboardMarkup(inline_keyboard=[
-#     [
-#         colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_hitter_stripe", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING),
-#         colored_button(text="Wʜᴏᴘ", callback_data="info_hitter_whop", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
-#     ],
-#     [colored_button(text="« Bᴀᴄᴋ", callback_data="menu_gates", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
-# ])
+# ── HITTER SECTION ────────────────────────────────────────────────────
+_KB_HITTER = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        colored_button(text="Jɪᴏ Rᴇᴄʜᴀʀɢᴇ", callback_data="info_hitter_jio", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
+    ],
+    [colored_button(text="« Bᴀᴄᴋ", callback_data="menu_gates", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
+])
 
 
 # CHARGE SECTION
@@ -461,10 +460,10 @@ STATIC_MENU_MAP: dict = {
         "𝗔𝗨𝗧𝗛 ➠ Stripe authorization gates\n"
         "𝗖𝗛𝗔𝗥𝗚𝗘 ➠ Charge gates for payment processing\n"
         "𝟯𝗗𝗦 𝗟𝗢𝗢𝗞𝗨𝗣 ➠ 3D Secure verification lookup\n"
-        "𝗛𝗜𝗧𝗧𝗘𝗥 ➠ Stripe / Whop auto hitters",
+        "𝗛𝗜𝗧𝗧𝗘𝗥 ➠ Jio Recharge hitter",
         _KB_GATES
     ),
-    # "menu_hitter": ("...", _KB_HITTER),  # hitter OFF
+    "menu_hitter": ("<b><tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> 𝗛𝗜𝗧𝗧𝗘𝗥 𝗦𝗘𝗟𝗘𝗖𝗧𝗜𝗢𝗡</b>\n\nSelect a hitter:", _KB_HITTER),
     "menu_charge_section": ("<b><tg-emoji emoji-id=\"5424976816530014958\">👛</tg-emoji> 𝗖𝗛𝗔𝗥𝗚𝗘 𝗚𝗔𝗧𝗘𝗦</b>\n\nSelect a charge gate:", _KB_CHARGE_SECTION),
     "menu_3ds_section": ("<b><tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> 𝟯𝗗𝗦 𝗟𝗢𝗢𝗞𝗨𝗣</b>\n\nSelect lookup method:", _KB_3DS_SECTION),
     "menu_mass": ("<b><tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> 𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗠𝗮𝘀𝘀 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 𝗢𝗽𝘁𝗶𝗼𝗻𝘀:</b>\n\n➤ 𝗦𝗧𝗥𝗜𝗣𝗘 𝗠𝗔𝗦𝗦 - Mass Stripe Auth Checking\n➤ 𝗣𝗔𝗬𝗣𝗔𝗟 𝗠𝗔𝗦𝗦 - Mass PayPal Checking\n➤ 𝗦𝗞𝗕𝗔𝗦𝗘𝗗 𝗠𝗔𝗦𝗦 - Mass SK Based Checking\n➤ 𝗦𝗛𝗢𝗣𝗜𝗙𝗬 𝗠𝗔𝗦𝗦 - Mass Shopify Charge Checking", _KB_MASS),
@@ -480,9 +479,16 @@ STATIC_MENU_MAP["info_auth"] = (
     _back("menu_gates")
 )
 
-# ── HITTER INFO (OFF) ──────────────────────────────────────────────────
-# STATIC_MENU_MAP["info_hitter_stripe"] = (...)
-# STATIC_MENU_MAP["info_hitter_whop"] = (...)
+# ── HITTER INFO ────────────────────────────────────────────────────────
+STATIC_MENU_MAP["info_hitter_jio"] = (
+    f"{_SEP}\n"
+    f"<b><i>Hitter ➠ Jio Recharge</i></b>\n"
+    f"<b><i>Command ➠ /jio</i></b>\n"
+    f"<b><i>Usage ➠ /jio &lt;number&gt; [amount] + reply cards (max 5)</i></b>\n"
+    f"<b><i>Example ➠ /jio 7667702392 19</i></b>\n"
+    f"{_SEP}",
+    _back("menu_hitter")
+)
 
 # 3DS LOOKUP INFO
 STATIC_MENU_MAP["info_3ds_vbv"] = (
