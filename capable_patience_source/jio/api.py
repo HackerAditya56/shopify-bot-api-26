@@ -26,7 +26,7 @@ app = FastAPI(
 )
 
 checker = RechargeChecker()
-_executor = ThreadPoolExecutor(max_workers=8)
+_executor = ThreadPoolExecutor(max_workers=30)
 
 AMOUNTS = ["19", "29", "49", "69", "98", "129", "155", "199", "219", "239",
            "299", "349", "399", "449", "499", "599", "719", "839", "999", "1499"]

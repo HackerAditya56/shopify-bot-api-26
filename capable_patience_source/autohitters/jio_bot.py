@@ -17,6 +17,7 @@ from sub import get_premium_status
 router = Router()
 
 JIO_API = "http://127.0.0.1:9090/check"
+JIO_BULK_API = "http://127.0.0.1:9090/check/bulk"
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")
 
@@ -80,6 +81,24 @@ async def _check_card(session, cc, number, proxy, amount):
         }
 
 
+async def _check_bulk(session, number, cards, proxies, amount):
+    """POST all cards to /check/bulk (parallel on the API side) and return (results, summary)."""
+    payload = {
+        "number": number,
+        "cards": [{"cc": c, "proxy": proxies[i % len(proxies)], "amount": amount}
+                  for i, c in enumerate(cards)],
+    }
+    try:
+        async with session.post(JIO_BULK_API, json=payload,
+                                timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+            data = await resp.json()
+        return data.get("results", []), data.get("summary", {})
+    except Exception as e:
+        errs = [{"cc": c, "response": "error", "real-response": f"{type(e).__name__}: {e}",
+                 "gateway": "none", "price": "-", "time": 0, "number": number} for c in cards]
+        return errs, {}
+
+
 def _format_result(res):
     cat = str(res.get("response", "error")).lower()
     _, eid, emoji, label = RESPONSE_MAP.get(cat, RESPONSE_MAP["error"])
@@ -116,6 +135,18 @@ async def jio_command(message: types.Message):
     if message.reply_to_message:
         t = message.reply_to_message.text or message.reply_to_message.caption or ""
         raw_cards.extend(t.splitlines())
+    # .txt file support (reply with a file, like /msh)
+    document = message.document
+    if not document and message.reply_to_message:
+        document = message.reply_to_message.document
+    if document:
+        try:
+            fi = await message.bot.get_file(document.file_id)
+            data = await message.bot.download_file(fi.file_path)
+            raw_cards.extend(data.read().decode("utf-8", errors="ignore").splitlines())
+        except Exception as e:
+            await message.reply(f"{_tg(E_DECLINED, '❌')} <b>Error reading file:</b> {html_escape(str(e))}", parse_mode="HTML")
+            return
     if len(args) > 2:
         raw_cards.extend(args[2:])
 
@@ -133,7 +164,7 @@ async def jio_command(message: types.Message):
 
     if not re.fullmatch(r"\d{10}", number):
         await message.reply(
-            f"{_tg(E_DECLINED, '❌')} <b>Usage:</b> <code>/jio &lt;number&gt; [amount]</code> + reply to cards.",
+            f"{_tg(E_DECLINED, '❌')} <b>Usage:</b> <code>/jio &lt;number&gt; [amount]</code> + reply to cards or a .txt file.",
             parse_mode="HTML")
         return
     if not cards:
@@ -150,11 +181,10 @@ async def jio_command(message: types.Message):
         parse_mode="HTML")
 
     async with aiohttp.ClientSession() as session:
-        results = []
-        for c in cards:
-            proxy = random.choice(proxies)
-            r = await _check_card(session, c, number, proxy, amount)
-            results.append(r)
+        results, _summary = await _check_bulk(session, number, cards, proxies, amount)
+
+        # DM live hits individually
+        for r in results:
             cat = str(r.get("response", "error")).lower()
             if cat in HIT_CATEGORIES:
                 try:
