@@ -84,6 +84,19 @@ def parse_cc(cc: str) -> dict | None:
     return {"number": number, "expiryMonth": mm, "expiryYear": yyyy, "cvv": cvv}
 
 
+def _card_type(number: str) -> str:
+    """Map a card number to the cardType string Jio/PayGlocal expects.
+    Discover (6xxx) and Amex (34/37) were wrongly sent as "mastercard"."""
+    n = number or ""
+    if n.startswith("4"):
+        return "visa"
+    if n.startswith(("34", "37")):
+        return "amex"
+    if n.startswith("6"):
+        return "discover"
+    return "mastercard"   # 2xxx and 5xxx (Mastercard), and anything else
+
+
 class RechargeChecker:
     def __init__(self, plans_file: str | None = None):
         import os as _os
@@ -118,9 +131,9 @@ class RechargeChecker:
             "expiryMonth": card["expiryMonth"],
             "expiryYear": card["expiryYear"],
             "cardHolderName": "Test User",
-            "cardType": "visa" if card["number"][0] == "4" else "mastercard",
+            "cardType": _card_type(card["number"]),
             "cardTypeText": card["number"][:6],
-            "customerCardTypeValue": "visa" if card["number"][0] == "4" else "mastercard",
+            "customerCardTypeValue": _card_type(card["number"]),
         }
         invoke = jc.on_ccdc_confirmation(token, invoke_url, {**card_info, "cvv": card["cvv"]})
         html = invoke.get("htmlForm", "")
