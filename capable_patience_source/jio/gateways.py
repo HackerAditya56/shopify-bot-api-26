@@ -127,19 +127,10 @@ def _run_pw_flow(xgl: str, zipc: str, proxy: str, card: dict | None = None) -> d
 
 
 def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> tuple:
-    """PayGlocal: Playwright (stealth) full flow for the REAL verdict,
-    curl_cffi fallback on failure."""
-    # 1) Playwright full flow (real declined/charged/insufficient/3d)
-    try:
-        zipc = _get_zip(xgl, proxy)
-        out = _run_pw_flow(xgl, zipc, proxy, card)
-        cat = out.get("category")
-        if cat and cat != "error":
-            return cat, out.get("real-response", "")
-    except Exception:
-        pass
-
-    # 2) curl_cffi fallback (non-3DS cards still get a terminal; 3DS -> '3d')
+    """PayGlocal check via curl_cffi. The x-gl token is single-use/short-lived,
+    so the slow Playwright flow is skipped — it expired the token and caused
+    "dc empty: REQUEST_ERROR" on the fallback."""
+    # curl_cffi (fast — uses the token immediately, before it expires)
     proxies = [proxy]
     for fp in (fallback_proxies or []):
         if fp and fp not in proxies:
