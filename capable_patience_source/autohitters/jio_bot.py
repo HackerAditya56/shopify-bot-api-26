@@ -63,12 +63,15 @@ def _load_proxies():
         return []
 
 
-async def _check_card(session, cc, number, proxy, amount):
+async def _check_card(session, cc, number, proxy, amount, fallbacks=None):
+    body = {"cc": cc, "number": number, "proxy": proxy, "amount": amount}
+    if fallbacks:
+        body["extra_proxies"] = fallbacks
     try:
         async with session.post(
             JIO_API,
-            json={"cc": cc, "number": number, "proxy": proxy, "amount": amount},
-            timeout=aiohttp.ClientTimeout(total=60),
+            json=body,
+            timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             data = await resp.json()
         return data
@@ -155,8 +158,10 @@ async def jio_command(message: types.Message):
     async with aiohttp.ClientSession() as session:
         results = []
         for c in cards:
-            proxy = random.choice(proxies)
-            r = await _check_card(session, c, number, proxy, amount)
+            random.shuffle(proxies)
+            proxy = proxies[0]
+            fallbacks = proxies[1:4]
+            r = await _check_card(session, c, number, proxy, amount, fallbacks)
             results.append(r)
             # DM every card result individually (max 5 cards)
             try:

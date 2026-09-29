@@ -37,6 +37,7 @@ class CheckReq(BaseModel):
     number: str
     proxy: str  # mandatory
     amount: str = "19"
+    extra_proxies: list[str] | None = None  # fallback pool for the Jio leg retry
 
 
 class BulkCard(BaseModel):
@@ -70,14 +71,16 @@ def root():
 async def check_get(cc: str = Query(..., description="number|MM|YYYY|CVV"),
                     number: str = Query(...),
                     proxy: str = Query(..., description="host:port:user:pass (mandatory)"),
-                    amount: str = Query("19")):
-    res = checker.check(cc, number, proxy, amount)
+                    amount: str = Query("19"),
+                    extra_proxies: str = Query(None, description="comma-separated fallback proxies")):
+    extra = [x.strip() for x in extra_proxies.split(",") if x.strip()] if extra_proxies else None
+    res = checker.check(cc, number, proxy, amount, extra)
     return JSONResponse(res)
 
 
 @app.post("/check")
 async def check_post(req: CheckReq):
-    res = checker.check(req.cc, req.number, req.proxy, req.amount)
+    res = checker.check(req.cc, req.number, req.proxy, req.amount, req.extra_proxies)
     return JSONResponse(res)
 
 
