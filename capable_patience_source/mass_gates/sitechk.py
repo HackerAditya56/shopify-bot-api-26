@@ -30,7 +30,7 @@ from database import is_owner_user
 TEST_CARD = "4000223372377978|05|29|651"
 
 # API Configuration - SAME AS msh.py
-API_BASE_URL = "http://127.0.0.1:8080/shopii"
+API_BASE_URL = "http://127.0.0.1:8080/sh"
 API_TIMEOUT = 30
 
 # Proxy List - Rotated randomly for each check
@@ -215,9 +215,9 @@ def is_reject_response(response_msg: str) -> bool:
 
 async def call_site_check_api(site_url: str, cc_formatted: str, proxy: str) -> dict:
     """
-    Call the cxchk.shopii API for site checking
-    
-    API Endpoint: http://core.cxchk.site/shopii?site=<url>&cc=<card>&proxy=<proxy>
+    Call the local Shopify checker API for site checking
+
+    API Endpoint: {API_BASE_URL}?site=<url>&cc=<card>&proxy=<proxy>&key=ladle
     
     Response Format:
     {

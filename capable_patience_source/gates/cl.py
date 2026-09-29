@@ -59,7 +59,7 @@ async def get_anime_gif():
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-API_URL = "http://127.0.0.1:8080/shopii"
+API_URL = "http://127.0.0.1:8080/sh"
 API_KEY = "ladle"
 DEFAULT_SITE = "https://nicotests-com.myshopify.com"
 MAX_RETRIES = 20

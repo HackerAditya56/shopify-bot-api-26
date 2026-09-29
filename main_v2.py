@@ -300,7 +300,7 @@ app = FastAPI(title="Shopify Checker API v2", docs_url=None, redoc_url=None,
 @app.get("/")
 @app.get("/health")
 async def route_health():
-    return JSONResponse({"ok": True, "api": "shopii"})
+    return JSONResponse({"ok": True, "api": "sh"})
 
 
 @app.get("/stats")
@@ -309,8 +309,8 @@ async def route_stats():
         return JSONResponse(dict(_stats))
 
 
-@app.api_route("/shopii", methods=["GET", "POST"])
-async def route_shopii(
+@app.api_route("/sh", methods=["GET", "POST"])
+async def route_sh(
     request: Request,
     cc:    Optional[str] = Query(None),
     site:  Optional[str] = Query(None),
@@ -452,7 +452,7 @@ if __name__ == "__main__":
     print(f"  Host         : {cfg.HOST}")
     print(f"  Port         : {cfg.PORT}")
     print(f"  Workers      : {cfg.WORKERS}")
-    print(f"  Endpoint     : /shopii")
+    print(f"  Endpoint     : /sh")
     print(f"  Health       : /health")
     print(f"  Timeout      : {cfg.REQUEST_TIMEOUT}s")
     print("━" * 50)

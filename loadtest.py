@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-loadtest.py — hammer the /shopii API with 1000 concurrent requests.
+loadtest.py — hammer the /sh API with 1000 concurrent requests.
 
 Merged card file (archive/test/all_cards.txt) + site.txt + proxy.txt,
 cycled per request. Prints CHARGED and APPROVED cards to terminal so you
@@ -110,7 +110,7 @@ async def main() -> int:
                           max_keepalive_connections=args.concurrency + 500)
     async with httpx.AsyncClient(timeout=httpx.Timeout(args.timeout, connect=15.0),
                                  limits=limits, follow_redirects=False) as client:
-        url = args.url.rstrip("/") + "/shopii"
+        url = args.url.rstrip("/") + "/sh"
 
         async def one(i: int) -> None:
             nonlocal done
@@ -120,7 +120,7 @@ async def main() -> int:
 
             async with sem:
                 try:
-                    r = await client.post(url, json={"cc": cc, "site": site, "proxy": proxy})
+                    r = await client.post(url, json={"cc": cc, "site": site, "proxy": proxy, "key": "ladle"})
                     body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
                     kind = classify(body, r.status_code)
                     async with lock:

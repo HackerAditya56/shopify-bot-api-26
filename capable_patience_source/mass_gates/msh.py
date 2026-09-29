@@ -163,8 +163,8 @@ async def _safe_answer(callback: types.CallbackQuery, text: str = "", **kw):
 
 
 
-#API_BASE_URL = "http://127.0.0.1:8080/shopii"
-API_BASE_URL = "http://127.0.0.1:8080/shopii"
+#API_BASE_URL = "http://127.0.0.1:8080/sh"
+API_BASE_URL = "http://127.0.0.1:8080/sh"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CALLBACK DATA

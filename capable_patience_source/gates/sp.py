@@ -59,7 +59,7 @@ async def get_anime_gif():
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-API_URL = "http://127.0.0.1:8080/shopii"
+API_URL = "http://127.0.0.1:8080/sh"
 API_KEY = "ladle"
 SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 MAX_SITE_ROTATIONS = 20
