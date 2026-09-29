@@ -31,7 +31,7 @@ class SessionFactory:
     """curl_cffi Session with impersonation + proxy (proxy passed per-request)."""
 
     def make(self, proxy: str | None = None) -> creq.Session:
-        s = creq.Session(impersonate=CHROME, timeout=15)
+        s = creq.Session(impersonate=CHROME, timeout=30)
         if proxy:
             s.proxies = {"http": proxy, "https": proxy}
         return s

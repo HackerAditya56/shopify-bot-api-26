@@ -358,15 +358,30 @@ class RechargeChecker:
         price = f"{plan_amt} INR"
 
         proxy = normalize_proxy(proxy)
+        extra = []
+        for x in (extra_proxies or []):
+            nx = normalize_proxy(x)
+            if nx and nx != proxy and nx not in extra:
+                extra.append(nx)
+        jc = html = None
+        last_jio_err = ""
+        work_proxy = proxy
+        for p in [proxy] + extra:
+            try:
+                jc, html = self._jio_to_easebuzz(number, card, p, plan_id)
+                if html:
+                    work_proxy = p
+                    break
+                last_jio_err = "on-ccdc-confirmation returned no htmlForm"
+            except Exception as e:
+                last_jio_err = f"{type(e).__name__}: {e}"
+        if jc is None or not html:
+            return self._result(cc, number, "error", last_jio_err or "jio flow failed", "jio", t0, price)
         try:
-            jc, html = self._jio_to_easebuzz(number, card, proxy, plan_id)
-            if not html:
-                return self._result(cc, number, "error", "on-ccdc-confirmation returned no htmlForm",
-                                    "jio", t0, price)
             gw = self._easebuzz_to_gateway(jc, html)
             gateway = gw["gateway"]
             if gateway == "payglocal":
-                cat, real = gateways.payglocal_check(gw["xgl_token"], card, proxy,
+                cat, real = gateways.payglocal_check(gw["xgl_token"], card, work_proxy,
                                        [normalize_proxy(x) for x in (extra_proxies or [])])
                 return self._result(cc, number, cat, real, "payglocal", t0, price)
             elif gateway == "paytm":

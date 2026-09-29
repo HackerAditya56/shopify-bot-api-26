@@ -167,16 +167,20 @@ def paytm_check(jc, data_val: str, action: str) -> tuple:
     try:
         r = jc.session.post(action, data={"data": data_val},
             headers={"Content-Type": "application/x-www-form-urlencoded",
-                     "Accept": "text/html,application/xhtml+xml", "User-Agent": UA},
+                     "Accept": "text/html,application/xhtml+xml", "User-Agent": UA,
+                     "Origin": "https://secure.paytmpayments.com", "Referer": action},
             allow_redirects=True, timeout=30)
     except Exception as e:
         return "error", f"paytm loader failed: {type(e).__name__}: {e}"
 
-    m = re.search(r"var APP_DATA = '([^']+)'", r.text)
+    m = (re.search(r"var\s+APP_DATA\s*=\s*'([^']+)'", r.text)
+         or re.search(r"APP_DATA\s*=\s*'([^']+)'", r.text)
+         or re.search(r"var\s+appData\s*=\s*'([^']+)'", r.text)
+         or re.search(r'var\s+APP_DATA\s*=\s*"([^"]+)"', r.text))
     if not m:
-        return "error", "paytm: no APP_DATA in loader"
+        return "error", f"paytm: no APP_DATA in loader [{r.status_code}] {r.text[:200]}"
     try:
-        app_data = json.loads(m.group(1))
+        app_data = json.loads(m.group(1).replace("&quot;", '"').replace("&#39;", "'").replace("&amp;", "&"))
     except Exception:
         return "error", "paytm: bad APP_DATA json"
 
