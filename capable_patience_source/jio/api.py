@@ -9,6 +9,7 @@ proxy: host:port:user:pass  (or http://user:pass@host:port)
 """
 from __future__ import annotations
 
+import hmac
 import time
 import os as _os
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,15 @@ app = FastAPI(
 checker = RechargeChecker()
 _executor = ThreadPoolExecutor(max_workers=30)
 
+MASTER_KEY = _os.environ.get("JIO_API_KEY", "ladle")
+
+
+def _key_ok(key: str | None) -> bool:
+    """Constant-time master-key check. `ladle` -> unlimited; anything else rejected."""
+    if not key:
+        return False
+    return hmac.compare_digest(str(key), MASTER_KEY)
+
 AMOUNTS = ["19", "29", "49", "69", "98", "129", "155", "199", "219", "239",
            "299", "349", "399", "449", "499", "599", "719", "839", "999", "1499"]
 
@@ -37,6 +47,7 @@ class CheckReq(BaseModel):
     number: str
     proxy: str  # mandatory
     amount: str = "19"
+    key: str = ""  # mandatory API key
     extra_proxies: list[str] | None = None  # fallback pool for the Jio leg retry
 
 
@@ -48,6 +59,7 @@ class BulkCard(BaseModel):
 
 class BulkReq(BaseModel):
     number: str
+    key: str = ""  # mandatory API key
     cards: list[BulkCard]
 
 
@@ -72,7 +84,10 @@ async def check_get(cc: str = Query(..., description="number|MM|YYYY|CVV"),
                     number: str = Query(...),
                     proxy: str = Query(..., description="host:port:user:pass (mandatory)"),
                     amount: str = Query("19"),
+                    key: str = Query("", description="API key (mandatory)"),
                     extra_proxies: str = Query(None, description="comma-separated fallback proxies")):
+    if not _key_ok(key):
+        return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
     extra = [x.strip() for x in extra_proxies.split(",") if x.strip()] if extra_proxies else None
     res = checker.check(cc, number, proxy, amount, extra)
     return JSONResponse(res)
@@ -80,12 +95,16 @@ async def check_get(cc: str = Query(..., description="number|MM|YYYY|CVV"),
 
 @app.post("/check")
 async def check_post(req: CheckReq):
+    if not _key_ok(req.key):
+        return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
     res = checker.check(req.cc, req.number, req.proxy, req.amount, req.extra_proxies)
     return JSONResponse(res)
 
 
 @app.post("/check/bulk")
 async def check_bulk(req: BulkReq):
+    if not _key_ok(req.key):
+        return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
     t0 = time.time()
     futs = [_executor.submit(checker.check, c.cc, req.number, c.proxy, c.amount) for c in req.cards]
     results = [f.result() for f in futs]

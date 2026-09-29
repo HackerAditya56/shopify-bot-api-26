@@ -231,7 +231,7 @@ async def call_site_check_api(site_url: str, cc_formatted: str, proxy: str) -> d
     
     Returns dict with keys: success, response, price, proxy_status, gateway, error
     """
-    api_url = f"{API_BASE_URL}?site={site_url}&cc={cc_formatted}&proxy={proxy}"
+    api_url = f"{API_BASE_URL}?site={site_url}&cc={cc_formatted}&proxy={proxy}&key=ladle"
     
     try:
         timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)

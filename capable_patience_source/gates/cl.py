@@ -60,6 +60,7 @@ async def get_anime_gif():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 API_URL = "http://127.0.0.1:8080/shopii"
+API_KEY = "ladle"
 DEFAULT_SITE = "https://nicotests-com.myshopify.com"
 MAX_RETRIES = 20
 
@@ -314,7 +315,7 @@ async def process_cl_check(
 
         try:
             timeout = aiohttp.ClientTimeout(total=45)
-            params = {"site": DEFAULT_SITE, "cc": formatted_cc, "proxy": current_proxy}
+            params = {"site": DEFAULT_SITE, "cc": formatted_cc, "proxy": current_proxy, "key": API_KEY}
             async with aiohttp.ClientSession() as session:
                 async with session.get(API_URL, params=params, timeout=timeout) as resp:
                     text = await resp.text()

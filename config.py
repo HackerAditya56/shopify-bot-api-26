@@ -14,14 +14,14 @@ PORT = int(os.environ.get("CHECKER_PORT", os.environ.get("PORT", "8080")))
 REQUEST_TIMEOUT = int(os.environ.get("CHECKER_TIMEOUT", "120"))
 
 # Uvicorn workers. Keep 1 by default (cheap Railway plans, in-memory caches).
-WORKERS = int(os.environ.get("CHECKER_WORKERS", "15"))
+WORKERS = int(os.environ.get("CHECKER_WORKERS", "16"))
 
 # Keep-alive for long-lived connections (499s usually come from the client /
 # load balancer giving up, so we tune this to be forgiving)
 UA_KEEP_ALIVE = int(os.environ.get("CHECKER_KEEP_ALIVE", "55"))
 
 # API key for auth — leave empty to disable auth
-CHECKER_API_KEY = os.environ.get("CHECKER_API_KEY", "")
+CHECKER_API_KEY = os.environ.get("CHECKER_API_KEY", "ladle")
 
 # Site list files (used only for the optional random-site helper)
 SITE_FILE     = os.environ.get("SITE_FILE",     "site.txt")

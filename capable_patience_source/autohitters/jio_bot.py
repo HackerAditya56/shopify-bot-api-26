@@ -17,6 +17,7 @@ from sub import get_premium_status
 router = Router()
 
 JIO_API = "http://127.0.0.1:9090/check"
+JIO_KEY = "ladle"
 MAX_CARDS = 5
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")
@@ -64,7 +65,7 @@ def _load_proxies():
 
 
 async def _check_card(session, cc, number, proxy, amount, fallbacks=None):
-    body = {"cc": cc, "number": number, "proxy": proxy, "amount": amount}
+    body = {"cc": cc, "number": number, "proxy": proxy, "amount": amount, "key": JIO_KEY}
     if fallbacks:
         body["extra_proxies"] = fallbacks
     try:

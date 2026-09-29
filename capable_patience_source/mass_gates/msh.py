@@ -689,7 +689,7 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
     import aiohttp
 
     cc_formatted = f"{cc}|{mes}|{ano[-2:]}|{cvv}"
-    api_url = f"{API_BASE_URL}?site={site}&cc={cc_formatted}&proxy={proxy}"
+    api_url = f"{API_BASE_URL}?site={site}&cc={cc_formatted}&proxy={proxy}&key=ladle"
 
     logging.debug(f"[API] Processing {cc[:6]}**** via {mask_proxy(proxy)}")
 

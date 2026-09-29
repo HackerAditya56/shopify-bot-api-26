@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hmac
 import logging
 import os
 import sys
@@ -262,6 +263,13 @@ _stats_lock = threading.Lock()
 _mem_cache: dict = {"val": False, "ts": 0.0}
 
 
+def _key_valid(key: str | None) -> bool:
+    """Constant-time master-key check. `ladle` -> unlimited; anything else rejected."""
+    if not key:
+        return False
+    return hmac.compare_digest(str(key), cfg.CHECKER_API_KEY)
+
+
 def _is_memory_exceeded() -> bool:
     if not _MEMORY_CHECK or psutil is None:
         return False
@@ -307,19 +315,25 @@ async def route_shopii(
     cc:    Optional[str] = Query(None),
     site:  Optional[str] = Query(None),
     proxy: Optional[str] = Query(None),
+    key:   Optional[str] = Query(None),
 ):
+    if request.method == "POST":
+        try:
+            body  = await request.json()
+            key   = body.get("key", key)
+            cc    = body.get("cc", cc)
+            site  = body.get("site", site)
+            proxy = body.get("proxy", proxy)
+        except Exception:
+            pass
+
+    if not _key_valid(key):
+        return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
+
     if _is_memory_exceeded():
         return JSONResponse(_build_response(_result_error(cc or "", site or "",
                                           "Server is busy"), cc or "", site or "", proxy or ""),
                             status_code=503)
-    if request.method == "POST":
-        try:
-            body  = await request.json()
-            cc    = body.get("cc",    cc)
-            site  = body.get("site",  site)
-            proxy = body.get("proxy", proxy)
-        except Exception:
-            pass
 
     if not cc or not site:
         return JSONResponse({

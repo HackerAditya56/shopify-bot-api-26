@@ -12,6 +12,7 @@ _SHOPIFY_DIR = os.path.dirname(_BOT_DIR)  # parent dir holds site.txt / proxy.tx
 
 # Local Shopify checker API (main.py in the parent project)
 API_URL = "http://127.0.0.1:8080/shopii"
+API_KEY = "ladle"
 
 SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")

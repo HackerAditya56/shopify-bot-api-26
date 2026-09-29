@@ -35,6 +35,7 @@ router = Router()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 API_URL = "http://127.0.0.1:8080/shopii"
+API_KEY = "ladle"
 
 SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 
@@ -261,6 +262,7 @@ async def check_card_logic(sites: List[str], cc: str) -> Dict:
                     "site": current_site,
                     "cc": cc,
                     "proxy": proxy,
+                    "key": API_KEY,
                 }
                 async with aiohttp.ClientSession() as session:
                     async with session.get(API_URL, params=params, timeout=timeout) as resp:
