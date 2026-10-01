@@ -62,6 +62,7 @@ extract_tax_amount = _auto.extract_tax_amount
 extract_identification_signature = _auto.extract_identification_signature
 extract_pci_session_id = _auto.extract_pci_session_id
 extract_receipt_id = _auto.extract_receipt_id
+extract_poll_for_receipt_id = _auto.extract_poll_for_receipt_id
 extract_receipt_session_token = _auto.extract_receipt_session_token
 extract_receipt_status_code = _auto.extract_receipt_status_code
 extract_any_error = _auto.extract_any_error
@@ -1574,7 +1575,8 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
             submit_id   = extract_submit_for_completion_id(js_body)
             if not proposal_id or not submit_id:
                 raise Exception("missing Proposal or Submit ID")
-            poll_for_receipt_id = "978b340f3027dc55313349c4089004147b6b0dccee75e42ed97685ef1feae418"
+            poll_for_receipt_id = (extract_poll_for_receipt_id(js_body)
+                                    or "978b340f3027dc55313349c4089004147b6b0dccee75e42ed97685ef1feae418")
         except Exception as e:
             result.status = CheckStatus.ERROR
             result.retryable = True
