@@ -834,7 +834,7 @@ def extract_proposal_id(js_body: str) -> str:
     return match.group(1) if match else ""
 
 def extract_submit_for_completion_id(js_body: str) -> str:
-    match = re.search(r'id:"([a-f0-9]{64})",type:"mutation",name:"CreditCardCreate"', js_body)
+    match = re.search(r'id:"([a-f0-9]{64})",type:"query",name:"NegotiateFromSession"', js_body)
     return match.group(1) if match else ""
 
 def extract_poll_for_receipt_id(js_body: str) -> str:

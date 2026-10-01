@@ -1301,7 +1301,6 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
 
     gql_payload = f'''{{
   "variables": {{
-    "input": {{
       "sessionInput": {{"sessionToken": "{session_token}"}},
       "queueToken": "{queue_token}",
       "discounts": {{"lines": [], "acceptUnexpectedDiscounts": true}},
@@ -1402,20 +1401,13 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
       }},
       "optionalDuties": {{"buyerRefusesDuties": false}},
       "cartMetafields": []
-    }},
-    "attemptToken": "{attempt_token}",
-    "metafields": [],
-    "analytics": {{
-      "requestUrl": "{checkout_url}",
-      "pageId": "{page_id}"
-    }}
   }},
-  "operationName": "SubmitForCompletion",
+  "operationName": "NegotiateFromSession",
   "id": "{submit_id}"
 }}'''
     gql_payload = patch_payload(gql_payload, currency, country)
     resp = await client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=NegotiateFromSession",
         data=gql_payload,
         headers=_proposal_headers(shop_url, checkout_url, checkout_token,
                                   session_token, build_id, source_token),
