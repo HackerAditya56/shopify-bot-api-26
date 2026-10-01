@@ -804,14 +804,21 @@ def fetch_private_access_token(client: TLSClient, shop_url: str, checkout_url: s
 # ──────────────────────── Step 3: actions JS ─────────────────────────
 
 def extract_actions_js_url(checkout_html: str, shop_url: str) -> str:
-    """Return every modulepreload JS chunk path (newline-joined). Shopify moved
-    the checkout assets to hashed ES modules; the persisted-query registry is now
-    split across these chunks instead of one actions.XXX.js file."""
+    """Return every JS chunk path (newline-joined): modulepreload links + the
+    importmap integrity keys. Shopify moved to hashed ES modules and keeps the
+    persisted-query registry (Proposal/SubmitForCompletion/PollForReceipt) in a
+    dynamically-imported negotiator chunk that only appears in the importmap."""
     paths = []
+    seen = set()
     for tag in re.findall(r'<link\b[^>]*modulepreload[^>]*>', checkout_html):
         m = re.search(r'href="([^"]+\.js)"', tag)
-        if m:
-            paths.append(m.group(1))
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1)); paths.append(m.group(1))
+    mm = re.search(r'<script type="importmap">(.*?)</script>', checkout_html, re.S)
+    if mm:
+        for u in re.findall(r'"(/cdn/shopifycloud/checkout-web/assets/[^"]+\.js)"', mm.group(1)):
+            if u not in seen:
+                seen.add(u); paths.append(u)
     return "\n".join(shop_url + p for p in paths)
 
 def fetch_actions_js(client: TLSClient, actions_url: str, shop_url: str) -> str:
@@ -830,11 +837,11 @@ def fetch_actions_js(client: TLSClient, actions_url: str, shop_url: str) -> str:
     return resp.text
 
 def extract_proposal_id(js_body: str) -> str:
-    match = re.search(r'id:"([a-f0-9]{64})",type:"query",name:"NegotiateFromSession"', js_body)
+    match = re.search(r'id:"([a-f0-9]{64})",type:"query",name:"Proposal"', js_body)
     return match.group(1) if match else ""
 
 def extract_submit_for_completion_id(js_body: str) -> str:
-    match = re.search(r'id:"([a-f0-9]{64})",type:"query",name:"NegotiateFromSession"', js_body)
+    match = re.search(r'id:"([a-f0-9]{64})",type:"mutation",name:"SubmitForCompletion"', js_body)
     return match.group(1) if match else ""
 
 def extract_poll_for_receipt_id(js_body: str) -> str:
