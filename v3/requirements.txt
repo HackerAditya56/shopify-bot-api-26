@@ -1,0 +1,18 @@
+# Shopify Checker API (main_v2.py) — runtime dependencies
+# Verified against archive/.venv (Python 3.11.15)
+
+# Web framework + ASGI server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# TLS-fingerprint HTTP client (sync + async). The weighted browser profiles
+# (chrome150, safari260, chrome133a, ...) and extra_fp need curl_cffi >= 0.16.
+curl_cffi>=0.16.0
+
+# HTML parsing — auto.py imports bs4 at module level (import auto would fail
+# without it), even though the catalog fallback currently regex-parses JSON.
+beautifulsoup4>=4.12.0
+
+# Memory guard for /shopii (optional: main_v2.py falls back gracefully when
+# absent, but include it so the guard is active)
+psutil>=5.9.0
