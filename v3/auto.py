@@ -1395,13 +1395,13 @@ def send_proposal(client: TLSClient, shop_url: str, checkout_url: str, checkout_
     "optionalDuties": {{"buyerRefusesDuties": false}},
     "cartMetafields": []
   }},
-  "operationName": "NegotiateFromSession",
+  "operationName": "Proposal",
   "id": "{proposal_id}"
 }}'''
 
     gql_payload = patch_payload(gql_payload, currency, country)
     resp = client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=NegotiateFromSession",
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
         data=gql_payload,
         headers=_proposal_headers(shop_url, checkout_url, checkout_token, session_token, build_id, source_token)
     )
@@ -1496,13 +1496,13 @@ def send_proposal2(client: TLSClient, shop_url: str, checkout_url: str, checkout
     "optionalDuties": {{"buyerRefusesDuties": false}},
     "cartMetafields": []
   }},
-  "operationName": "NegotiateFromSession",
+  "operationName": "Proposal",
   "id": "{proposal_id}"
 }}'''
 
     gql_payload = patch_payload(gql_payload, currency, country)
     resp = client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=NegotiateFromSession",
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
         data=gql_payload,
         headers=_proposal_headers(shop_url, checkout_url, checkout_token, session_token, build_id, source_token)
     )
@@ -1615,13 +1615,13 @@ def send_proposal3(client: TLSClient, shop_url: str, checkout_url: str, checkout
     "optionalDuties": {{"buyerRefusesDuties": false}},
     "cartMetafields": []
   }},
-  "operationName": "NegotiateFromSession",
+  "operationName": "Proposal",
   "id": "{proposal_id}"
 }}'''
 
     gql_payload = patch_payload(gql_payload, currency, country)
     resp = client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=NegotiateFromSession",
+        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
         data=gql_payload,
         headers=_proposal_headers(shop_url, checkout_url, checkout_token, session_token, build_id, source_token)
     )
