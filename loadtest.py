@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-loadtest.py — hammer the /sh API with 1000 concurrent requests.
+loadtest.py — hammer the /sh API and measure server workload.
 
 Merged card file (archive/test/all_cards.txt) + site.txt + proxy.txt,
 cycled per request. Prints CHARGED and APPROVED cards to terminal so you
@@ -8,8 +8,12 @@ can confirm the pipeline is returning real results, logs connection drops
 (VPS killing the socket), and tallies dead/site/error/declined.
 
 Usage:
-  python3 loadtest.py                          # 1000 concurrent, 2000 total
-  python3 loadtest.py --concurrency 1000 --total 2000
+  python3 loadtest.py                          # interactive: pick CC count + workers
+  python3 loadtest.py -i                       # same interactive menu
+  python3 loadtest.py --total 100 --concurrency 50
+  python3 loadtest.py --total 500 --concurrency 250 --key mykey --url http://host:8080
+
+Auth: POSTs {cc, site, proxy, key} — key defaults to "ladle" (override with --key).
 """
 from __future__ import annotations
 
@@ -78,21 +82,97 @@ def load_lines(path: str) -> list[str]:
         return [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
 
 
+def _ask_int(prompt: str, default: int, min_v: int = 1) -> int:
+    """Prompt for an integer, returning default on empty input."""
+    while True:
+        raw = input(prompt).strip()
+        if not raw:
+            return default
+        try:
+            v = int(raw)
+        except ValueError:
+            print("  enter a number")
+            continue
+        if v < min_v:
+            print(f"  must be >= {min_v}")
+            continue
+        return v
+
+
+def interactive_setup(args):
+    """Walk the user through CC count + worker count (+ URL/key override)."""
+    print()
+    print(f"{CYAN}Shopify loadtest — interactive setup{RESET}")
+    print("-" * 60)
+    url = input(f"Target URL [{args.url}]: ").strip() or args.url
+    key = input(f"API key    [{args.key}]: ").strip() or args.key
+
+    print()
+    print("How many CCs to hammer?")
+    print("  1) 100        2) 500        3) 1,000")
+    print("  4) 2,000      5) 5,000      6) custom")
+    while True:
+        c = input("pick [3]: ").strip() or "3"
+        preset = {"1": 100, "2": 500, "3": 1000, "4": 2000, "5": 5000}
+        if c in preset:
+            total = preset[c]
+            break
+        if c == "6":
+            total = _ask_int("CC count: ", 1000)
+            break
+        print("  pick 1-6")
+
+    print()
+    print("How many workers (concurrency)?")
+    print("  1) 50         2) 100        3) 250")
+    print("  4) 500        5) 1,000      6) custom")
+    while True:
+        c = input("pick [3]: ").strip() or "3"
+        preset = {"1": 50, "2": 100, "3": 250, "4": 500, "5": 1000}
+        if c in preset:
+            conc = preset[c]
+            break
+        if c == "6":
+            conc = _ask_int("Workers: ", 250)
+            break
+        print("  pick 1-6")
+
+    return url, key, total, conc
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://103.124.157.14:8080")
-    ap.add_argument("--cc-file", default="archive/test/all_cards.txt")
+    ap.add_argument("--key", default="ladle")
+    ap.add_argument("--cc-file", default="archive/test/test.txt")
     ap.add_argument("--site-file", default="site.txt")
     ap.add_argument("--proxy-file", default="proxy.txt")
-    ap.add_argument("--total", type=int, default=2000)
-    ap.add_argument("--concurrency", "-c", type=int, default=1000)
+    ap.add_argument("--total", type=int, default=None)
+    ap.add_argument("--concurrency", "-c", type=int, default=None)
     ap.add_argument("--timeout", type=float, default=140.0)
     ap.add_argument("--interval", type=float, default=5.0)
+    ap.add_argument("--interactive", "-i", action="store_true")
     args = ap.parse_args()
+
+    bare = len(sys.argv) == 1
+    if args.interactive or bare:
+        args.url, args.key, args.total, args.concurrency = interactive_setup(args)
+    elif args.total is None or args.concurrency is None:
+        if args.total is None:
+            args.total = _ask_int("How many CCs to test? ", 1000)
+        if args.concurrency is None:
+            args.concurrency = _ask_int("How many workers (concurrency)? ", 250)
 
     cards   = load_lines(args.cc_file)
     sites   = load_lines(args.site_file)
     proxies = load_lines(args.proxy_file)
+
+    if not cards:
+        sys.exit(f"cc file is empty: {args.cc_file}")
+    if not sites:
+        sys.exit(f"site file is empty: {args.site_file}")
+    if not proxies:
+        sys.exit(f"proxy file is empty: {args.proxy_file}")
 
     print(f"cards={len(cards)} sites={len(sites)} proxies={len(proxies)}")
     print(f"target={args.url}  total={args.total}  concurrency={args.concurrency}")
@@ -120,7 +200,7 @@ async def main() -> int:
 
             async with sem:
                 try:
-                    r = await client.post(url, json={"cc": cc, "site": site, "proxy": proxy, "key": "ladle"})
+                    r = await client.post(url, json={"cc": cc, "site": site, "proxy": proxy, "key": args.key})
                     body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
                     kind = classify(body, r.status_code)
                     async with lock:
