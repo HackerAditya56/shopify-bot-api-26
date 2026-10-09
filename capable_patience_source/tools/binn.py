@@ -33,7 +33,7 @@ async def fetch_bin_from_api(bin_number: str) -> dict:
     url = f"https://bins.antipublic.cc/bins/{bin_number}"
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, timeout=10, headers={"Accept-Encoding": "gzip, deflate"}) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 elif resp.status == 404:

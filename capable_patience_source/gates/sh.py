@@ -259,7 +259,6 @@ async def check_card_logic(sites: List[str], cc: str) -> Dict:
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
                 params = {
-                    "site": current_site,
                     "cc": cc,
                     "proxy": proxy,
                     "key": API_KEY,

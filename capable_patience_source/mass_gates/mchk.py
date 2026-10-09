@@ -8,7 +8,7 @@ import string
 import psycopg2.extras
 from datetime import datetime
 from typing import Optional, Tuple, List
-from io import BytesIO
+from io import BytesIO, RawIOBase
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # AIOGRAM IMPORTS
@@ -199,6 +199,7 @@ def extract_cards_from_text(text: str) -> List[str]:
         r'(\d{13,19})\s(\d{1,2})\/(\d{2,4})\s(\d{3,4})',
     ]
     cards = []
+    seen = set()
     for pattern in patterns:
         matches = re.findall(pattern, text)
         for match in matches:
@@ -208,9 +209,71 @@ def extract_cards_from_text(text: str) -> List[str]:
                 if len(year) == 4:
                     year = year[2:]
                 card_string = f"{card_number}|{month}|{year}|{cvv}"
-                if card_string not in cards:
+                if card_string not in seen:
+                    seen.add(card_string)
                     cards.append(card_string)
     return cards
+
+
+# ── Chunked file download (2MB chunks → low memory, fast) ──────────────────
+_CHUNK_SIZE = 2 * 1024 * 1024
+
+
+class _CardChunkSink(RawIOBase):
+    """Streams a Telegram file download and extracts cards per ~2MB chunk."""
+
+    def __init__(self, chunk_size=_CHUNK_SIZE):
+        self._buf = b""
+        self._chunk = chunk_size
+        self.carry = ""
+        self.cards = []
+        self._seen = set()
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def write(self, b):
+        self._buf += bytes(b)
+        while len(self._buf) >= self._chunk:
+            self._process(self._buf[:self._chunk])
+            self._buf = self._buf[self._chunk:]
+        return len(b)
+
+    def flush(self):
+        pass
+
+    def seek(self, offset, whence=0):
+        return offset
+
+    def _process(self, raw):
+        text = self.carry + raw.decode("utf-8", errors="ignore")
+        for c in extract_cards_from_text(text):
+            if c not in self._seen:
+                self._seen.add(c)
+                self.cards.append(c)
+        self.carry = text[-96:]
+
+    def finalize(self):
+        if self._buf:
+            self._process(self._buf)
+            self._buf = b""
+        for c in extract_cards_from_text(self.carry):
+            if c not in self._seen:
+                self._seen.add(c)
+                self.cards.append(c)
+        self.carry = ""
+        return self.cards
+
+
+async def download_and_extract_chunked(bot, document) -> List[str]:
+    """Download a document and extract cards in ~2MB chunks (low memory)."""
+    file_info = await bot.get_file(document.file_id)
+    sink = _CardChunkSink()
+    await bot.download(file_info.file_path, destination=sink, seek=False)
+    return sink.finalize()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # HELPERS
@@ -854,20 +917,22 @@ async def mchk_command(message: types.Message):
     if not document and message.reply_to_message and message.reply_to_message.document:
         document = message.reply_to_message.document
 
+    file_cards = []
     if document:
         try:
-            file = await bot.get_file(document.file_id)
-            byte_io = await bot.download_file(file.file_path)
-            raw_text += byte_io.read().decode('utf-8', errors='ignore')
+            file_cards = await download_and_extract_chunked(bot, document)
         except Exception as e:
             await message.reply(f"❌ Error reading file: {e}")
             return
 
-    if not raw_text.strip():
+    if not raw_text.strip() and not file_cards:
         await message.reply("❌ <b>No cards found.</b>", parse_mode="HTML")
         return
 
     extracted_cards = extract_cards_from_text(raw_text)
+    if file_cards:
+        _seen = set(extracted_cards)
+        extracted_cards.extend(c for c in file_cards if c not in _seen)
     if not extracted_cards:
         await message.reply("❌ No valid card formats found.")
         return

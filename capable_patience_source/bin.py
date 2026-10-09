@@ -69,7 +69,7 @@ def _normalize_chargeblast(data: dict) -> dict:
 
 async def _fetch_json(session, url: str, proxy=None):
     try:
-        async with session.get(url, timeout=10, proxy=proxy) as resp:
+        async with session.get(url, timeout=10, proxy=proxy, headers={"Accept-Encoding": "gzip, deflate"}) as resp:
             if resp.status == 200:
                 try:
                     return await resp.json()

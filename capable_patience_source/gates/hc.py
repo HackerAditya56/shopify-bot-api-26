@@ -325,7 +325,7 @@ async def process_hc_check(
 
         try:
             timeout = aiohttp.ClientTimeout(total=45)
-            params = {"site": current_site, "cc": formatted_cc, "proxy": proxy, "key": API_KEY}
+            params = {"cc": formatted_cc, "proxy": proxy, "key": API_KEY}
             async with aiohttp.ClientSession() as session:
                 async with session.get(API_URL, params=params, timeout=timeout) as resp:
                     text = await resp.text()
