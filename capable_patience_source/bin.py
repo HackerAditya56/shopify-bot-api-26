@@ -152,9 +152,9 @@ def _write_csv(data: dict):
 async def get_bin_info(bin_number: str) -> dict:
     """Fetch BIN info. Persistent CSV cache (bin_cache.csv) is the source of
     truth: if a BIN is already in the CSV it is returned without any API call.
-    New BINs are fetched from antipublic.cc (full detail incl. level) and fall
-    back to chargeblast.com (unlimited, no rate limit) on failure, then the
-    result + last_update is written to the CSV."""
+    New BINs are fetched from chargeblast.com (primary, unlimited) and enriched
+    from antipublic.cc (level/brand/type); on rate-limit the last cached CSV row
+    is served instead of null, then results are written to the CSV."""
     if not bin_number.isdigit() or len(bin_number) < 6:
         return {"error": "Invalid BIN. Must be at least 6 digits."}
 
@@ -188,30 +188,47 @@ async def get_bin_info(bin_number: str) -> dict:
             _bin_cache[bin_number] = (row, now)
             return row
 
-    # 3) fetch from APIs via proxies (datacenter IPs are blocked by both APIs)
+    # 3) fetch from APIs via proxies (datacenter IPs are blocked by both APIs).
+    #    chargeblast is PRIMARY (unlimited, no rate limit).  antipublic is only
+    #    used to enrich the "level"/"type" fields when chargeblast answers.
     proxies = _load_proxies()
-    trial = random.sample(proxies, min(3, len(proxies))) if proxies else []
+    trial = random.sample(proxies, min(5, len(proxies))) if proxies else []
     trial.append(None)  # direct as a last resort
 
     result = None
     async with aiohttp.ClientSession() as session:
-        data = None
+        cb_data = None
         for proxy in trial:
-            data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number), proxy)
-            if data is not None:
+            cb_data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number), proxy)
+            if cb_data is not None:
                 break
-        if data is not None:
-            result = _normalize_antipublic(data)
+
+        ap_data = None
+        for proxy in trial:
+            ap_data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number), proxy)
+            if ap_data is not None:
+                break
+
+        if cb_data is not None:
+            result = _normalize_chargeblast(cb_data)
+            # enrich with antipublic level/brand + type when available
+            if ap_data is not None:
+                ap_norm = _normalize_antipublic(ap_data)
+                if ap_norm.get("brand") != "N/A":
+                    result["brand"] = ap_norm["brand"]
+                if ap_norm.get("type") != "N/A":
+                    result["type"] = ap_norm["type"]
+        elif ap_data is not None:
+            result = _normalize_antipublic(ap_data)
+        elif row is not None:
+            # Rate-limited on both APIs -> serve the last known CSV row instead
+            # of null/error, so a rate limit never blanks the BIN output.
+            result = dict(row)
+            result["stale"] = True
+            logging.warning(f"[BIN] rate-limited for {bin_number}, serving stale cache")
         else:
-            for proxy in trial:
-                data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number), proxy)
-                if data is not None:
-                    break
-            if data is not None:
-                result = _normalize_chargeblast(data)
-            else:
-                result = {"error": "BIN lookup failed (both APIs unavailable)."}
-                logging.warning(f"[BIN] lookup failed for {bin_number} (both APIs down/rate-limited)")
+            result = {"error": "BIN lookup failed (both APIs unavailable)."}
+            logging.warning(f"[BIN] lookup failed for {bin_number} (both APIs down/rate-limited)")
 
     _bin_cache[bin_number] = (result, time.time())
 

@@ -131,15 +131,21 @@ def check_proxy(proxy):
     return original, False, last_reason or "unknown"
 
 
-def load_proxies():
-    """Read proxy.txt, normalize, dedupe (preserving order)."""
-    if not os.path.isfile(PROXY_FILE):
-        print(f"[!] {PROXY_FILE} not found.")
+def load_proxies(dead=False):
+    """Read proxy.txt (or proxy_dead.txt) entries, normalize, dedupe."""
+    src = DEAD_FILE if dead else PROXY_FILE
+    if not os.path.isfile(src):
+        print(f"[!] {src} not found.")
         sys.exit(1)
     proxies, seen = [], set()
-    with open(PROXY_FILE, encoding="utf-8", errors="replace") as f:
+    with open(src, encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
+            if not line:
+                continue
+            if dead:
+                # proxy_dead.txt lines are "proxy | reason" — keep the proxy part
+                line = line.split(" | ")[0].strip()
             if not line:
                 continue
             norm = normalize_proxy(line)
@@ -158,13 +164,15 @@ def main():
     ap.add_argument("--timeout", type=int, default=TIMEOUT)
     ap.add_argument("--retries", type=int, default=MAX_ATTEMPTS)
     ap.add_argument("--url", default=TEST_URL)
+    ap.add_argument("--dead", action="store_true",
+                    help="retest proxy_dead.txt and append recovered proxies to proxy.txt")
     args = ap.parse_args()
 
     TIMEOUT = args.timeout
     MAX_ATTEMPTS = args.retries
     TEST_URL = args.url
 
-    proxies = load_proxies()
+    proxies = load_proxies(dead=args.dead)
     total = len(proxies)
     print(f"[*] Checking {total} proxies | {args.workers} workers | "
           f"{TIMEOUT}s timeout | {MAX_ATTEMPTS} attempts")
@@ -191,15 +199,32 @@ def main():
                     el = time.monotonic() - t0
                     print(f"  [{done}/{total}] live={len(live)} dead={len(dead)} ({el:.0f}s)")
 
-    # live -> proxy.txt (preserve original format/order)
-    with open(PROXY_FILE, "w", encoding="utf-8") as f:
-        if live:
-            f.write("\n".join(live) + "\n")
-
-    # dead -> proxy_dead.txt (with reason)
-    with open(DEAD_FILE, "w", encoding="utf-8") as f:
-        for original, reason in dead:
-            f.write(f"{original} | {reason}\n")
+    if args.dead:
+        # recovered proxies -> append to proxy.txt (no duplicates)
+        existing = set()
+        if os.path.isfile(PROXY_FILE):
+            with open(PROXY_FILE, encoding="utf-8", errors="replace") as f:
+                existing = {l.strip() for l in f if l.strip()}
+        added = 0
+        with open(PROXY_FILE, "a", encoding="utf-8") as f:
+            for p in live:
+                if p not in existing:
+                    f.write(p + "\n")
+                    added += 1
+        # still-dead -> rewrite proxy_dead.txt (with reason)
+        with open(DEAD_FILE, "w", encoding="utf-8") as f:
+            for original, reason in dead:
+                f.write(f"{original} | {reason}\n")
+        print(f"\n[✓] RECOVERED {added} proxies -> appended to {PROXY_FILE}")
+    else:
+        # live -> proxy.txt (preserve original format/order)
+        with open(PROXY_FILE, "w", encoding="utf-8") as f:
+            if live:
+                f.write("\n".join(live) + "\n")
+        # dead -> proxy_dead.txt (with reason)
+        with open(DEAD_FILE, "w", encoding="utf-8") as f:
+            for original, reason in dead:
+                f.write(f"{original} | {reason}\n")
 
     print(f"\n[✓] Done in {time.monotonic() - t0:.0f}s")
     print(f"[✓] LIVE : {len(live)}  -> {PROXY_FILE}")
