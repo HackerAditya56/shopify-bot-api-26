@@ -1641,9 +1641,6 @@ async def msh_command(message: types.Message):
         document = message.reply_to_message.document
 
     if document:
-        if document.file_size > 2 * 1024 * 1024:
-            await message.reply("❌ File too large. Max 2MB.")
-            return
         try:
             file_info = await bot.get_file(document.file_id)
             byte_content = await bot.download_file(file_info.file_path)
@@ -1674,11 +1671,7 @@ async def msh_command(message: types.Message):
     expired_count = 0
     invalid_luhn_count = 0
     is_owner = is_owner_user(user_id)
-    MAX_VALID_CARDS = 50000 if (is_owner or is_premium) else 1000
-
     for card_string in extracted_cards:
-        if len(valid_cards) >= MAX_VALID_CARDS:
-            break
         parts_c = card_string.split('|')
         if len(parts_c) != 4:
             continue

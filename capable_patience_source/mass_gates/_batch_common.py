@@ -431,8 +431,6 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
 
         kind = classify_status(status)
 
-        if kind in ("charged", "approved", "declined"):
-            await _deduct_one(user_id)
         await asyncio.to_thread(update_user_stats, user_id, kind == "approved")
 
         # bin info for approved/charged result captions

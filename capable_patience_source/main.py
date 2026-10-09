@@ -29,7 +29,7 @@ from status import status_command, router as status_router
 from sub import (
     sub_command, rc_command, suball_command, g_code_command,
     claim_command, info_command, rsub_command, plan_command, 
-    adcr_command
+    adcr_command, get_premium_status
 )
 
 from gates.sh import sh_command, sh_callback_handler
@@ -311,7 +311,7 @@ async def _get_profile_caption(user) -> str:
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐔𝐬𝐞𝐫 𝐍𝐚𝐦𝐞 ➠ {ul}\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐔𝐬𝐞𝐫 𝐈𝐃 ➠ <code>{user.id}</code>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐏𝐥𝐚𝐧 ➠ <b>{access_str}</b>\n"
-        f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐂𝐫𝐞𝐝𝐢𝐭𝐬 ➠ <b>{credits_str}</b>\n"
+
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐉𝐨𝐢𝐧𝐞𝐝 ➠ <b>{joined_str}</b>\n"
         #f"━━━━━━━━━━━━━━━━\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> 𝐃𝐞𝐯 ➠ {dl}"
@@ -612,6 +612,30 @@ async def _safe_answer(cb: types.CallbackQuery, text: str = None, **kw):
 async def start(message: types.Message):
     user = message.from_user
     asyncio.create_task(ensure_user_and_credits(user.id, user.username))
+
+    # Authorization gate: owner/premium see the menu; new/unauthorized users
+    # are held and the owner is notified with their username + ID.
+    is_authed, _expiry = await asyncio.to_thread(get_premium_status, user.id)
+    if not is_authed:
+        _name = (user.full_name or user.first_name or "Unknown")
+        _name = _name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        _uname = f"@{user.username}" if user.username else "—"
+        _uname = _uname.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        _alert = (f"🆕 <b>New user started the bot</b>\n"
+                  f"├ <b>Name:</b> {_name}\n"
+                  f"├ <b>Username:</b> {_uname}\n"
+                  f"└ <b>ID:</b> <code>{user.id}</code>")
+        try:
+            for oid in ADMIN_IDS:
+                await message.bot.send_message(oid, _alert, parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"notify owner for {user.id}: {e}")
+        await message.answer(
+            "⏳ <b>Account pending approval.</b>\n\n"
+            "Send your ID to the admin to get access.",
+            parse_mode="HTML",
+        )
+        return
 
     temp_msg = await message.answer(text=ANIMATION_WORDS[0], parse_mode="HTML")
 

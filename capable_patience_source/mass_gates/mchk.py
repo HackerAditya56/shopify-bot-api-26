@@ -855,9 +855,6 @@ async def mchk_command(message: types.Message):
         document = message.reply_to_message.document
 
     if document:
-        if document.file_size > 2 * 1024 * 1024:
-            await message.reply("❌ File too large. Max 2MB.")
-            return
         try:
             file = await bot.get_file(document.file_id)
             byte_io = await bot.download_file(file.file_path)
@@ -877,10 +874,7 @@ async def mchk_command(message: types.Message):
 
     valid_cards = []
     is_owner = is_owner_user(user_id)
-    MAX_VALID_CARDS = 50000 if (is_owner or is_premium) else 1000
     for card_string in extracted_cards:
-        if len(valid_cards) >= MAX_VALID_CARDS:
-            break
         parts = card_string.split('|')
         if len(parts) != 4:
             continue

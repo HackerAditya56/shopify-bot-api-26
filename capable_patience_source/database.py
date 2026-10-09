@@ -285,19 +285,12 @@ def create_user(user_id: int, username: str):
 
 
 def get_user_credits(user_id: int) -> int:
-    if is_owner_user(user_id):
-        return UNLIMITED_CREDITS
-    now = time.monotonic()
-    cached = _credits_cache.get(user_id)
-    if cached and now < cached[1]:
-        return cached[0]
-    with PooledConn() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT credits FROM users WHERE user_id = %s", (user_id,))
-        result = cur.fetchone()
-        credits = result[0] if result else 0
-    _credits_cache[user_id] = (credits, now + _credits_cache_ttl)
-    return credits
+    """Credit system removed — every user has unlimited credits.
+
+    Premium access is now days-based only (premium_expiry); credits no longer
+    gate or limit any check, so all callers see an effectively-infinite balance.
+    """
+    return UNLIMITED_CREDITS
 
 
 def update_credits(user_id: int, new_credits: int):
