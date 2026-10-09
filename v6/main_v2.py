@@ -129,8 +129,7 @@ def _is_proxy_err(text: str) -> bool:
     m = (text or "").lower()
     return any(k in m for k in (
         "could not resolve proxy", "curl:", "proxy", "tunnel", "refused",
-        "timed out", "timeout", "connection", "dns", "name resolution",
-        "http none"))
+        "timed out", "timeout", "connection", "dns", "name resolution"))
 
 
 def _is_site_err(text: str) -> bool:
