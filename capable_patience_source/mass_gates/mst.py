@@ -270,7 +270,9 @@ async def download_and_extract_chunked(bot, document) -> List[str]:
     """Download a document and extract cards in ~2MB chunks (low memory)."""
     file_info = await bot.get_file(document.file_id)
     sink = _CardChunkSink()
-    await bot.download(file_info.file_path, destination=sink, seek=False)
+    # download_file() takes a file_PATH (download() takes a file_id).
+    # Higher timeout: Telegram CDN can be slow for 10-20MB files.
+    await bot.download_file(file_info.file_path, destination=sink, seek=False, timeout=120)
     return sink.finalize()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
