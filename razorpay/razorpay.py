@@ -355,6 +355,31 @@ class RazorpaySession:
             'sec-ch-ua-platform': platform,
         }
 
+    @staticmethod
+    def _agent_fields(target: str) -> dict:
+        """_[agent][platform|device|os] — the agent-detection fields checkout.js
+        sends in payment_create (from navigator.platform/userAgent).  Added by
+        Razorpay's 2026 checkout build; required to pass the WAF.
+
+        checkout.js module 2606:
+          os       = iPhone|iPad -> "iOS" | Android -> "android" | Windows NT -> "windows"
+                     | Linux -> "linux" | Mac OS -> "macOS" | else "other"
+          device   = iPhone -> "iPhone" | iPad -> "iPad" | Android -> "android"
+                     | small-screen -> "mobile" | else "desktop"
+          platform = navigator.platform ("Win32" | "MacIntel" | "Linux armv8l")
+        """
+        if target in RazorpaySession._ANDROID_TARGETS:
+            return {'_[agent][platform]': 'Linux armv8l',
+                    '_[agent][device]': 'android',
+                    '_[agent][os]': 'android'}
+        if target in RazorpaySession._MACOS_TARGETS:
+            return {'_[agent][platform]': 'MacIntel',
+                    '_[agent][device]': 'desktop',
+                    '_[agent][os]': 'macOS'}
+        return {'_[agent][platform]': 'Win32',
+                '_[agent][device]': 'desktop',
+                '_[agent][os]': 'windows'}
+
     def _create_session(self) -> curl_requests.Session:
         """Create the proxy session with browser TLS impersonation + JA4 diversity."""
         # JA4 config's impersonate target takes priority (provides JA4 hash rotation).
@@ -1392,6 +1417,10 @@ class RazorpaySession:
             ('_[is_magic_script]', 'false'),
             ('_[os]', self._browser_profile.os_label),
             ('_[referer]', self.payment_referer),
+            *RazorpaySession._agent_fields(
+                self._ja4_config.impersonate_target
+                if self._ja4_config is not None else self._impersonation_target
+            ).items(),
             ('_[shield][fhash]', fhash),
             ('_[shield][tz]', shield_tz),
             ('_[device_id]', device_id),
