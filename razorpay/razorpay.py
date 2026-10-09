@@ -2359,6 +2359,81 @@ class RazorpaySession:
             print(f'[lumberjack] FAIL #{RazorpaySession._lj_failed}: {type(last_err).__name__}: {last_err}',
                   file=sys.stderr)
 
+    RISK_LJ_URL = 'https://lumberjack.razorpay.com/v2/m/logz'
+
+    @staticmethod
+    def _risk_dom(page_url: str):
+        """DOM structure a real browser exposes after checkout.js + the
+        razorpay-risk-detection bundle load.  sc=scripts, if=iframes, fm=forms."""
+        host = urlparse(page_url).hostname or ''
+        sc = [
+            'https://cdn.razorpay.com/static/analytics/bundle.js',
+            'https://cdn.razorpay.com/static/assets/color.js',
+            'https://cdn.razorpay.com/static/assets/quilljs/1.3.6/quill.min.js',
+            'https://cdn.razorpay.com/static/hosted/wysiwyg.js',
+            'https://checkout.razorpay.com/v1/checkout.js',
+            'https://cdn.razorpay.com/static/cx/razorpay-risk-detection/bundle.js',
+        ]
+        ifm = [f'https://api.razorpay.com/v1/checkout/public/card']
+        return sc, ifm, []
+
+    def _send_risk_event(self, event_name: str):
+        """Replicate one razorpay-risk-detection/bundle.js lumberjack event.
+
+        Sent through the SAME proxy as the checkout so Razorpay correlates the
+        risk signal with the payment_create source IP (direct sends are ignored).
+        """
+        kid = (self.tokens.get('key_id') or '').strip()
+        if not kid:
+            return
+        sc, ifm, fm = RazorpaySession._risk_dom(self.payment_page_url)
+        host = urlparse(self.payment_page_url).hostname or ''
+        sid = ''.join(random.choice('0123456789abcdef') for _ in range(32))
+        now_ms = int(time.time() * 1000)
+        payload = {
+            'target': 'risk-detection.v1.live',
+            'events': [{
+                'timestamp': now_ms,
+                'source': 'checkoutjs',
+                'event_name': f'risk:{event_name}',
+                'event_timestamp': now_ms,
+                'properties': {
+                    'sc': sc, 'if': ifm, 'fm': fm,
+                    'v': '1.0.0',
+                    'u': self.payment_page_url, 'h': host, 'r': '', 's': sid,
+                },
+                'event_type': 'risk-detection',
+                'version': 'v1',
+                'mode': 'live',
+            }],
+            'addons': {'merchant_id': 'properties.m', 'ip': 'context.ip', 'ua': 'context.ua'},
+        }
+        url = f'{RazorpaySession.RISK_LJ_URL}?key_id={quote(kid)}'
+        for attempt in range(2):
+            try:
+                req = curl_requests.Session(impersonate=self._impersonation_target)
+                if self._proxy_url:
+                    req.proxies = {'http': self._proxy_url, 'https': self._proxy_url}
+                req.post(url, json=payload, timeout=3)
+                return
+            except Exception:
+                if attempt == 0:
+                    time.sleep(0.2)
+
+    def _fire_risk_detection(self):
+        """Fire the risk:risk_scan / risk_mutation / risk_scan_complete events.
+
+        These are what razorpay-risk-detection/bundle.js sends; the payment
+        engine flags a payment_create with no prior risk signal as a bot (403).
+        """
+        def _run():
+            self._send_risk_event('risk_scan')
+            time.sleep(random.uniform(0.15, 0.3))
+            self._send_risk_event('risk_mutation')
+            time.sleep(random.uniform(0.15, 0.3))
+            self._send_risk_event('risk_scan_complete')
+        threading.Thread(target=_run, daemon=True).start()
+
     def _fire_lumberjack_sequence(self):
         """Spawn a background thread that fires lumberjack events in the same
         order a real browser does.  Mimics human interaction to prevent
@@ -2371,6 +2446,7 @@ class RazorpaySession:
 
         def _run():
             lj = self._send_lumberjack
+            self._fire_risk_detection()  # risk-detection DOM signals first
             # Card name entry
             lj('change:new_card_name', cid)
             time.sleep(random.uniform(0.05, 0.15))
