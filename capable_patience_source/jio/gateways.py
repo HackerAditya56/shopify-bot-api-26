@@ -23,6 +23,9 @@ RC_EXPIRED = ("GL-201-007",)
 RC_CVV = ("GL-201-006", "GL-201-013")
 RC_INVALID = ("GL-201-010", "GL-201-019")
 RC_BLOCKED = ("GL-201-012", "GL-201-016")
+# "Transaction blocked by acquirer" — cross-border debit / processor risk rule.
+# NOT a cardholder's-bank decline; the acquirer refuses to route it.
+RC_ACQUIRER_BLOCK = ("GL-201-025",)
 
 
 def classify_pg_status(d: dict) -> tuple:
@@ -45,6 +48,8 @@ def classify_pg_status(d: dict) -> tuple:
         return "invalid", reason or "invalid/lost card"
     if code in RC_BLOCKED:
         return "blocked", reason or "blocked/blacklisted"
+    if code in RC_ACQUIRER_BLOCK:
+        return "blocked", reason or "blocked by acquirer (cross-border debit / processor risk rule)"
     if status in STATUS_CHARGED:
         return "charged", reason or "payment successful"
     if status in STATUS_APPROVED:
