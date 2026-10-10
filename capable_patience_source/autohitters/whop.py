@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import threading
 import json
 import re
 import sys
@@ -223,6 +224,21 @@ REQUESTS = {
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 
 
+# libcurl (curl_cffi) keeps a process-global netlink socket that is NOT
+# thread-safe. Concurrent curl_cffi use from multiple threads races on it and
+# aborts the whole process: "Unexpected error 9 on netlink descriptor" ->
+# "Aborted (core dumped)". Serialize every whop check through one lock so only
+# a single libcurl session is active at a time.
+_CURL_LOCK = threading.Lock()
+
+
+def _single_curl(fn):
+    def wrapper(*a, **kw):
+        with _CURL_LOCK:
+            return fn(*a, **kw)
+    return wrapper
+
+
 def get_client():
     try:
         from curl_cffi import requests as cffi
@@ -344,6 +360,7 @@ def classify_whop(msg):
     return "ERROR"
 
 
+@_single_curl
 def run_whop_check(checkout_url, card, email="", proxy=None):
     """Full Whop checkout (Basis Theory tokenize -> Whop confirm -> Stripe). Returns a dict."""
     import random
