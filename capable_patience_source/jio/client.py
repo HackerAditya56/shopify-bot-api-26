@@ -231,7 +231,7 @@ class PayGlocalClient:
             self._url("/gl/v1/payments/risk/fp"),
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             json={"requestId": request_id, "visitorId": visitor_id,
-                  "visitorFound": True, "confidenceScore": 1},
+                  "visitorFound": False, "confidenceScore": 0.72},
         )
         return r.json()
 
@@ -279,6 +279,9 @@ def build_card_payload(card: dict, customer_currency: str = "INR",
         "browserDetails": browser_details or {
             "userAgent": UA, "screenWidth": 1920, "screenHeight": 1080,
             "colorDepth": 24, "timezone": "Asia/Kolkata", "language": "en-US",
+            "platform": "Linux x86_64", "hardwareConcurrency": 8,
+            "deviceMemoryGb": 8, "javaEnabled": False, "cookiesEnabled": True,
+            "screenAvailWidth": 1920, "screenAvailHeight": 1080,
         },
     }
     if customer_currency == "INR":

@@ -32,6 +32,7 @@ def main():
     risk_fp_req = {}
     risk_fp_resp = {}
     dc_resp = {}
+    extra_captures = []   # ThreatMetrix / FingerprintJS / anything fingerprint-related
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, proxy=proxy_cfg,
             args=["--disable-blink-features=AutomationControlled"])
@@ -39,10 +40,20 @@ def main():
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
         ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
+        def _interesting(url):
+            u = (url or "").lower()
+            return ("risk/fp" in u or "online-metrix" in u or "fingerprint" in u
+                    or "clear.png" in u or "tmx" in u or "threatmetrix" in u)
         def on_req(req):
             if "risk/fp" in req.url:
                 try: risk_fp_req["body"] = req.post_data
                 except Exception: pass
+            if _interesting(req.url):
+                try:
+                    extra_captures.append({"type": "req", "url": req.url,
+                                           "headers": dict(req.headers), "body": req.post_data})
+                except Exception:
+                    pass
         def on_resp(resp):
             if "risk/fp" in resp.url:
                 try: risk_fp_resp["body"] = resp.text()
@@ -50,6 +61,11 @@ def main():
             elif "redirect/dc" in resp.url:
                 try: dc_resp["body"] = resp.text()
                 except Exception: pass
+            if _interesting(resp.url):
+                try:
+                    extra_captures.append({"type": "resp", "url": resp.url, "body": resp.text()[:3000]})
+                except Exception:
+                    pass
         page.on("request", on_req)
         page.on("response", on_resp)
         page.goto(f"https://api.payglocal.com/gl/payflow-ui/?x-gl-token={xgl}",
@@ -68,14 +84,17 @@ def main():
         browser.close()
     out = {"cookies": {c["name"]: c["value"] for c in cookies}}
     if risk_fp_req.get("body"):
+        out["risk_fp_raw"] = risk_fp_req["body"]           # FULL raw body — decode every field
         try:
             body = json.loads(risk_fp_req["body"])
+            out["risk_fp_full"] = body                      # FULL parsed body
             out["visitorId"] = body.get("visitorId", "")
             out["requestId"] = body.get("requestId", "")
             out["visitorFound"] = body.get("visitorFound", "true")
             out["confidenceScore"] = body.get("confidenceScore", "1")
         except Exception:
             pass
+    out["extra_captures"] = extra_captures
     if dc_resp.get("body"):
         try: out["dc_resp"] = json.loads(dc_resp["body"])
         except Exception: out["dc_resp"] = dc_resp["body"][:500]
