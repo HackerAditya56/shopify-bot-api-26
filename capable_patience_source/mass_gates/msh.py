@@ -1392,44 +1392,65 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         session['charged'] += 1
         session['charged_cards'].append(card_result_data)
 
-        await asyncio.gather(
-            asyncio.to_thread(update_user_stats, user_id, True),
-            asyncio.to_thread(log_hit_to_mshh, user_id, user_obj.username, user_obj.first_name),
-            asyncio.to_thread(deduct_credits_atomic, user_id, 2),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(update_user_stats, user_id, True),
+                asyncio.to_thread(log_hit_to_mshh, user_id, user_obj.username, user_obj.first_name),
+                asyncio.to_thread(deduct_credits_atomic, user_id, 2),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            logging.warning(f"[MSH] stats update failed: {e}")
 
         if is_session_stopped(session_id):
             return
 
         if session.get('send_charged', True):
-            await send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
+            try:
+                await send_charged_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
+            except Exception as e:
+                logging.warning(f"[MSH] charged msg send failed: {e}")
 
     elif result_status == "APPROVED":
         session['approved'] += 1
         session['live_cards'].append(card_result_data)
 
-        await asyncio.gather(
-            asyncio.to_thread(update_user_stats, user_id, True),
-            asyncio.to_thread(deduct_credits_atomic, user_id, 1),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(update_user_stats, user_id, True),
+                asyncio.to_thread(deduct_credits_atomic, user_id, 1),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            logging.warning(f"[MSH] stats update failed: {e}")
 
         if is_session_stopped(session_id):
             return
 
         if session.get("send_approved", False):
-            await send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
+            try:
+                await send_approved_msg_to_user(bot, cc_formatted, response_msg, bin_data, proxy_status_formatted, api_price, user_obj, plan_name)
+            except Exception as e:
+                logging.warning(f"[MSH] approved msg send failed: {e}")
     elif result_status == "DEAD":
         session['dead'] += 1
         session['dead_cards'].append(card_result_data)
 
-        await asyncio.gather(
-            asyncio.to_thread(update_user_stats, user_id, False),
-            asyncio.to_thread(deduct_credits_atomic, user_id, 1),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(update_user_stats, user_id, False),
+                asyncio.to_thread(deduct_credits_atomic, user_id, 1),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            logging.warning(f"[MSH] stats update failed: {e}")
     elif result_status == "ERROR":
         session['errors'] += 1
         session['error_cards'].append(card_result_data)
-        await asyncio.to_thread(update_user_stats, user_id, False)
+        try:
+            await asyncio.to_thread(update_user_stats, user_id, False)
+        except Exception as e:
+            logging.warning(f"[MSH] error stats update failed: {e}")
 
     if is_session_stopped(session_id):
         return

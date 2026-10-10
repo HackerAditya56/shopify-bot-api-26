@@ -838,26 +838,37 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         session['charged'] += 1
         session['charged_cards'].append(card_result_data)
 
-        await asyncio.gather(
-            asyncio.to_thread(update_user_stats, user_id, True),
-            asyncio.to_thread(log_hit_to_mchk, user_id, user_obj.username, user_obj.first_name),
-            asyncio.to_thread(deduct_credits_atomic, user_id, 2),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(update_user_stats, user_id, True),
+                asyncio.to_thread(log_hit_to_mchk, user_id, user_obj.username, user_obj.first_name),
+                asyncio.to_thread(deduct_credits_atomic, user_id, 2),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            logging.warning(f"[MCHK] stats update failed: {e}")
 
         if is_session_stopped(session_id):
             return
 
         if session.get('send_charged', True):
-            await send_user_hit_notification(bot, session, cc_formatted, cc_num, response_msg, user_obj, plan_name, "CHARGED")
+            try:
+                await send_user_hit_notification(bot, session, cc_formatted, cc_num, response_msg, user_obj, plan_name, "CHARGED")
+            except Exception as e:
+                logging.warning(f"[MCHK] hit notify failed: {e}")
 
     elif result_status == "DECLINED":
         session['dead'] += 1
         session['dead_cards'].append(card_result_data)
 
-        await asyncio.gather(
-            asyncio.to_thread(update_user_stats, user_id, False),
-            asyncio.to_thread(deduct_credits_atomic, user_id, 1),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(update_user_stats, user_id, False),
+                asyncio.to_thread(deduct_credits_atomic, user_id, 1),
+                return_exceptions=True,
+            )
+        except Exception as e:
+            logging.warning(f"[MCHK] stats update failed: {e}")
 
     if is_session_stopped(session_id):
         return

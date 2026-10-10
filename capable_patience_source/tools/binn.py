@@ -11,6 +11,7 @@ import aiohttp
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramBadRequest
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PATH FIX (To import database from root folder)
@@ -25,6 +26,14 @@ from sub import get_premium_status
 
 # Initialize Router
 router = Router()
+
+
+async def _safe_reply(message: types.Message, *args, **kwargs):
+    """Reply to a message; fall back to a plain answer if it was deleted."""
+    try:
+        return await message.reply(*args, **kwargs)
+    except TelegramBadRequest:
+        return await message.answer(*args, **kwargs)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # HELPER: FETCH BIN FROM API DIRECTLY
@@ -95,7 +104,7 @@ async def binn_command(message: types.Message):
 
     # 2. Validate that we have some text
     if not raw_text:
-        await message.reply(
+        await _safe_reply(message, 
             "𝗘𝗿𝗿𝗼𝗿 ➠ <b>𝗠𝗶𝘀𝘀𝗶𝗻𝗴 𝗔𝗿𝗴𝘂𝗺𝗲𝗻𝘁❌</b>\n"
             "Usage: <code>/bin 456789</code>\n",
             parse_mode="HTML"
@@ -106,7 +115,7 @@ async def binn_command(message: types.Message):
     digits_only = re.sub(r'\D', '', raw_text)
 
     if len(digits_only) < 6:
-        await message.reply(
+        await _safe_reply(message, 
             "𝗘𝗿𝗿𝗼𝗿 ➠ <b>𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗜𝗻𝗽𝘂𝘁❌</b>\n"
             "Please provide at least 6 digits in the argument or replied message.",
             parse_mode="HTML"
@@ -126,7 +135,7 @@ async def binn_command(message: types.Message):
     if not is_premium:
         current_credits = await asyncio.to_thread(get_user_credits, user_id)
         if current_credits <= 0:
-            await message.reply(
+            await _safe_reply(message, 
                 "❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀!</b>\n\n"
                 "You have 0 credits left.",
                 parse_mode="HTML"
@@ -180,7 +189,7 @@ async def binn_command(message: types.Message):
         )
 
     # 9. Send Direct Reply
-    await message.reply(
+    await _safe_reply(message, 
         text=final_text,
         parse_mode="HTML",
         #reply_markup=button,

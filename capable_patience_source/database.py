@@ -15,7 +15,12 @@ DB_CONFIG = {
     "database": "wizard",
     "user": "wizxchk",
     "password": "wizx",   # 🔴 replace with your real password
-    "port": 5432
+    "port": 5432,
+    "connect_timeout": 10,
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -38,17 +43,45 @@ def _get_pool():
     return _pool
 
 
-def _get_raw_connection():
-    """Borrow a raw pooled connection (caller must return it via _release)."""
-    conn = _get_pool().getconn()
-    # Some modules (sub.py) set connection-level cursor_factory=RealDictCursor
-    # which persists on the shared pooled connection and breaks tuple-indexing
-    # callers (get_user_credits -> result[0]). Reset to a clean tuple cursor on
-    # every handoff so each borrower gets a predictable default.
+def _reset_cursor_factory(conn):
     try:
         conn.cursor_factory = None
     except Exception:
         pass
+
+
+def _get_raw_connection():
+    """Borrow a raw pooled connection (caller must return it via _release).
+
+    Some modules (sub.py) set connection-level cursor_factory=RealDictCursor
+    which persists on the shared pooled connection and breaks tuple-indexing
+    callers (get_user_credits -> result[0]). Reset to a clean tuple cursor on
+    every handoff so each borrower gets a predictable default.
+
+    Also health-checks the borrowed connection (SELECT 1) and swaps in a fresh
+    one when the old socket died (e.g. Postgres closed it after idle or the
+    server restarted) — this kills the "could not receive data from server:
+    Bad file descriptor" worker errors.
+    """
+    pool = _get_pool()
+    conn = pool.getconn()
+    _reset_cursor_factory(conn)
+    for _ in range(2):
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            return conn
+        except Exception:
+            try:
+                pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            try:
+                conn = pool.getconn()
+                _reset_cursor_factory(conn)
+            except Exception:
+                pass
     return conn
 
 
