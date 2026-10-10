@@ -14,7 +14,7 @@ from aiogram.filters.callback_data import CallbackData
 
 from database import get_user_credits, update_credits, update_user_stats
 from bin import get_bin_info
-from mass_gates._tg_helpers import send_hit, safe_reply
+from mass_gates._tg_helpers import send_hit, edit_message_safe, safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PREMIUM EMOJI IDs (same set as msh/mchk/mst mass gates)
@@ -403,22 +403,10 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             return
         is_running = session["status"] == "𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴..."
         reply_markup = get_result_buttons(prefix, session_id, session, is_running=is_running)
-        try:
-            await bot.edit_message_text(
-                chat_id=session["chat_id"],
-                message_id=session["msg_id"],
-                text=text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-            session["last_text"] = text
-            session["last_update_time"] = time.time()
-        except TelegramBadRequest as e:
-            err = str(e).lower()
-            if "message is not modified" not in err and "message to edit not found" not in err:
-                logging.error(f"[BATCH] progress edit error: {e}")
-        except Exception as e:
-            logging.error(f"[BATCH] progress edit error: {e}")
+        await edit_message_safe(bot, session["chat_id"], session["msg_id"], text,
+                                parse_mode="HTML", reply_markup=reply_markup)
+        session["last_text"] = text
+        session["last_update_time"] = time.time()
 
     async def worker(card):
         async with sem:

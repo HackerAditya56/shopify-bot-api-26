@@ -6,8 +6,8 @@ import time
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest
 
 # Global token bucket: ~25 msgs/sec (headroom under Telegram's ~30/s global limit).
-_G_RATE = 25.0
-_G_CAP = 25.0
+_G_RATE = 20.0
+_G_CAP = 20.0
 _g_state = {"tokens": _G_CAP, "ts": time.monotonic(), "lock": None}
 
 # Per-chat token bucket: ~1 msg/sec per chat (Telegram per-chat limit),
@@ -86,6 +86,24 @@ async def send_hit(bot, chat_id, caption, gif_url=None, parse_mode="HTML"):
                 break
     return await send_message_safe(bot, chat_id, caption, parse_mode=parse_mode,
                                    disable_web_page_preview=True)
+
+
+async def edit_message_safe(bot, chat_id, message_id, text, parse_mode="HTML", **kw):
+    """Rate-limited (global + per-chat), FloodWait-aware edit_message_text. Never raises."""
+    for _ in range(3):
+        await _throttle(chat_id)
+        try:
+            return await bot.edit_message_text(chat_id=chat_id, message_id=message_id,
+                                               text=text, parse_mode=parse_mode, **kw)
+        except TelegramRetryAfter as e:
+            logging.warning(f"[TG] FloodWait {e.retry_after}s — sleeping")
+            await asyncio.sleep(e.retry_after + 1)
+        except TelegramBadRequest:
+            return None   # "message not modified" / "not found" — nothing to edit
+        except Exception as e:
+            logging.warning(f"[TG] edit failed for {chat_id}: {e}")
+            return None
+    return None
 
 
 async def safe_reply(message, *args, **kwargs):

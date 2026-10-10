@@ -24,7 +24,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
-from mass_gates._tg_helpers import send_hit, send_message_safe, safe_reply
+from mass_gates._tg_helpers import send_hit, send_message_safe, safe_reply, edit_message_safe
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STRIPE AUTH IMPORT (Handles its own proxy internally)
@@ -631,22 +631,11 @@ async def update_progress_message(bot: Bot, session_id):
         is_running = session['status'] == "𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴..."
         reply_markup = get_result_buttons(session_id, is_running=is_running)
 
-        try:
-            await bot.edit_message_text(
-                chat_id=session['chat_id'],
-                message_id=session['msg_id'],
-                text=text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-                disable_web_page_preview=True
-            )
-            session['last_text'] = text
-            session['last_update_time'] = current_time
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e).lower() and "message to edit not found" not in str(e).lower():
-                logging.error(f"Error updating progress: {e}")
-        except Exception as e:
-            logging.error(f"Error updating progress: {e}")
+        await edit_message_safe(bot, session['chat_id'], session['msg_id'], text,
+                                parse_mode="HTML", reply_markup=reply_markup,
+                                disable_web_page_preview=True)
+        session['last_text'] = text
+        session['last_update_time'] = current_time
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CALLBACK HANDLERS
