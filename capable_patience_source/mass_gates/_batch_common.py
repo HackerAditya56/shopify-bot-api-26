@@ -14,7 +14,7 @@ from aiogram.filters.callback_data import CallbackData
 
 from database import get_user_credits, update_credits, update_user_stats
 from bin import get_bin_info
-from mass_gates._tg_helpers import send_hit
+from mass_gates._tg_helpers import send_hit, safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PREMIUM EMOJI IDs (same set as msh/mchk/mst mass gates)
@@ -88,7 +88,7 @@ async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, p
         "charged": True,
         "approved": False,
     }
-    msg = await message.reply(
+    msg = await safe_reply(message, 
         _selection_text(True, False, len(cards)),
         parse_mode="HTML",
         reply_markup=_selection_keyboard(sel_id, True, False),
@@ -380,7 +380,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
     # Send the initial progress message (with result + stop buttons)
     initial_text = build_progress_text(session_id, gateway, 0, total, 0, 0, 0, 0, "0s")
     initial_buttons = get_result_buttons(prefix, session_id, session, is_running=True)
-    proc_msg = await message.reply(initial_text, parse_mode="HTML", reply_markup=initial_buttons)
+    proc_msg = await safe_reply(message, initial_text, parse_mode="HTML", reply_markup=initial_buttons)
     session["msg_id"] = proc_msg.message_id
     session["chat_id"] = message.chat.id
 

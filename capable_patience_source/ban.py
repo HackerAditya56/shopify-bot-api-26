@@ -5,6 +5,7 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram import Router, types, BaseMiddleware
 from aiogram.filters import Command
 from database import DB_CONFIG, is_owner_user
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -77,21 +78,21 @@ def _unban_user_sync(user_id: int) -> bool:
 @router.message(Command("ban"))
 async def ban_command(message: types.Message):
     if not is_owner_user(message.from_user.id):
-        await message.reply("⛔ Admin only.")
+        await safe_reply(message, "⛔ Admin only.")
         return
 
     parts = message.text.split()
     if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
-        await message.reply("Usage: /ban [user_id]")
+        await safe_reply(message, "Usage: /ban [user_id]")
         return
 
     target_id = int(parts[1])
     if is_owner_user(target_id):
-        await message.reply("❌ Cannot ban the admin.")
+        await safe_reply(message, "❌ Cannot ban the admin.")
         return
 
     await asyncio.to_thread(_ban_user_sync, target_id)
-    await message.reply(
+    await safe_reply(message, 
         f"🚫 User <code>{target_id}</code> has been <b>banned</b>.",
         parse_mode="HTML"
     )
@@ -102,24 +103,24 @@ async def ban_command(message: types.Message):
 @router.message(Command("unban"))
 async def unban_command(message: types.Message):
     if not is_owner_user(message.from_user.id):
-        await message.reply("⛔ Admin only.")
+        await safe_reply(message, "⛔ Admin only.")
         return
 
     parts = message.text.split()
     if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
-        await message.reply("Usage: /unban [user_id]")
+        await safe_reply(message, "Usage: /unban [user_id]")
         return
 
     target_id = int(parts[1])
     removed = await asyncio.to_thread(_unban_user_sync, target_id)
 
     if removed:
-        await message.reply(
+        await safe_reply(message, 
             f"✅ User <code>{target_id}</code> has been <b>unbanned</b>.",
             parse_mode="HTML"
         )
     else:
-        await message.reply(
+        await safe_reply(message, 
             f"⚠️ User <code>{target_id}</code> is <b>not</b> in the ban list.",
             parse_mode="HTML"
         )

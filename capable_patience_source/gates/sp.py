@@ -22,6 +22,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
 from bin import get_bin_info
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -198,7 +199,7 @@ def build_user_link(user_obj) -> str:
 async def sp_command(message: types.Message):
     # ─── Gate check ─────────────────────────────────────────────────
     if not await asyncio.to_thread(is_gate_enabled, "sp"):
-        await message.reply(
+        await safe_reply(message, 
             "🚧 <b>𝗦𝗣 𝗚𝗮𝘁𝗲 𝗶𝘀 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>",
             parse_mode="HTML"
         )
@@ -216,7 +217,7 @@ async def sp_command(message: types.Message):
         elapsed = current_time - last
         if elapsed < 10:
             remaining = round(10 - elapsed, 1)
-            await message.reply(
+            await safe_reply(message, 
                 f"<tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝗔𝗰𝘁𝗶𝘃𝗲 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻 !</b>\n\n"
                 f"𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁 <code>{remaining}</code> 𝘀𝗲𝗰𝗼𝗻𝗱𝘀 𝗯𝗲𝗳𝗼𝗿𝗲 𝗰𝗼𝗻𝘁𝗶𝗻𝘂𝗶𝗻𝗴.\n\n"
                 f"<tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝗽𝗹𝗮𝗻 𝗳𝗼𝗿 𝘂𝘀𝗲 𝗰𝗼𝗺𝗺𝗮𝗻𝗱𝘀 𝘄𝗶𝘁𝗵𝗼𝘂𝘁 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻.",
@@ -228,7 +229,7 @@ async def sp_command(message: types.Message):
     # ─── Credit check ────────────────────────────────────────────────
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits is None or current_credits < 1:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             "You need at least <b>1 credit</b> to use this gate.\n"
             "Use /buy to get more.",
@@ -245,7 +246,7 @@ async def sp_command(message: types.Message):
         raw_text += " " + (replied.text or replied.caption or "")
 
     if not raw_text.strip():
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Usage:</b> /sp <code>cc|mm|yy|cvv</code>\n"
             "Or reply to a message containing card details.",
             parse_mode="HTML"
@@ -256,7 +257,7 @@ async def sp_command(message: types.Message):
     pattern = r'(\d{13,19})[\|/:\s]+(\d{1,2})[\|/:\s]+(\d{2,4})[\|/:\s]+(\d{3,4})'
     match = re.search(pattern, raw_text)
     if not match:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Card Format.</b>\n"
             "Please send as <code>4242424242424242|05|27|123</code>",
             parse_mode="HTML"
@@ -270,7 +271,7 @@ async def sp_command(message: types.Message):
 
     # ─── Luhn check ──────────────────────────────────────────────────
     if not luhn_check(cc):
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Card Number</b>\n"
             "Luhn check failed.",
             parse_mode="HTML"
@@ -280,7 +281,7 @@ async def sp_command(message: types.Message):
     # ─── Sites check ─────────────────────────────────────────────────
     sites = load_sites()
     if not sites:
-        await message.reply(
+        await safe_reply(message, 
             "❌ No sites found in <code>sites.txt</code>.",
             parse_mode="HTML"
         )
@@ -289,7 +290,7 @@ async def sp_command(message: types.Message):
     plan_name = await get_user_plan_name(user_id)
 
     escaped_card = escape(formatted_cc)
-    proc_msg = await message.reply(
+    proc_msg = await safe_reply(message, 
         f"<pre><code>𝙋𝙧𝙤𝙘𝙚𝙨𝙨𝙞𝙣𝙜⏳...</code></pre>\n"
         f"<pre><code>{escaped_card}</code></pre>\n"
         f"<b>𝙂𝙖𝙩𝙚𝙬𝙖𝙮 ➠ 𝙎𝙝𝙤𝙥𝙞𝙛𝙮 𝟬.𝟵𝟴$</b>\n",
@@ -443,7 +444,7 @@ async def process_sp_check(
             )
         except Exception as edit_err:
             logging.error(f"Error editing message: {edit_err}")
-            await message.reply(
+            await safe_reply(message, 
                 text=final_caption,
                 parse_mode="HTML",
                 disable_web_page_preview=True
@@ -458,7 +459,7 @@ async def process_sp_check(
                 disable_web_page_preview=True
             )
         except Exception:
-            await message.reply(
+            await safe_reply(message, 
                 text=final_caption,
                 parse_mode="HTML",
                 disable_web_page_preview=True

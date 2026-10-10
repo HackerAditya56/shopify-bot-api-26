@@ -86,3 +86,14 @@ async def send_hit(bot, chat_id, caption, gif_url=None, parse_mode="HTML"):
                 break
     return await send_message_safe(bot, chat_id, caption, parse_mode=parse_mode,
                                    disable_web_page_preview=True)
+
+
+async def safe_reply(message, *args, **kwargs):
+    """Reply to a message; fall back to a plain answer if it was deleted."""
+    try:
+        return await message.reply(*args, **kwargs)
+    except TelegramBadRequest:
+        try:
+            return await message.answer(*args, **kwargs)
+        except Exception:
+            return None

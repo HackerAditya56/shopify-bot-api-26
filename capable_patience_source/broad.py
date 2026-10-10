@@ -6,6 +6,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database import DB_CONFIG, is_owner_user
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -60,11 +61,11 @@ async def broad_command(message: types.Message):
     global _broadcast_running
 
     if not is_owner_user(message.from_user.id):
-        await message.reply("⛔ Admin only.")
+        await safe_reply(message, "⛔ Admin only.")
         return
 
     if not message.reply_to_message:
-        await message.reply(
+        await safe_reply(message, 
             "↩️ Reply to a message with <b>/broad</b> to broadcast it to all users.\n\n"
             "<i>The message is sent as a native bot message — no 'Forwarded from' header.</i>",
             parse_mode="HTML"
@@ -73,7 +74,7 @@ async def broad_command(message: types.Message):
 
     # ⚡ Guard: reject if a broadcast is already in progress
     if _broadcast_running:
-        await message.reply("⚠️ A broadcast is already in progress. Please wait for it to finish.")
+        await safe_reply(message, "⚠️ A broadcast is already in progress. Please wait for it to finish.")
         return
 
     _broadcast_running = True
@@ -83,7 +84,7 @@ async def broad_command(message: types.Message):
         target = message.reply_to_message
 
         # Initial status message
-        status_msg = await message.reply(
+        status_msg = await safe_reply(message, 
             _status_text(total, 0, 0, 0, 0),
             parse_mode="HTML"
         )

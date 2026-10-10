@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database import get_user_credits, update_credits, PooledConn
 from sub import get_premium_status
 from bin import get_bin_info
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -464,7 +465,7 @@ async def gen_command(message: types.Message):
         elapsed = current_time - user_last_command_time[user_id]
         if elapsed < cooldown:
             remaining_time = round(cooldown - elapsed, 1)
-            await message.reply(
+            await safe_reply(message, 
                 f"⚠️ <b>Slow Down!</b>\n"
                 f"Please wait <code>{remaining_time}</code> seconds.\n\n"
                 f"<i>Premium: {cooldown}s | FREE: 5s</i>",
@@ -476,7 +477,7 @@ async def gen_command(message: types.Message):
     
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Format!</b>\n\n"
             "📌 <b>Basic Usage:</b>\n"
             "<code>/gen 486732</code>\n\n"
@@ -503,7 +504,7 @@ async def gen_command(message: types.Message):
     try:
         bin_pattern, month, year, amount, cvv = parse_gen_input(input_text)
     except ValueError as e:
-        await message.reply(
+        await safe_reply(message, 
             f"⚠️ <b>Error: {str(e)}</b>",
             parse_mode="HTML"
         )
@@ -512,7 +513,7 @@ async def gen_command(message: types.Message):
     if amount < 1:
         amount = 1
     elif amount > 100000:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Maximum limit exceeded!</b>\n"
             "You can generate up to 100,000 cards per request.\n"
             f"Requested: {amount} cards",
@@ -522,7 +523,7 @@ async def gen_command(message: types.Message):
     
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits is None or current_credits <= 0:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Insufficient Credits!</b>\n\n"
             "You have 0 credits left.\n"
             "Use /buy to purchase more credits.",
@@ -537,7 +538,7 @@ async def gen_command(message: types.Message):
     else:
         processing_text = f"<pre>🃏 Generating {amount} cards with pattern {bin_pattern[:6]}...⏳</pre>"
     
-    proc_msg = await message.reply(processing_text, parse_mode="HTML")
+    proc_msg = await safe_reply(message, processing_text, parse_mode="HTML")
     
     asyncio.create_task(
         process_gen_enhanced(
@@ -610,7 +611,7 @@ async def process_gen_enhanced(message, proc_msg, user, user_id, bin_pattern, mo
         )
         
         if new_balance <= 10:
-            await message.reply(
+            await safe_reply(message, 
                 f"⚠️ <b>Low Credits Warning</b>\n"
                 f"You have <code>{new_balance}</code> credits remaining.\n"
                 f"Use /buy to recharge.",
@@ -649,7 +650,7 @@ async def process_gen_enhanced(message, proc_msg, user, user_id, bin_pattern, mo
             )
         except Exception as e:
             logger.error(f"[GEN] Error editing message: {e}")
-            await message.reply(
+            await safe_reply(message, 
                 text=final_caption,
                 parse_mode="HTML",
                 disable_web_page_preview=True,
@@ -657,7 +658,7 @@ async def process_gen_enhanced(message, proc_msg, user, user_id, bin_pattern, mo
             )
         
         if new_balance <= 10:
-            await message.reply(
+            await safe_reply(message, 
                 f"⚠️ <b>Low Credits Warning</b>\n"
                 f"You have <code>{new_balance}</code> credits remaining.\n"
                 f"Use /buy to recharge.",
@@ -704,4 +705,4 @@ async def genhelp_command(message: types.Message):
         "<code>/gen 544422885678xxxx|06|27|xxx|100</code>\n"
         "→ Generates 100 valid cards with random CVV"
     )
-    await message.reply(help_text, parse_mode="HTML", disable_web_page_preview=True)
+    await safe_reply(message, help_text, parse_mode="HTML", disable_web_page_preview=True)

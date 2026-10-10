@@ -25,7 +25,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
-from mass_gates._tg_helpers import send_hit, send_message_safe
+from mass_gates._tg_helpers import send_hit, send_message_safe, safe_reply
 from mass_gates.stripe import check_gate
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -900,7 +900,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
 @router.message(F.text.regexp(r"^/mst(?:$|\s|@)"))
 async def mst_command(message: types.Message):
     if not await asyncio.to_thread(is_gate_enabled, "mst"):
-        await message.reply("🚧 <b>𝗠𝗮𝘀𝘀 𝗖𝗵𝗲𝗰𝗸𝗲𝗿 𝗶𝘀 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
+        await safe_reply(message, "🚧 <b>𝗠𝗮𝘀𝘀 𝗖𝗵𝗲𝗰𝗸𝗲𝗿 𝗶𝘀 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
         return
 
     user = message.from_user
@@ -909,7 +909,7 @@ async def mst_command(message: types.Message):
 
     is_premium, _ = get_premium_status(user_id)
     if not is_premium:
-        await message.reply(
+        await safe_reply(message, 
             "💎𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.",
             parse_mode="HTML"
         )
@@ -922,7 +922,7 @@ async def mst_command(message: types.Message):
             break
 
     if is_checking:
-        await message.reply(
+        await safe_reply(message, 
             "⚠️ <b>𝗔𝗰𝘁𝗶𝘃𝗲 𝗦𝗲𝘀𝘀𝗶𝗼𝗻</b>\n\nUse the <b>🛑 Stop</b> button to stop it.",
             parse_mode="HTML"
         )
@@ -948,11 +948,11 @@ async def mst_command(message: types.Message):
         try:
             file_cards = await download_and_extract_chunked(bot, document)
         except Exception as e:
-            await message.reply(f"❌ Error reading file: {e}")
+            await safe_reply(message, f"❌ Error reading file: {e}")
             return
 
     if not raw_text.strip() and not file_cards:
-        await message.reply("❌ <b>No cards found.</b>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>No cards found.</b>", parse_mode="HTML")
         return
 
     extracted_cards = extract_cards_from_text(raw_text)
@@ -960,7 +960,7 @@ async def mst_command(message: types.Message):
         _seen = set(extracted_cards)
         extracted_cards.extend(c for c in file_cards if c not in _seen)
     if not extracted_cards:
-        await message.reply("❌ No valid card formats found.")
+        await safe_reply(message, "❌ No valid card formats found.")
         return
 
     valid_cards = []
@@ -975,13 +975,13 @@ async def mst_command(message: types.Message):
 
     total_cards = len(valid_cards)
     if total_cards == 0:
-        await message.reply("❌ No valid Luhn checked cards found.")
+        await safe_reply(message, "❌ No valid Luhn checked cards found.")
         return
 
     # ── Credit check: user must have at least 1 credit per card ──
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits < total_cards:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             f"You need <b>{total_cards}</b> credits to check <b>{total_cards}</b> cards.\n"
             f"Your balance: <b>{current_credits}</b> credits.\n\n"
@@ -1004,7 +1004,7 @@ async def mst_command(message: types.Message):
         "approved": False,
         "chat_id": message.chat.id,
     }
-    sel_msg = await message.reply(
+    sel_msg = await safe_reply(message, 
         _selection_text(True, False, total_cards),
         parse_mode="HTML",
         reply_markup=_selection_keyboard(sel_id, True, False),
@@ -1045,7 +1045,7 @@ async def _start_mst(callback: types.CallbackQuery, pending: dict):
     )
 
     initial_buttons = get_result_buttons(session_id, is_running=True)
-    progress_msg = await message.reply(initial_text, parse_mode="HTML", reply_markup=initial_buttons, disable_web_page_preview=True)
+    progress_msg = await safe_reply(message, initial_text, parse_mode="HTML", reply_markup=initial_buttons, disable_web_page_preview=True)
 
     MST_SESSIONS[session_id] = {
         "status": "𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴...",

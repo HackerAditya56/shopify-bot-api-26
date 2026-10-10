@@ -10,6 +10,8 @@ from aiogram.types import (
     InputMediaPhoto, InputMediaVideo, InputMediaAnimation, InputMediaDocument,
 )
 
+from mass_gates._tg_helpers import safe_reply
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -134,7 +136,7 @@ async def feedback_cmd(message: types.Message):
     Supports: single photo, video, GIF/animation, document, or a photo album (up to 7)."""
 
     if not message.reply_to_message:
-        await message.reply(
+        await safe_reply(message, 
             "<b><i>Usage ➠ Reply to your hit message with /fb</i></b>",
             parse_mode="HTML"
         )
@@ -144,7 +146,7 @@ async def feedback_cmd(message: types.Message):
     user    = message.from_user
 
     # ── Confirm to user INSTANTLY — no waiting ──────────────────────────────
-    asyncio.create_task(message.reply(
+    asyncio.create_task(safe_reply(message, 
         "━━━━━━━━━━━━━━━━\n"
         "<b><i>Feedback Submitted ✓</i></b>\n"
         "━━━━━━━━━━━━━━━━",

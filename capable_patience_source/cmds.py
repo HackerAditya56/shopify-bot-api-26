@@ -1,6 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from mass_gates._tg_helpers import safe_reply
 
 router = Router()
 
@@ -108,7 +109,7 @@ _CACHE: list[tuple[str, InlineKeyboardMarkup]] = [
 @router.message(Command("cmds"))
 async def cmds_command(message: types.Message):
     text, kb = _CACHE[0]
-    await message.reply(text=text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+    await safe_reply(message, text=text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
 
 @router.callback_query(F.data.startswith("cmds_page_"))
 async def cmds_page_callback(callback: types.CallbackQuery):

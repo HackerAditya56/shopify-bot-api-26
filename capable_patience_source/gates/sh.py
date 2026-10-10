@@ -24,6 +24,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
 from bin import get_bin_info
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -354,7 +355,7 @@ async def sh_command(message: types.Message):
     user_id = message.from_user.id
 
     if not await asyncio.to_thread(is_gate_enabled, "sh"):
-        await message.reply(
+        await safe_reply(message, 
             "🚧 <b>𝗦𝗶𝗻𝗴𝗹𝗲 𝗦𝗵𝗼𝗽𝗶𝗳𝘆 𝗶𝘀 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>",
             parse_mode="HTML"
         )
@@ -362,7 +363,7 @@ async def sh_command(message: types.Message):
 
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits is None or current_credits < 1:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             "You need at least <b>1 credit</b> to use this gate.",
             parse_mode="HTML"
@@ -371,7 +372,7 @@ async def sh_command(message: types.Message):
 
     sites = load_sites()
     if not sites:
-        await message.reply("❌ No sites found in <code>site.txt</code>.", parse_mode="HTML")
+        await safe_reply(message, "❌ No sites found in <code>site.txt</code>.", parse_mode="HTML")
         return
 
     # ─── Collect one card from command text, reply, or .txt file ─────
@@ -399,11 +400,11 @@ async def sh_command(message: types.Message):
                 data = byte_content.read() if hasattr(byte_content, "read") else byte_content
                 raw_text += data.decode("utf-8", errors="ignore")
         except Exception as e:
-            await message.reply(f"❌ Error reading file: {e}")
+            await safe_reply(message, f"❌ Error reading file: {e}")
             return
 
     if not raw_text.strip():
-        await message.reply(
+        await safe_reply(message, 
             "⚠️ <b>Usage:</b>\n"
             "<code>/sh cc|mm|yy|cvv</code>\n"
             "or send a card / reply to a card with <code>/sh</code>",
@@ -413,7 +414,7 @@ async def sh_command(message: types.Message):
 
     extracted = extract_cards(raw_text)
     if not extracted:
-        await message.reply("❌ No valid card found.")
+        await safe_reply(message, "❌ No valid card found.")
         return
 
     # ─── Validate and pick the first valid card ──────────────────────
@@ -431,10 +432,10 @@ async def sh_command(message: types.Message):
         break
 
     if not card:
-        await message.reply("❌ No valid (Luhn + expiry) card found.")
+        await safe_reply(message, "❌ No valid (Luhn + expiry) card found.")
         return
 
-    status_msg = await message.reply(
+    status_msg = await safe_reply(message, 
         f"<pre>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 𝗦𝗶𝗻𝗴𝗹𝗲 𝗖𝗮𝗿𝗱...</pre>\n"
         f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{card}</code>",
         parse_mode="HTML"
@@ -453,7 +454,7 @@ async def sh_command(message: types.Message):
     try:
         await status_msg.edit_text(text, parse_mode="HTML")
     except Exception:
-        await message.reply(text, parse_mode="HTML")
+        await safe_reply(message, text, parse_mode="HTML")
 
     # ─── Deduct 1 credit for a real response ─────────────────────────
     if res.get("resp", "").lower() != "dead / site error":
@@ -493,7 +494,7 @@ async def run_sh_check(
     total_cards = len(cards)
     #user_link = f"<a href='tg://user?id={user_id}'>{user_name}</a>"
 
-    status_msg = await message.reply(
+    status_msg = await safe_reply(message, 
         f"𝗧𝗼𝘁𝗮𝗹 𝗖𝗮𝗿𝗱𝘀 ➠ <code>{total_cards}</code>\n"
         f"𝗘𝗹𝗮𝗽𝘀𝗲𝗱 ➠ <code>0.0s</code>\n"
         #f"𝗨𝘀𝗲𝗿 ➠ {user_link}\n"

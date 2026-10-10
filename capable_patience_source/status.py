@@ -14,6 +14,7 @@ except ImportError:
     HAS_PSUTIL = False
 
 from database import is_owner_user
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -240,7 +241,7 @@ async def status_command(message: types.Message):
     """Handle /status command - displays VPS and bot status."""
     # Admin check
     if not is_owner_user(message.from_user.id):
-        await message.reply(
+        await safe_reply(message, 
             f"{BULLET_LINK} <tg-emoji emoji-id='5247149163132493357'>⛔️</tg-emoji> <b>Admin only command.</b>",
             parse_mode="HTML"
         )
@@ -254,7 +255,7 @@ async def status_command(message: types.Message):
         text, _ = await asyncio.to_thread(_collect_status)
         
         # Send the formatted message
-        await message.reply(
+        await safe_reply(message, 
             text,
             parse_mode="HTML",
             disable_web_page_preview=True
@@ -264,7 +265,7 @@ async def status_command(message: types.Message):
             f"{BULLET_LINK} <tg-emoji emoji-id='5893081007153746175'>❌</tg-emoji> <b>Failed to collect system status:</b>\n"
             f"{BULLET_LINK} <code>{str(e)}</code>"
         )
-        await message.reply(error_msg, parse_mode="HTML")
+        await safe_reply(message, error_msg, parse_mode="HTML")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

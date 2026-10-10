@@ -28,7 +28,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
-from mass_gates._tg_helpers import send_hit, send_message_safe
+from mass_gates._tg_helpers import send_hit, send_message_safe, safe_reply
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1665,7 +1665,7 @@ async def handle_selection_callback(callback: types.CallbackQuery, callback_data
 @router.message(F.text.startswith("/msh") | F.caption.startswith("/msh"))
 async def msh_command(message: types.Message):
     if not await asyncio.to_thread(is_gate_enabled, "msh"):
-        await message.reply("🚧 <b>𝗠𝗮𝘀𝘀 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
+        await safe_reply(message, "🚧 <b>𝗠𝗮𝘀𝘀 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
         return
 
     user = message.from_user
@@ -1674,7 +1674,7 @@ async def msh_command(message: types.Message):
 
     is_premium, _ = get_premium_status(user_id)
     if not is_premium:
-        await message.reply(
+        await safe_reply(message, 
             "💎𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.",
             parse_mode="HTML"
         )
@@ -1687,7 +1687,7 @@ async def msh_command(message: types.Message):
             break
 
     if is_checking:
-        await message.reply(
+        await safe_reply(message, 
             "⚠️ <b>𝗔𝗰𝘁𝗶𝘃𝗲 𝗦𝗲𝘀𝘀𝗶𝗼𝗻</b>\n\n"
             "You have a check running.\n"
             "Use the <b>🛑 Stop</b> button to stop it.",
@@ -1697,7 +1697,7 @@ async def msh_command(message: types.Message):
 
     user_proxies = await get_user_proxies(user_id)
     if not user_proxies:
-        await message.reply(
+        await safe_reply(message, 
             "⚠️ <b>𝗡𝗼 𝗣𝗿𝗼𝘅𝗶𝗲𝘀!</b>\n\n"
             "Proxies auto-load from <code>proxy.txt</code>. Ensure it has proxies.",
             parse_mode="HTML"
@@ -1731,11 +1731,11 @@ async def msh_command(message: types.Message):
         try:
             file_cards = await download_and_extract_chunked(bot, document)
         except Exception as e:
-            await message.reply(f"❌ Error reading file: {e}")
+            await safe_reply(message, f"❌ Error reading file: {e}")
             return
 
     if not raw_text.strip() and not file_cards:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>𝗡𝗼 𝗰𝗮𝗿𝗱𝘀 𝗳𝗼𝘂𝗻𝗱.</b>\n\n"
             "• <code>/msh cc|mm|yy|cvv</code>\n"
             "• Reply to cards with <code>/msh</code>\n"
@@ -1750,7 +1750,7 @@ async def msh_command(message: types.Message):
         _seen = set(extracted_cards)
         extracted_cards.extend(c for c in file_cards if c not in _seen)
     if not extracted_cards:
-        await message.reply("❌ No valid card formats found.")
+        await safe_reply(message, "❌ No valid card formats found.")
         return
 
     valid_cards = []
@@ -1775,13 +1775,13 @@ async def msh_command(message: types.Message):
         filter_info = ""
         if expired_count > 0 or invalid_luhn_count > 0:
             filter_info = f"Filtered {invalid_luhn_count} invalid & {expired_count} expired.\n"
-        await message.reply(f"{filter_info}❌ No valid cards to check.", parse_mode="HTML")
+        await safe_reply(message, f"{filter_info}❌ No valid cards to check.", parse_mode="HTML")
         return
 
     # ── Credit check: user must have at least 1 credit per card ──
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits < total_cards:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             f"You need <b>{total_cards}</b> credits to check <b>{total_cards}</b> cards.\n"
             f"Your balance: <b>{current_credits}</b> credits.\n\n"
@@ -1806,7 +1806,7 @@ async def msh_command(message: types.Message):
         "msg_id": None,
         "chat_id": message.chat.id,
     }
-    sel_msg = await message.reply(
+    sel_msg = await safe_reply(message, 
         _selection_text(True, False, total_cards),
         parse_mode="HTML",
         reply_markup=_selection_keyboard(sel_id, True, False),
@@ -1828,7 +1828,7 @@ async def process_mass_check_background(message: types.Message, bot: Bot, valid_
 
     total_cards = len(valid_cards)
     if total_cards == 0:
-        await message.reply("❌ No valid cards to check.", parse_mode="HTML")
+        await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
     session_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -1856,7 +1856,7 @@ async def process_mass_check_background(message: types.Message, bot: Bot, valid_
 
     initial_buttons = get_result_buttons(session_id, is_running=True)
 
-    progress_msg = await message.reply(initial_text, parse_mode="HTML", reply_markup=initial_buttons, disable_web_page_preview=True)
+    progress_msg = await safe_reply(message, initial_text, parse_mode="HTML", reply_markup=initial_buttons, disable_web_page_preview=True)
 
     MSH_SESSIONS[session_id] = {
         "session_id": session_id,

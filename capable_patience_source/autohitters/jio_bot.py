@@ -13,6 +13,7 @@ import aiohttp
 
 from database import get_user_credits, update_credits, is_owner_user
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 router = Router()
 
@@ -108,7 +109,7 @@ async def jio_command(message: types.Message):
 
     is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
     if not is_premium and not is_owner_user(user_id):
-        await message.reply(f"{_tg(E_DIAMOND, '💎')} <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
+        await safe_reply(message, f"{_tg(E_DIAMOND, '💎')} <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
         return
 
     args = message.text.split()[1:] if " " in message.text else []
@@ -139,20 +140,20 @@ async def jio_command(message: types.Message):
         cards = cards[:MAX_CARDS]
 
     if not re.fullmatch(r"\d{10}", number):
-        await message.reply(
+        await safe_reply(message, 
             f"{_tg(E_DECLINED, '❌')} <b>Usage:</b> <code>/jio &lt;number&gt; [amount]</code> + reply to cards (max 5).",
             parse_mode="HTML")
         return
     if not cards:
-        await message.reply(f"{_tg(E_DECLINED, '❌')} <b>No cards found.</b>", parse_mode="HTML")
+        await safe_reply(message, f"{_tg(E_DECLINED, '❌')} <b>No cards found.</b>", parse_mode="HTML")
         return
 
     proxies = _load_proxies()
     if not proxies:
-        await message.reply(f"{_tg(E_DECLINED, '❌')} <b>No proxies.</b>", parse_mode="HTML")
+        await safe_reply(message, f"{_tg(E_DECLINED, '❌')} <b>No proxies.</b>", parse_mode="HTML")
         return
 
-    proc = await message.reply(
+    proc = await safe_reply(message, 
         f"{_tg(E_LIGHTNING, '⚡')} <b>Jio Recharge checking…</b> {len(cards)} card(s) → <code>{number}</code> ₹{amount}",
         parse_mode="HTML")
 
@@ -166,7 +167,7 @@ async def jio_command(message: types.Message):
             results.append(r)
             # DM every card result individually (max 5 cards)
             try:
-                await message.reply(_format_result(r), parse_mode="HTML")
+                await safe_reply(message, _format_result(r), parse_mode="HTML")
             except Exception:
                 pass
 

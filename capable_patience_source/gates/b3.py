@@ -20,6 +20,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection, create_user
 from bin import get_bin_info
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION & URLS
@@ -146,7 +147,7 @@ def build_user_link(user_obj) -> str:
 @router.message(F.text.startswith("/b3"))
 async def b3_command(message: types.Message):
     if not is_gate_enabled("b3"):
-        await message.reply(
+        await safe_reply(message, 
             "🚧 <b>𝗕𝗿𝗮𝗶𝗻𝘁𝗿𝗲𝗲 𝗔𝘂𝘁𝗵 𝗶𝘀 𝘂𝗻𝗱𝗲𝗿 𝗺𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>\n"
             "𝗜𝘁 𝘄𝗶𝗹𝗹 𝗯𝗲 𝗯𝗮𝗰𝗸 𝘀𝗵𝗼𝗿𝘁𝗹𝘆 𝘄𝗶𝘁𝗵 𝗲𝘅𝗰𝗶𝘁𝗶𝗻𝗴 𝗶𝗺𝗽𝗿𝗼𝘃𝗲𝗺𝗲𝗻𝘁𝘀.⚙️",
             parse_mode="HTML"
@@ -164,7 +165,7 @@ async def b3_command(message: types.Message):
             elapsed = current_time - user_last_command_time[user_id]
             if elapsed < 10:
                 remaining_time = round(10 - elapsed, 1)
-                await message.reply(
+                await safe_reply(message, 
                     f"<tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝗔𝗰𝘁𝗶𝘃𝗲 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻 !</b>\n\n"
                     f"𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁 <code>{remaining_time}</code> 𝘀𝗲𝗰𝗼𝗻𝗱𝘀 𝗯𝗲𝗳𝗼𝗿𝗲 𝗰𝗼𝗻𝘁𝗶𝗻𝘂𝗶𝗻𝗴.\n\n"
                     f"<tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝗽𝗹𝗮𝗻 𝗳𝗼𝗿 𝘂𝘀𝗲 𝗰𝗼𝗺𝗺𝗮𝗻𝗱𝘀 𝘄𝗶𝘁𝗵𝗼𝘂𝘁 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻.",
@@ -183,7 +184,7 @@ async def b3_command(message: types.Message):
         raw_text = message.reply_to_message.text or message.reply_to_message.caption
         
     if not raw_text:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Usage:</b> /b3 <code>cc|mm|yy|cvv</code>\n"
             "Or reply to a message containing card details.",
             parse_mode="HTML"
@@ -194,7 +195,7 @@ async def b3_command(message: types.Message):
     match = re.search(pattern, raw_text)
 
     if not match:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Card Format.</b>\n"
             "Please provide CC as <code>4242424242424242|05|27|123</code>",
             parse_mode="HTML"
@@ -211,7 +212,7 @@ async def b3_command(message: types.Message):
     formatted_cc = f"{cc}|{mm}|{yy}|{cvv}"
 
     if not luhn_check(cc):
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Card</b>\n"
             "Your card number is incorrect.",
             parse_mode="HTML"
@@ -221,7 +222,7 @@ async def b3_command(message: types.Message):
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     
     if current_credits is None or current_credits < 1:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Insufficient Credits!</b>\n\n"
             "You need at least 1 credit to perform a check.",
             parse_mode="HTML"
@@ -231,7 +232,7 @@ async def b3_command(message: types.Message):
     plan_name = await get_user_plan_name(user_id)
 
     escaped_card = escape(formatted_cc)
-    proc_msg = await message.reply(
+    proc_msg = await safe_reply(message, 
         f"<pre><code>𝙋𝙧𝙤𝙘𝙚𝙨𝙨𝙞𝙣𝙜⏳...</code></pre>\n"
         f"<pre><code>{escaped_card}</code></pre>\n"
         f"<b>𝙂𝙖𝙩𝙚𝙬𝙖𝙮 ➠ 𝘽𝙧𝙖𝙞𝙣𝙩𝙧𝙚𝙚 𝘼𝙪𝙩𝙝</b>\n",
@@ -365,7 +366,7 @@ async def process_b3_check(message, proc_msg, user, user_id, formatted_cc, cc, p
             )
         except Exception as edit_err:
             logging.error(f"Error editing message: {edit_err}")
-            await message.reply(
+            await safe_reply(message, 
                 text=final_caption,
                 parse_mode="HTML",
                 disable_web_page_preview=True
@@ -379,7 +380,7 @@ async def process_b3_check(message, proc_msg, user, user_id, formatted_cc, cc, p
                 disable_web_page_preview=True
             )
         except Exception:
-            await message.reply(
+            await safe_reply(message, 
                 text=final_caption,
                 parse_mode="HTML",
                 disable_web_page_preview=True

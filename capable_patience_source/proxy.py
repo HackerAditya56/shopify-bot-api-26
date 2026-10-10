@@ -16,6 +16,7 @@ from aiogram.types import BufferedInputFile
 # LOCAL IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from database import get_db_connection
+from mass_gates._tg_helpers import safe_reply
 
 # Router for this module
 router = Router()
@@ -324,7 +325,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
     total_count = len(valid_proxies)
     
     # Send initial status message
-    status_msg = await message.reply(
+    status_msg = await safe_reply(message, 
         f"⏳ <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐢𝐧𝐠...</b>\n\n"
         f"<code>{total_count}</code> 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐭𝐨 𝐜𝐡𝐞𝐜𝐤\n"
         f"<b>𝐂𝐡𝐞𝐜𝐤𝐢𝐧𝐠</b> {min(MAX_CONCURRENT_CHECKS, total_count)} 𝐚𝐭 𝐚 𝐭𝐢𝐦𝐞...",
@@ -427,7 +428,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
         )
     except Exception:
         # If edit fails, send new message
-        await message.reply(caption, parse_mode="HTML")
+        await safe_reply(message, caption, parse_mode="HTML")
 
 
 async def check_db_proxies_background(bot, message: types.Message):
@@ -447,17 +448,17 @@ async def check_db_proxies_background(bot, message: types.Message):
         rows = await run_db_operation(fetch_proxies)
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await message.reply("<b>❌ 𝐃𝐁 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, "<b>❌ 𝐃𝐁 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
         return
 
     if not rows:
-        await message.reply("<b>📭 𝐍𝐨 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐬𝐚𝐯𝐞𝐝.</b>", parse_mode="HTML")
+        await safe_reply(message, "<b>📭 𝐍𝐨 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐬𝐚𝐯𝐞𝐝.</b>", parse_mode="HTML")
         return
 
     total_count = len(rows)
     
     # Send initial status message
-    status_msg = await message.reply(
+    status_msg = await safe_reply(message, 
         f"⏳ <b>𝐂𝐡𝐞𝐜𝐤𝐢𝐧𝐠...</b>\n\n"
         f"<code>{total_count}</code> 𝐬𝐚𝐯𝐞𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n"
         f"<i>𝐓𝐞𝐬𝐭𝐢𝐧𝐠 {min(MAX_CONCURRENT_CHECKS, total_count)} 𝐚𝐭 𝐚 𝐭𝐢𝐦𝐞...</i>",
@@ -533,7 +534,7 @@ async def check_db_proxies_background(bot, message: types.Message):
                 parse_mode="HTML"
             )
         except Exception:
-            await message.reply(caption, parse_mode="HTML")
+            await safe_reply(message, caption, parse_mode="HTML")
         return
 
     # Build .txt file content with http format
@@ -570,7 +571,7 @@ async def check_db_proxies_background(bot, message: types.Message):
         )
     except Exception as e:
         logging.error(f"File send error: {e}")
-        await message.reply(caption, parse_mode="HTML")
+        await safe_reply(message, caption, parse_mode="HTML")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -583,12 +584,12 @@ async def proxy_command(message: types.Message):
     valid_proxies, total_lines, error_msg = await extract_proxies_from_input(message)
     
     if error_msg:
-        await message.reply(error_msg, parse_mode="HTML")
+        await safe_reply(message, error_msg, parse_mode="HTML")
         return
     
     if not valid_proxies:
         if total_lines > 0:
-            await message.reply(
+            await safe_reply(message, 
                 f"<b>❌ 𝐍𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐟𝐨𝐮𝐧𝐝!</b>\n\n"
                 f"𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐞𝐝 {total_lines} 𝐥𝐢𝐧𝐞𝐬, 𝐛𝐮𝐭 𝐧𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐝𝐞𝐭𝐞𝐜𝐭𝐞𝐝.\n\n"
                 f"<i>𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐟𝐨𝐫𝐦𝐚𝐭𝐬:\n"
@@ -601,7 +602,7 @@ async def proxy_command(message: types.Message):
                 parse_mode="HTML"
             )
         else:
-            await message.reply(
+            await safe_reply(message, 
                 "<b>⚠️ 𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐔𝐬𝐚𝐠𝐞!</b>\n\n"
                 "𝐔𝐬𝐞: <code>/proxy &lt;proxy_data&gt;</code>\n"
                 "𝐎𝐫 𝐬𝐞𝐧𝐝 𝐚 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞 𝐰𝐢𝐭𝐡 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n"
@@ -660,10 +661,10 @@ async def clearproxy_command(message: types.Message):
             msg = f"<b>✅ 𝐒𝐮𝐜𝐜𝐞𝐬𝐬!</b>\n\n<b>𝐃𝐞𝐥𝐞𝐭𝐞𝐝 {count} 𝐩𝐫𝐨𝐱𝐢𝐞𝐬.</b>"
         else:
             msg = "<b>📭 𝐃𝐚𝐭𝐚𝐛𝐚𝐬𝐞 𝐢𝐬 𝐚𝐥𝐫𝐞𝐚𝐝𝐲 𝐞𝐦𝐩𝐭𝐲.</b>"
-        await message.reply(msg, parse_mode="HTML")
+        await safe_reply(message, msg, parse_mode="HTML")
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await message.reply("<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, "<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -698,7 +699,7 @@ async def myproxy_command(message: types.Message):
                 f"𝐘𝐨𝐮 𝐡𝐚𝐯𝐞𝐧'𝐭 𝐬𝐚𝐯𝐞𝐝 𝐚𝐧𝐲 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐲𝐞𝐭.\n\n"
                 f"𝐔𝐬𝐞 <code>/proxy</code> 𝐭𝐨 𝐚𝐝𝐝 𝐬𝐨𝐦𝐞!"
             )
-        await message.reply(msg, parse_mode="HTML")
+        await safe_reply(message, msg, parse_mode="HTML")
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await message.reply("<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, "<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")

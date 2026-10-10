@@ -15,6 +15,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import get_user_credits, update_credits, PooledConn
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 user_last_command_time = {}
 
@@ -521,7 +522,7 @@ async def gate_command(message: types.Message):
     user_id = user.id
     now = time.time()
     if user_id in user_last_command_time and now - user_last_command_time[user_id] < 5:
-        await message.reply(f"⚠️ <b>Slow down!</b> wait <code>{round(5 - (now - user_last_command_time[user_id]), 1)}</code>s", parse_mode="HTML")
+        await safe_reply(message, f"⚠️ <b>Slow down!</b> wait <code>{round(5 - (now - user_last_command_time[user_id]), 1)}</code>s", parse_mode="HTML")
         return
     user_last_command_time[user_id] = now
 
@@ -532,15 +533,15 @@ async def gate_command(message: types.Message):
         m = re.search(r'https?://[^\s]+', rt or "")
         url = m.group(0) if m else ""
     if not url:
-        await message.reply("❌ <b>Usage:</b> /gate <code>https://site.com</code>", parse_mode="HTML", disable_web_page_preview=True)
+        await safe_reply(message, "❌ <b>Usage:</b> /gate <code>https://site.com</code>", parse_mode="HTML", disable_web_page_preview=True)
         return
 
     credits = await asyncio.to_thread(get_user_credits, user_id)
     if credits is None or credits <= 0:
-        await message.reply("❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
         return
 
-    proc = await message.reply("🔍 <b>Scanning site…</b>", parse_mode="HTML")
+    proc = await safe_reply(message, "🔍 <b>Scanning site…</b>", parse_mode="HTML")
     asyncio.create_task(_finish_gate(message, proc, user, user_id, url))
 
 async def _finish_gate(message, proc, user, user_id, url):
@@ -553,7 +554,7 @@ async def _finish_gate(message, proc, user, user_id, url):
     try:
         await proc.edit_text(caption, parse_mode="HTML", disable_web_page_preview=True)
     except Exception as e:
-        await message.reply(caption, parse_mode="HTML", disable_web_page_preview=True)
+        await safe_reply(message, caption, parse_mode="HTML", disable_web_page_preview=True)
 
 async def gmass_command(message: types.Message):
     user = message.from_user
@@ -566,14 +567,14 @@ async def gmass_command(message: types.Message):
         rt = message.reply_to_message.text or message.reply_to_message.caption
         urls = [u for u in re.findall(r'https?://[^\s]+', rt or "")] if rt else []
     if not urls:
-        await message.reply("❌ <b>Usage:</b> /gmass <code>site1.com, site2.com, site3.com</code>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>Usage:</b> /gmass <code>site1.com, site2.com, site3.com</code>", parse_mode="HTML")
         return
     urls = urls[:10]
     credits = await asyncio.to_thread(get_user_credits, user_id)
     if credits is None or credits < len(urls):
-        await message.reply(f"❌ <b>Insufficient Credits!</b> need {len(urls)}", parse_mode="HTML")
+        await safe_reply(message, f"❌ <b>Insufficient Credits!</b> need {len(urls)}", parse_mode="HTML")
         return
-    proc = await message.reply(f"🔍 <b>Scanning {len(urls)} sites…</b>", parse_mode="HTML")
+    proc = await safe_reply(message, f"🔍 <b>Scanning {len(urls)} sites…</b>", parse_mode="HTML")
     asyncio.create_task(_finish_gmass(message, proc, user, user_id, urls))
 
 async def _finish_gmass(message, proc, user, user_id, urls):
@@ -591,7 +592,7 @@ async def _finish_gmass(message, proc, user, user_id, urls):
     try:
         await proc.edit_text(text[:4000], parse_mode="HTML", disable_web_page_preview=True)
     except Exception:
-        await message.reply(text[:4000], parse_mode="HTML", disable_web_page_preview=True)
+        await safe_reply(message, text[:4000], parse_mode="HTML", disable_web_page_preview=True)
 
 async def gatehelp_command(message: types.Message):
     help_text = (
@@ -612,4 +613,4 @@ async def gatehelp_command(message: types.Message):
         "<b>Cost:</b> 1 credit per site\n"
         "<b>Cooldown:</b> 5 seconds"
     )
-    await message.reply(help_text, parse_mode="HTML", disable_web_page_preview=True)
+    await safe_reply(message, help_text, parse_mode="HTML", disable_web_page_preview=True)

@@ -9,6 +9,7 @@ from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback, show_selection
 from gates.stripe import check_cc
+from mass_gates._tg_helpers import safe_reply
 
 router = Router()
 
@@ -61,7 +62,7 @@ def extract_cards(text):
 @router.message(F.text.startswith("/mstripe") | F.caption.startswith("/mstripe"))
 async def mstripe_command(message: types.Message):
     if not await asyncio.to_thread(is_gate_enabled, "mstripe"):
-        await message.reply("🚧 <b>𝗦𝘁𝗿𝗶𝗽𝗲 𝗠𝗮𝘀𝘀 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
+        await safe_reply(message, "🚧 <b>𝗦𝘁𝗿𝗶𝗽𝗲 𝗠𝗮𝘀𝘀 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")
         return
 
     user = message.from_user
@@ -69,7 +70,7 @@ async def mstripe_command(message: types.Message):
 
     is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
     if not is_premium:
-        await message.reply(
+        await safe_reply(message, 
             "💎 𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.",
             parse_mode="HTML"
         )
@@ -97,11 +98,11 @@ async def mstripe_command(message: types.Message):
             data = await message.bot.download_file(file_info.file_path)
             raw_text += data.read().decode('utf-8', errors='ignore')
         except Exception as e:
-            await message.reply(f"❌ Error reading file: {e}")
+            await safe_reply(message, f"❌ Error reading file: {e}")
             return
 
     if not raw_text.strip():
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>𝗡𝗼 𝗰𝗮𝗿𝗱𝘀 𝗳𝗼𝘂𝗻𝗱.</b>\n\n"
             "• <code>/mstripe cc|mm|yy|cvv</code>\n"
             "• Reply to cards with <code>/mstripe</code>\n"
@@ -120,13 +121,13 @@ async def mstripe_command(message: types.Message):
             break
 
     if not valid:
-        await message.reply("❌ No valid cards to check.", parse_mode="HTML")
+        await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
     total = len(valid)
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits < total:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             f"You need <b>{total}</b> credits to check <b>{total}</b> cards.\n"
             f"Your balance: <b>{current_credits}</b> credits.",

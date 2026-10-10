@@ -17,6 +17,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from database import get_user_credits, update_credits, PooledConn
 from sub import get_premium_status
+from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
@@ -200,7 +201,7 @@ async def fake_command(message: types.Message):
         elapsed = current_time - user_last_command_time[user_id]
         if elapsed < 3:
             remaining_time = round(3 - elapsed, 1)
-            await message.reply(
+            await safe_reply(message, 
                 f"⚠️ <b>Slow Down!</b>\n"
                 f"Please wait <code>{remaining_time}</code> seconds before continuing.",
                 parse_mode="HTML"
@@ -227,14 +228,14 @@ async def fake_command(message: types.Message):
             "<b>Cost:</b> 1 credit per generation\n"
             "<b>Cooldown:</b> 3 seconds"
         )
-        await message.reply(help_text, parse_mode="HTML")
+        await safe_reply(message, help_text, parse_mode="HTML")
         return
     
     country_code = parts[1].strip().lower()
     
     # Check if it's a valid country code
     if country_code not in SUPPORTED_LOCALES:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>Invalid country code!</b>\n"
             f"Use <code>/fakehelp</code> to see all supported countries.\n\n"
             f"<b>Example:</b> <code>/fake us</code>",
@@ -245,7 +246,7 @@ async def fake_command(message: types.Message):
     # Check Credits
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits is None or current_credits <= 0:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Insufficient Credits!</b>\n\n"
             "You have 0 credits left.\n"
             "Use /buy to purchase more credits.",
@@ -258,7 +259,7 @@ async def fake_command(message: types.Message):
     
     # Send Processing Message
     processing_text = "<pre>🆔 Generating Fake Identity…⏳</pre>"
-    proc_msg = await message.reply(processing_text, parse_mode="HTML")
+    proc_msg = await safe_reply(message, processing_text, parse_mode="HTML")
     
     # Execute Background Generation
     asyncio.create_task(
@@ -298,7 +299,7 @@ async def fakehelp_command(message: types.Message):
         "<b>Cost:</b> 1 credit per generation"
     )
     
-    await message.reply(help_text, parse_mode="HTML", disable_web_page_preview=True)
+    await safe_reply(message, help_text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def process_fake_generation(message, proc_msg, user, user_id, country_code, plan_name):
@@ -368,7 +369,7 @@ async def process_fake_generation(message, proc_msg, user, user_id, country_code
         )
     except Exception as e:
         logging.error(f"[FAKE] Error editing message: {e}")
-        await message.reply(
+        await safe_reply(message, 
             text=final_caption,
             parse_mode="HTML",
             disable_web_page_preview=True
@@ -394,7 +395,7 @@ async def qfake_command(message: types.Message):
         elapsed = current_time - user_last_command_time[user_id]
         if elapsed < 3:
             remaining_time = round(3 - elapsed, 1)
-            await message.reply(
+            await safe_reply(message, 
                 f"⚠️ <b>Slow Down!</b>\n"
                 f"Please wait <code>{remaining_time}</code> seconds.",
                 parse_mode="HTML"
@@ -407,7 +408,7 @@ async def qfake_command(message: types.Message):
     parts = message.text.split(maxsplit=1)
     
     if len(parts) < 2:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Usage:</b> /qfake &lt;country_code&gt;\n"
             "Example: <code>/qfake us</code>\n\n"
             "Use /fakehelp to see all supported countries",
@@ -418,7 +419,7 @@ async def qfake_command(message: types.Message):
     country_code = parts[1].strip().lower()
     
     if country_code not in SUPPORTED_LOCALES:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>Invalid country code!</b>\n"
             f"Use <code>/fakehelp</code> to see all supported countries.",
             parse_mode="HTML"
@@ -433,7 +434,7 @@ async def qfake_command(message: types.Message):
         identity = await asyncio.to_thread(generate_fake_identity, country_code)
     except Exception as e:
         logging.error(f"[FAKE] Quick generation error: {e}")
-        await message.reply("❌ Error generating fake identity.", parse_mode="HTML")
+        await safe_reply(message, "❌ Error generating fake identity.", parse_mode="HTML")
         return
     
     # Build Final Caption
@@ -465,4 +466,4 @@ async def qfake_command(message: types.Message):
         f"<i>𝐐𝐮𝐢𝐜𝐤 𝐦𝐨𝐝𝐞 - 𝐍𝐨 𝐜𝐫𝐞𝐝𝐢𝐭𝐬 𝐝𝐞𝐝𝐮𝐜𝐭𝐞𝐝</i>"
     )
     
-    await message.reply(final_caption, parse_mode="HTML", disable_web_page_preview=True)
+    await safe_reply(message, final_caption, parse_mode="HTML", disable_web_page_preview=True)

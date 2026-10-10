@@ -18,6 +18,7 @@ from aiogram.exceptions import TelegramBadRequest
 # LOCAL IMPORTS (DATABASE)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from database import get_user_credits, update_credits, create_user
+from mass_gates._tg_helpers import safe_reply
 
 # Initialize Router
 router = Router()
@@ -149,7 +150,7 @@ async def stco_command(message: types.Message):
 
     # 2. Validate URL
     if not url:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Invalid Format!</b>\n\n"
             "Usage: <code>/stco &lt;checkout_link&gt; &lt;card1&gt; &lt;card2&gt; ...</code>\n"
             "Or reply to a list of cards.",
@@ -176,14 +177,14 @@ async def stco_command(message: types.Message):
 
     # 4. Limits Check
     if len(valid_cards) > MAX_CARDS:
-        await message.reply(
+        await safe_reply(message, 
             f"❌ <b>Limit Exceeded!</b>\n\nMax allowed: {MAX_CARDS}",
             parse_mode="HTML"
         )
         return
 
     if not valid_cards:
-        await message.reply("⚠️ No valid cards found.", parse_mode="HTML")
+        await safe_reply(message, "⚠️ No valid cards found.", parse_mode="HTML")
         return
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -198,7 +199,7 @@ async def stco_command(message: types.Message):
         current_credits = await asyncio.to_thread(get_user_credits, user_id)
 
         if current_credits is None or current_credits < 1:
-            await message.reply(
+            await safe_reply(message, 
                 "❌ <b>Insufficient Credits!</b>\n\n"
                 "You need at least 1 credit to use this command.\n"
                 "Contact admin to top up.",
@@ -215,7 +216,7 @@ async def stco_command(message: types.Message):
 
     except Exception as e:
         logger.error(f"Failed to process credits for user {user_id}: {e}")
-        await message.reply("⚠️ <b>Database Error.</b>\nCould not verify credits. Please try again.", parse_mode="HTML")
+        await safe_reply(message, "⚠️ <b>Database Error.</b>\nCould not verify credits. Please try again.", parse_mode="HTML")
         return
 
     # 5. Start Async Task (Non-blocking)
@@ -235,7 +236,7 @@ async def run_stco_check(message: types.Message, url: str, cards: List[str], use
     bot = message.bot
 
     # Initial Status Message — sent as a reply to the user's command
-    status_msg = await message.reply(
+    status_msg = await safe_reply(message, 
         f"𝗧𝗼𝘁𝗮𝗹 𝗖𝗮𝗿𝗱𝘀 ➠ <code>{total_cards}</code>\n"
         f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ <code>StripeAutoHitX</code>\n"
         f"𝗧𝗶𝗺𝗲 ➠ <code>0.0s</code>\n"

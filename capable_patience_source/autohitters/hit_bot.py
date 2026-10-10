@@ -83,13 +83,13 @@ async def hit_command(message: types.Message):
     user_id = user.id
     now = time.time()
     if user_id in user_last_command_time and now - user_last_command_time[user_id] < 5:
-        await message.reply("⚠️ <b>Slow down!</b>", parse_mode="HTML")
+        await safe_reply(message, "⚠️ <b>Slow down!</b>", parse_mode="HTML")
         return
     user_last_command_time[user_id] = now
 
     is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
     if not is_premium:
-        await message.reply("💎 <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
+        await safe_reply(message, "💎 <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
         return
 
     parts = message.text.split()[1:] if " " in message.text else []
@@ -103,7 +103,7 @@ async def hit_command(message: types.Message):
         raw_cards.extend(rt.split("\n"))
 
     if not url:
-        await message.reply(
+        await safe_reply(message, 
             "❌ <b>Usage:</b> /co <code>&lt;checkout_url&gt; &lt;card&gt; ...</code>\n"
             "or reply to a list of cards.",
             parse_mode="HTML"
@@ -122,16 +122,16 @@ async def hit_command(message: types.Message):
             if f not in seen:
                 seen.add(f); cards.append(f)
     if not cards:
-        await message.reply("⚠️ No valid cards found.", parse_mode="HTML")
+        await safe_reply(message, "⚠️ No valid cards found.", parse_mode="HTML")
         return
     cards = cards[:MAX_CARDS]
 
     credits = await asyncio.to_thread(get_user_credits, user_id)
     if credits is None or credits < 1:
-        await message.reply("❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
         return
 
-    proc = await message.reply(f"{_tg(E_LIGHTNING, '⚡')} <b>Hitter starting…</b> ({len(cards)} cards)", parse_mode="HTML")
+    proc = await safe_reply(message, f"{_tg(E_LIGHTNING, '⚡')} <b>Hitter starting…</b> ({len(cards)} cards)", parse_mode="HTML")
     asyncio.create_task(_run_hit(message, proc, user_id, url, cards))
 
 
@@ -168,7 +168,7 @@ async def _run_hit(message, proc, user_id, url, cards):
     try:
         await proc.edit_text(final, parse_mode="HTML", disable_web_page_preview=True)
     except Exception:
-        await message.reply(final, parse_mode="HTML", disable_web_page_preview=True)
+        await safe_reply(message, final, parse_mode="HTML", disable_web_page_preview=True)
 
 
 def _build_final(results, meta, elapsed):
@@ -232,6 +232,7 @@ async def _update_proc(proc, results, total):
 # /whop — Whop checkout (Basis Theory -> Whop -> Stripe), via whop.worker.js for 3DS
 # ---------------------------------------------------------------------------
 from autohitters.whop import run_whop_check
+from mass_gates._tg_helpers import safe_reply
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -243,13 +244,13 @@ async def whop_command(message: types.Message):
     user_id = user.id
     now = time.time()
     if user_id in user_last_command_time and now - user_last_command_time[user_id] < 5:
-        await message.reply("⚠️ <b>Slow down!</b>", parse_mode="HTML")
+        await safe_reply(message, "⚠️ <b>Slow down!</b>", parse_mode="HTML")
         return
     user_last_command_time[user_id] = now
 
     is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
     if not is_premium:
-        await message.reply("💎 <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
+        await safe_reply(message, "💎 <b>Premium only.</b> Use /plan to upgrade.", parse_mode="HTML")
         return
 
     parts = message.text.split()[1:] if " " in message.text else []
@@ -263,7 +264,7 @@ async def whop_command(message: types.Message):
         raw_cards.extend(rt.split("\n"))
 
     if not url:
-        await message.reply("❌ <b>Usage:</b> /whop <code>&lt;whop_url&gt; &lt;card&gt; ...</code>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>Usage:</b> /whop <code>&lt;whop_url&gt; &lt;card&gt; ...</code>", parse_mode="HTML")
         return
 
     pat = re.compile(r'(\d{13,19})[\|/:\s]+(\d{1,2})[\|/:\s]+(\d{2,4})[\|/:\s]+(\d{3,4})')
@@ -278,16 +279,16 @@ async def whop_command(message: types.Message):
             if f not in seen:
                 seen.add(f); cards.append(f)
     if not cards:
-        await message.reply("⚠️ No valid cards found.", parse_mode="HTML")
+        await safe_reply(message, "⚠️ No valid cards found.", parse_mode="HTML")
         return
     cards = cards[:MAX_CARDS]
 
     credits = await asyncio.to_thread(get_user_credits, user_id)
     if credits is None or credits < 1:
-        await message.reply("❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
+        await safe_reply(message, "❌ <b>Insufficient Credits!</b>", parse_mode="HTML")
         return
 
-    proc = await message.reply(f"{_tg(E_LIGHTNING, '⚡')} <b>Whop Hitter starting…</b> ({len(cards)} cards)", parse_mode="HTML")
+    proc = await safe_reply(message, f"{_tg(E_LIGHTNING, '⚡')} <b>Whop Hitter starting…</b> ({len(cards)} cards)", parse_mode="HTML")
     asyncio.create_task(_run_whop_hit(message, proc, user_id, url, cards))
 
 
@@ -319,7 +320,7 @@ async def _run_whop_hit(message, proc, user_id, url, cards):
     try:
         await proc.edit_text(final, parse_mode="HTML", disable_web_page_preview=True)
     except Exception:
-        await message.reply(final, parse_mode="HTML", disable_web_page_preview=True)
+        await safe_reply(message, final, parse_mode="HTML", disable_web_page_preview=True)
 
 
 def _build_whop_final(results, meta, elapsed):

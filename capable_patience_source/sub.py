@@ -12,6 +12,7 @@ import io
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from aiogram import types, F, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+from mass_gates._tg_helpers import safe_reply
 
 router = Router()
 
@@ -444,7 +445,7 @@ _PLAN_TEXT = (
 @router.message(F.text.startswith("/plan"))
 async def plan_command(message: types.Message):
     """Replies directly to the user's /plan command with the pricing chart."""
-    await message.reply(text=_PLAN_TEXT, parse_mode="HTML", #reply_markup=_PLAN_KB
+    await safe_reply(message, text=_PLAN_TEXT, parse_mode="HTML", #reply_markup=_PLAN_KB
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -455,12 +456,12 @@ async def plan_command(message: types.Message):
 async def sub_command(message: types.Message):
     user = message.from_user
     if not is_owner_user(user.id):
-        await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
+        await safe_reply(message, "❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
         return
 
     args = message.text.split()[1:]
     if len(args) < 2:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /sub {user_id/username} {plan}\nPlans: swift, turbo, nitro, apex, owner\nExample: /sub 123456 apex")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /sub {user_id/username} {plan}\nPlans: swift, turbo, nitro, apex, owner\nExample: /sub 123456 apex")
         return
 
     target_input, plan = args[0], args[1].lower()
@@ -473,13 +474,13 @@ async def sub_command(message: types.Message):
         "owner":  ("Owner 👑",   365, 999999, 0),  # Owner plan with 0 price (free for admin use)
     }
     if plan not in plan_map:
-        await message.reply("❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗽𝗹𝗮𝗻. 𝗣𝗹𝗮𝗻𝘀: <b>Swift</b>, <b>Turbo</b>, <b>Nitro</b>, <b>Apex</b>, <b>Owner</b>", parse_mode="HTML")
+        await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗽𝗹𝗮𝗻. 𝗣𝗹𝗮𝗻𝘀: <b>Swift</b>, <b>Turbo</b>, <b>Nitro</b>, <b>Apex</b>, <b>Owner</b>", parse_mode="HTML")
         return
 
     # Resolve target ID in thread
     target_id = await asyncio.to_thread(_resolve_user_id_sync, target_input)
     if not target_id:
-        await message.reply("❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
+        await safe_reply(message, "❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
         return
 
     plan_name, days, credits, amount = plan_map[plan]
@@ -499,7 +500,7 @@ async def sub_command(message: types.Message):
         receipt_id = await asyncio.to_thread(_sub_db_sync, target_id, display_name, plan_name, days, credits, amount)
     except Exception as e:
         logging.error(f"Error updating subscription: {e}")
-        await message.reply("❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
+        await safe_reply(message, "❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
         return
 
     # "owner" plan -> flag the target as owner (unlimited credits + bypass premium gate)
@@ -555,7 +556,7 @@ async def sub_command(message: types.Message):
             logging.error(f"Could not DM user {target_id}: {e}")
 
     async def _reply():
-        await message.reply(f"✅ Premium granted to {target_id} for {days} days with {credits:,} credits.")
+        await safe_reply(message, f"✅ Premium granted to {target_id} for {days} days with {credits:,} credits.")
 
     await asyncio.gather(
         _dm_user(),
@@ -571,12 +572,12 @@ async def sub_command(message: types.Message):
 async def adcr_command(message: types.Message):
     user = message.from_user
     if not is_owner_user(user.id):
-        await message.reply("❌ 𝐘𝐨𝐮 𝐚𝐫𝐞 𝐧𝐨𝐭 𝐚𝐮𝐭𝐡𝐨𝐫𝐢𝐬𝐞𝐝.")
+        await safe_reply(message, "❌ 𝐘𝐨𝐮 𝐚𝐫𝐞 𝐧𝐨𝐭 𝐚𝐮𝐭𝐡𝐨𝐫𝐢𝐬𝐞𝐝.")
         return
 
     args = message.text.split()[1:]
     if len(args) < 2:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /adcr {user_id} {amount}\nExample: /adcr 123456789 5000")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /adcr {user_id} {amount}\nExample: /adcr 123456789 5000")
         return
 
     target_input, amount_input = args[0], args[1]
@@ -584,15 +585,15 @@ async def adcr_command(message: types.Message):
     try:
         add_credits = int(amount_input)
         if add_credits <= 0:
-            await message.reply("❌ 𝗔𝗺𝗼𝘂𝗻𝘁 𝗺𝘂𝘀𝘁 𝗯𝗲 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.")
+            await safe_reply(message, "❌ 𝗔𝗺𝗼𝘂𝗻𝘁 𝗺𝘂𝘀𝘁 𝗯𝗲 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.")
             return
     except ValueError:
-        await message.reply("❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝗻𝘂𝗺𝗯𝗲𝗿.")
+        await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝗻𝘂𝗺𝗯𝗲𝗿.")
         return
 
     target_id = await asyncio.to_thread(_resolve_user_id_sync, target_input)
     if not target_id:
-        await message.reply("❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
+        await safe_reply(message, "❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
         return
 
     display_name = "User"
@@ -606,7 +607,7 @@ async def adcr_command(message: types.Message):
         new_total = await asyncio.to_thread(_adcr_db_sync, target_id, display_name, add_credits)
     except Exception as e:
         logging.error(f"Error adding credits: {e}")
-        await message.reply("❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
+        await safe_reply(message, "❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
         return
 
     user_link = f'<a href="tg://user?id={target_id}">{display_name}</a>'
@@ -628,7 +629,7 @@ async def adcr_command(message: types.Message):
             logging.error(f"Could not DM user {target_id}: {e}")
 
     async def _reply():
-        await message.reply(
+        await safe_reply(message, 
             f"✅ Added <b>{add_credits:,}</b> credits to {user_link}.\n"
             f"𝐍𝐞𝐰 𝐓𝐨𝐭𝐚𝐥 ➠ <b>{new_total:,}</b>",
             parse_mode="HTML"
@@ -647,28 +648,28 @@ async def adcr_command(message: types.Message):
 async def rsub_command(message: types.Message):
     user = message.from_user
     if not is_owner_user(user.id):
-        await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
+        await safe_reply(message, "❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀.")
         return
 
     args = message.text.split()[1:]
     if not args:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /rsub {user_id/username}")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /rsub {user_id/username}")
         return
 
     target_id = await asyncio.to_thread(_resolve_user_id_sync, args[0])
     if not target_id:
-        await message.reply("❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
+        await safe_reply(message, "❌ 𝗖𝗼𝘂𝗹𝗱 𝗻𝗼𝘁 𝗳𝗶𝗻𝗱 𝘂𝘀𝗲𝗿 𝗶𝗻 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲.")
         return
 
     try:
         user_details = await asyncio.to_thread(_rsub_db_sync, target_id)
     except Exception as e:
         logging.error(f"Error removing subscription: {e}")
-        await message.reply("❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
+        await safe_reply(message, "❌ 𝗗𝗮𝘁𝗮𝗯𝗮𝘀𝗲 𝗘𝗿𝗿𝗼𝗿.")
         return
 
     if not user_details:
-        await message.reply(f"✅ Premium removed from {target_id} and credits reset to 150.")
+        await safe_reply(message, f"✅ Premium removed from {target_id} and credits reset to 150.")
         return
 
     display_name = "User"
@@ -701,7 +702,7 @@ async def rsub_command(message: types.Message):
             logging.error(f"Could not DM user {target_id}: {e}")
 
     async def _reply():
-        await message.reply(f"✅ Premium removed from {target_id} and credits reset to 150.")
+        await safe_reply(message, f"✅ Premium removed from {target_id} and credits reset to 150.")
 
     await asyncio.gather(
         _dm_user(),
@@ -716,19 +717,19 @@ async def rsub_command(message: types.Message):
 async def rc_command(message: types.Message):
     user = message.from_user
     if not is_owner_user(user.id):
-        await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
+        await safe_reply(message, "❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
         return
 
     args = message.text.split()[1:]
     if not args:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /rc {receipt_id}")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /rc {receipt_id}")
         return
 
     receipt_id = args[0]
     row = await asyncio.to_thread(_rc_db_sync, receipt_id)
 
     if not row:
-        await message.reply("❌ 𝗥𝗲𝗰𝗲𝗶𝗽𝘁 𝗜𝗗 𝗻𝗼𝘁 𝗳𝗼𝘂𝗻𝗱.")
+        await safe_reply(message, "❌ 𝗥𝗲𝗰𝗲𝗶𝗽𝘁 𝗜𝗗 𝗻𝗼𝘁 𝗳𝗼𝘂𝗻𝗱.")
         return
 
     uid = row['user_id']
@@ -760,7 +761,7 @@ async def rc_command(message: types.Message):
     #keyboard = InlineKeyboardMarkup(inline_keyboard=[
         #[InlineKeyboardButton(text="𝑪𝑨𝑹𝑫 ✘ 𝑪𝑯𝑲", url="https://t.me/CARDXV4_BOT")]
     #])
-    await message.reply(text, parse_mode="HTML", #reply_markup=keyboard
+    await safe_reply(message, text, parse_mode="HTML", #reply_markup=keyboard
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -813,7 +814,7 @@ async def info_command(message: types.Message):
     #keyboard = InlineKeyboardMarkup(inline_keyboard=[
         #[InlineKeyboardButton(text="𝑪𝑨𝑹𝑫 ✘ 𝑪𝑯𝑲", url="https://t.me/CARDXV4_BOT")]
     #])
-    await message.reply(text, parse_mode="HTML", #reply_markup=keyboard
+    await safe_reply(message, text, parse_mode="HTML", #reply_markup=keyboard
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -829,7 +830,7 @@ async def suball_command(message: types.Message):
     rows = await asyncio.to_thread(_suball_db_sync)
 
     if not rows:
-        await message.reply("𝗡𝗼 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝘂𝘀𝗲𝗿𝘀 𝗳𝗼𝘂𝗻𝗱.")
+        await safe_reply(message, "𝗡𝗼 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝘂𝘀𝗲𝗿𝘀 𝗳𝗼𝘂𝗻𝗱.")
         return
 
     output = io.BytesIO()
@@ -858,18 +859,18 @@ async def suball_command(message: types.Message):
 async def g_code_command(message: types.Message):
     user = message.from_user
     if not is_owner_user(user.id):
-        await message.reply("❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
+        await safe_reply(message, "❌ 𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.")
         return
 
     args = message.text.split()[1:]
     if not args:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /g_code {amount}")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /g_code {amount}")
         return
 
     try:
         amount = int(args[0])
     except ValueError:
-        await message.reply("❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁.")
+        await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁.")
         return
 
     generated_codes = await asyncio.to_thread(_g_code_db_sync, amount)
@@ -880,7 +881,7 @@ async def g_code_command(message: types.Message):
         f"{formatted_codes}\n\n"
         f"𝗨𝘀𝗲 /claim 𝘁𝗼 𝗴𝗲𝘁 𝘆𝗼𝘂𝗿 𝗰𝗿𝗲𝗱𝗶𝘁𝘀."
     )
-    await message.reply(response, parse_mode="HTML")
+    await safe_reply(message, response, parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # COMMAND: /claim
@@ -893,19 +894,19 @@ async def claim_command(message: types.Message):
 
     args = message.text.split()[1:]
     if not args:
-        await message.reply("❌ 𝗨𝘀𝗮𝗴𝗲: /claim {code}")
+        await safe_reply(message, "❌ 𝗨𝘀𝗮𝗴𝗲: /claim {code}")
         return
 
     code = args[0].upper()
     status, credits_added = await asyncio.to_thread(_claim_db_sync, user_id, code)
 
     if status == "invalid":
-        await message.reply("❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗖𝗼𝗱𝗲.")
+        await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗖𝗼𝗱𝗲.")
     elif status == "claimed":
-        await message.reply("❌ 𝗧𝗵𝗶𝘀 𝗰𝗼𝗱𝗲 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗮𝗶𝗺𝗲𝗱.")
+        await safe_reply(message, "❌ 𝗧𝗵𝗶𝘀 𝗰𝗼𝗱𝗲 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗰𝗹𝗮𝗶𝗺𝗲𝗱.")
     elif status == "premium":
-        await message.reply("❌ 𝗨𝘀𝗲𝗿𝘀 𝘄𝗶𝘁𝗵 𝗮𝗻 𝗮𝗰𝘁𝗶𝘃𝗲 𝗽𝗹𝗮𝗻 𝗰𝗮𝗻𝗻𝗼𝘁 𝗿𝗲𝗱𝗲𝗲𝗺 𝗰𝗼𝗱𝗲𝘀.")
+        await safe_reply(message, "❌ 𝗨𝘀𝗲𝗿𝘀 𝘄𝗶𝘁𝗵 𝗮𝗻 𝗮𝗰𝘁𝗶𝘃𝗲 𝗽𝗹𝗮𝗻 𝗰𝗮𝗻𝗻𝗼𝘁 𝗿𝗲𝗱𝗲𝗲𝗺 𝗰𝗼𝗱𝗲𝘀.")
     elif status == "ok":
-        await message.reply(f"✅ 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗖𝗹𝗮𝗶𝗺𝗲𝗱 {credits_added} 𝗰𝗿𝗲𝗱𝗶𝘁𝘀!")
+        await safe_reply(message, f"✅ 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗖𝗹𝗮𝗶𝗺𝗲𝗱 {credits_added} 𝗰𝗿𝗲𝗱𝗶𝘁𝘀!")
     else:
-        await message.reply("❌ 𝗘𝗿𝗿𝗼𝗿 𝗖𝗹𝗮𝗶𝗺𝗶𝗻𝗴 𝗰𝗼𝗱𝗲. 𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝘀𝘂𝗽𝗽𝗼𝗿𝘁.")
+        await safe_reply(message, "❌ 𝗘𝗿𝗿𝗼𝗿 𝗖𝗹𝗮𝗶𝗺𝗶𝗻𝗴 𝗰𝗼𝗱𝗲. 𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝘀𝘂𝗽𝗽𝗼𝗿𝘁.")
