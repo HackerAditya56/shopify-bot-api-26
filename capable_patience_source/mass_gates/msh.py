@@ -1455,7 +1455,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
     if is_session_stopped(session_id):
         return
 
-    if session['checked'] % 30 == 0 or session['checked'] == session['total']:
+    if session['checked'] % 3 == 0 or session['checked'] == session['total']:
         await update_progress_message(bot, session_id)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

