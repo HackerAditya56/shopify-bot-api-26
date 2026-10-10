@@ -17,6 +17,28 @@ def parse_proxy(proxy):
         return {"server": f"http://{h}:{port}", "username": u, "password": pw}
     return {"server": f"http://{parts[0]}:{parts[1]}"}
 
+
+def _find_chromium():
+    """Return the path to an installed chromium binary (any revision)."""
+    import os, glob
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            ep = p.chromium.executable_path
+            if ep and os.path.exists(ep):
+                return ep
+    except Exception:
+        pass
+    for pat in (
+        os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome"),
+        os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell"),
+        os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux/chrome"),
+    ):
+        hits = sorted(glob.glob(pat))
+        if hits:
+            return hits[-1]
+    return None
+
 STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 window.chrome = window.chrome || { runtime: {} };
@@ -101,6 +123,7 @@ def main():
     risk_fp_req = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, proxy=proxy_cfg,
+            executable_path=_find_chromium(),
             args=["--disable-blink-features=AutomationControlled"])
         ctx = browser.new_context(viewport={"width":1920,"height":1080},
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
