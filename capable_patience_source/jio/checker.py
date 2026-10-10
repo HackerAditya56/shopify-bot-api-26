@@ -137,6 +137,20 @@ class RechargeChecker:
         }
         invoke = jc.on_ccdc_confirmation(token, invoke_url, {**card_info, "cvv": card["cvv"]})
         html = invoke.get("htmlForm", "")
+        if not html:
+            # Card declined/blocked at the JioPG (CCDC) step, or an error —
+            # surface the REAL verdict instead of the generic "no htmlForm".
+            parts = []
+            for k in ("status", "responseStatus", "responseCode", "errorCode",
+                      "message", "responseMessage", "errorMessage", "error",
+                      "reason", "response"):
+                v = invoke.get(k)
+                if isinstance(v, str) and v.strip():
+                    parts.append(f"{k}={v}")
+                elif v is not None:
+                    parts.append(f"{k}={json.dumps(v)[:80]}")
+            detail = " ".join(parts)[:300] or json.dumps(invoke)[:300]
+            raise RuntimeError("no htmlForm (CCDC declined/error): " + detail)
         return jc, html
 
     def _easebuzz_to_gateway(self, jc, html: str) -> dict:
