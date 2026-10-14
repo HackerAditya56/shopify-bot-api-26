@@ -180,22 +180,69 @@ def forge_shield_context(shield_key_b64: str, shield_context: str, device: dict 
 
 
 def _fake_behavioral_events() -> list:
-    """Synthetic human-like mousemove/click/keyup/input events (the activityRecorder set)."""
+    """Synthetic human-like mousemove/click/keyup/input events.
+
+    Mimics real cursor physics: accelerated start, decelerated approach to a
+    target, micro-pauses (hesitation), then a click, then typing with natural
+    rhythm (fast bursts separated by pauses)."""
     evs = []
-    t0 = 0
-    x = random.randint(200, 800); y = random.randint(150, 700)
-    for i in range(random.randint(18, 40)):
-        x = max(0, min(1900, x + random.randint(-60, 60)))
-        y = max(0, min(1050, y + random.randint(-40, 40)))
-        t0 += random.randint(8, 45)
-        evs.append({"t": "mousemove", "s": t0, "x": x, "y": y})
-    t0 += random.randint(40, 120)
-    evs.append({"t": "click", "s": t0, "x": x, "y": y, "b": 0})
-    for _ in range(random.randint(4, 10)):
-        t0 += random.randint(30, 80)
-        evs.append({"t": "keyup", "s": t0, "n": random.randint(48, 57)})
-    t0 += random.randint(30, 90)
-    evs.append({"t": "input", "s": t0, "i": str(random.randint(1000, 9999))})
+    t = random.randint(120, 400)  # initial settle delay
+
+    def mousemove(x, y, ts):
+        evs.append({"t": "mousemove", "s": ts, "x": int(x), "y": int(y)})
+
+    # 1) mouse path: start -> hover near card number -> hover cvv (with drift)
+    sx, sy = random.randint(80, 400), random.randint(60, 300)
+    mousemove(sx, sy, t)
+    targets = [
+        (random.randint(420, 720), random.randint(240, 420)),   # card number field
+        (random.randint(700, 900), random.randint(240, 420)),   # expiry/cvv
+        (random.randint(500, 900), random.randint(420, 560)),   # cvv
+    ]
+    for tx, ty in targets:
+        cx, cy = sx, sy
+        dist = max(1, ((tx - cx) ** 2 + (ty - cy) ** 2) ** 0.5)
+        steps = random.randint(int(dist / 6), int(dist / 2))
+        for k in range(steps):
+            # easing: fast start, slow approach
+            progress = (k + 1) / steps
+            ease = 1 - (1 - progress) ** 2  # ease-out
+            nx = cx + (tx - cx) * ease + random.uniform(-6, 6)   # jitter
+            ny = cy + (ty - cy) * ease + random.uniform(-4, 4)
+            t += random.randint(6, 22)   # fast movement
+            mousemove(nx, ny, t)
+            # occasional hesitation micro-pause
+            if random.random() < 0.08:
+                t += random.randint(80, 260)
+        cx, cy = tx, ty
+        sx, sy = cx, cy
+        # pause at field before continuing
+        t += random.randint(150, 520)
+
+    # 2) click on the card-number field (button 0) after a beat
+    t += random.randint(120, 380)
+    evs.append({"t": "click", "s": t, "x": int(sx), "y": int(sy), "b": 0})
+
+    # 3) typing: card number (16 digits) in groups with natural rhythm
+    digits = [random.randint(48, 57) for _ in range(16)]
+    for idx, n in enumerate(digits):
+        t += random.randint(60, 160)   # keystroke gap
+        evs.append({"t": "keyup", "s": t, "n": n})
+        if idx in (3, 7, 11):
+            t += random.randint(180, 420)   # pause between digit groups
+
+    # 4) tab / field switch -> cvv typing (3-4 digits)
+    t += random.randint(200, 600)
+    for _ in range(random.randint(3, 4)):
+        t += random.randint(80, 200)
+        evs.append({"t": "keyup", "s": t, "n": random.randint(48, 57)})
+
+    # 5) input events (autofill/paste) + a final scroll
+    t += random.randint(150, 450)
+    evs.append({"t": "input", "s": t, "i": str(random.randint(10**15, 10**16 - 1))})
+    t += random.randint(80, 260)
+    evs.append({"t": "input", "s": t, "i": str(random.randint(100, 999))})
+
     return evs
 
 

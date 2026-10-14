@@ -182,7 +182,9 @@ def classify_status(status):
     u = str(status).upper()
     if u == "CHARGED":
         return "charged"
-    if u in ("APPROVED", "LIVE", "3DS"):
+    if u in ("3DS", "3D", "3D_SECURE"):
+        return "three_d"
+    if u in ("APPROVED", "LIVE"):
         return "approved"
     if u == "DECLINED":
         return "declined"
@@ -216,7 +218,7 @@ def progress_bar(checked, total):
     return bar, f"{ratio * 100:.1f}%"
 
 
-def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, errors, elapsed_str):
+def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, three_d, errors, elapsed_str):
     """Unified mass-check progress layout — identical across all mass gates (matches /msh)."""
     bar, percent = progress_bar(checked, total)
     return (
@@ -227,6 +229,7 @@ def build_progress_text(session_id, gate_display, checked, total, charged, appro
         f"      <tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged} </b>\n"
         f"      <tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved} </b>\n"
         f"      <tg-emoji emoji-id=\"{CUSTOM_DECLINED_EMOJI_ID}\">❌</tg-emoji> <b>𝐃𝐞𝐜𝐥𝐢𝐧𝐞𝐝 ➠</b> <b>{declined} </b>\n"
+        f"      <tg-emoji emoji-id=\"5258419835922030550\">🔐</tg-emoji> <b>𝟑𝐃 ➠</b> <b>{three_d} </b>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>π</a> <b>𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠</b> {gate_display}\n"
         f"      <tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝐄𝐫𝐫𝐨𝐫 ➠</b> <b>{errors} </b>\n"
         f"      <tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> <b>𝐑𝐞𝐜𝐡𝐞𝐜𝐤 ➠</b> <b>0 recovered, 0 remaining</b>\n"
@@ -290,6 +293,7 @@ def generate_result_file_content(session, result_type):
         cards = (
             session.get("charged_cards", []) +
             session.get("approved_cards", []) +
+            session.get("three_d_cards", []) +
             session.get("declined_cards", []) +
             session.get("error_cards", [])
         )
@@ -393,6 +397,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "charged": 0,
         "approved": 0,
         "declined": 0,
+        "three_d": 0,
         "errors": 0,
         "status": "𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴...",
         "start_time": time.time(),
@@ -401,6 +406,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "charged_cards": [],
         "approved_cards": [],
         "declined_cards": [],
+        "three_d_cards": [],
         "error_cards": [],
         "tasks": [],
         "send_charged": send_charged,
@@ -408,7 +414,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
     }
 
     # Send the initial progress message (with result + stop buttons)
-    initial_text = build_progress_text(session_id, gateway, 0, total, 0, 0, 0, 0, "0s")
+    initial_text = build_progress_text(session_id, gateway, 0, total, 0, 0, 0, 0, 0, "0s")
     initial_buttons = get_result_buttons(prefix, session_id, session, is_running=True)
     proc_msg = await safe_reply(message, initial_text, parse_mode="HTML", reply_markup=initial_buttons)
     session["msg_id"] = proc_msg.message_id
@@ -426,7 +432,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         text = build_progress_text(
             session_id, gateway,
             session["checked"], total,
-            session["charged"], session["approved"], session["declined"], session["errors"],
+            session["charged"], session["approved"], session["declined"], session.get("three_d", 0), session["errors"],
             elapsed_str,
         )
         if session.get("last_text") == text:
@@ -476,6 +482,8 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
                 session["charged_cards"].append(entry)
             elif kind == "approved":
                 session["approved_cards"].append(entry)
+            elif kind == "three_d":
+                session["three_d_cards"].append(entry)
             elif kind == "declined":
                 session["declined_cards"].append(entry)
             else:
@@ -610,7 +618,7 @@ async def handle_stop_callback(callback: types.CallbackQuery):
     text = build_progress_text(
         session_id, session["gateway"],
         session["checked"], session["total"],
-        session["charged"], session["approved"], session["declined"], session["errors"],
+        session["charged"], session["approved"], session["declined"], session.get("three_d", 0), session["errors"],
         elapsed_str,
     )
     try:

