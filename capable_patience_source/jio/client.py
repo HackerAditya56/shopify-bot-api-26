@@ -21,8 +21,8 @@ from curl_cffi import requests as creq
 from crypto import decrypt_public_key, encrypt_card_payload
 
 CHROME = "chrome131"
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
 
 JIO_PLAN_ID_19 = "1019863"  # verified live via recharge/search
 
@@ -30,16 +30,12 @@ JIO_PLAN_ID_19 = "1019863"  # verified live via recharge/search
 # per session so every recharge looks like a different browser — the fixed
 # chrome150+Linux-UA combo was being flagged GL-400-005 "high risk".
 PROFILES = [
-    {"imp": "chrome131", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-     "ch": '"Google Chrome";v="131", "Not_A Brand";v="8", "Chromium";v="131"', "plat": '"Windows"', "mob": "?0"},
-    {"imp": "chrome124", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-     "ch": '"Google Chrome";v="124", "Not_A Brand";v="8", "Chromium";v="124"', "plat": '"macOS"', "mob": "?0"},
-    {"imp": "chrome123", "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-     "ch": '"Google Chrome";v="123", "Not_A Brand";v="8", "Chromium";v="123"', "plat": '"Linux"', "mob": "?0"},
-    {"imp": "chrome120", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-     "ch": '"Google Chrome";v="120", "Not_A Brand";v="8", "Chromium";v="120"', "plat": '"Windows"', "mob": "?0"},
-    {"imp": "edge101", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Safari/537.36 Edg/101.0.0.0",
-     "ch": '"Microsoft Edge";v="101", "Not_A Brand";v="8", "Chromium";v="101"', "plat": '"Windows"', "mob": "?0"},
+    {"imp": "chrome131", "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+     "ch": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"', "plat": '"Linux"', "mob": "?0"},
+    {"imp": "chrome131", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+     "ch": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"', "plat": '"Windows"', "mob": "?0"},
+    {"imp": "chrome131", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+     "ch": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"', "plat": '"macOS"', "mob": "?0"},
 ]
 
 
