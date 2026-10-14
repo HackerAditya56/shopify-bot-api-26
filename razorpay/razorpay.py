@@ -2636,6 +2636,7 @@ def parse_proxy(proxy_str: str) -> str:
     """Convert proxy string to curl_cffi-compatible URL.
 
     Accepts: http://user:pass@host:port | user:pass@host:port | host:port:user:pass | host:port
+             | user pass host port | user:pass host:port | host:port user pass | user pass host:port
     """
     proxy_str = proxy_str.strip()
     if not proxy_str:
@@ -2645,6 +2646,32 @@ def parse_proxy(proxy_str: str) -> str:
     # user:pass@host:port (curl-style without scheme)
     if '@' in proxy_str:
         return f'http://{proxy_str}'
+    # space-separated formats
+    if ' ' in proxy_str:
+        sp = proxy_str.split()
+        # user pass host port (4 parts)
+        if len(sp) == 4 and sp[3].isdigit():
+            user, pwd, host, port = sp
+            return f'http://{quote(user, safe="")}:{quote(pwd, safe="")}@{host}:{port}'
+        # host:port user pass (3 parts, first has :port)
+        if len(sp) == 3 and ':' in sp[0] and sp[0].rsplit(':', 1)[-1].isdigit():
+            hp, user, pwd = sp
+            host, port = hp.rsplit(':', 1)
+            return f'http://{quote(user, safe="")}:{quote(pwd, safe="")}@{host}:{port}'
+        # user pass host:port (3 parts, last has :port)
+        if len(sp) == 3 and ':' in sp[2] and sp[2].rsplit(':', 1)[-1].isdigit():
+            user, pwd, hp = sp
+            host, port = hp.rsplit(':', 1)
+            return f'http://{quote(user, safe="")}:{quote(pwd, safe="")}@{host}:{port}'
+        # user:pass host:port (2 parts, both colon)
+        if len(sp) == 2 and ':' in sp[0] and ':' in sp[1]:
+            up, hp = sp
+            user, pwd = up.split(':', 1)
+            host, port = hp.rsplit(':', 1)
+            return f'http://{quote(user, safe="")}:{quote(pwd, safe="")}@{host}:{port}'
+        # host port (2 parts, no auth)
+        if len(sp) == 2 and sp[1].isdigit():
+            return f'http://{sp[0]}:{sp[1]}'
     parts = proxy_str.split(':')
     if len(parts) >= 4 and parts[1].isdigit():
         host, port, user, pwd = parts[0], parts[1], ':'.join(parts[2:-1]), parts[-1]
@@ -2657,25 +2684,13 @@ def parse_proxy(proxy_str: str) -> str:
 # ── primp-backed session support ──────────────────────────────────────────
 
 def _parse_proxy_for_primp(proxy_str: str) -> str:
-    """Convert proxy string to primp-compatible URL.
-
-    Accepts two formats:
-      - Already-formatted URL:  http://user:pass@host:port  (returned as-is)
-      - Raw colon-delimited:    host:port:user:pass         (converted to URL)
-    """
+    """Convert proxy string to primp-compatible URL (delegates to parse_proxy)."""
     if not proxy_str:
         return None
-    # If the proxy string already has a scheme prefix (http://, https://,
-    # socks5://, etc.), return it unmodified — primp handles these natively
-    # via reqwest::Proxy::all().
-    if '://' in proxy_str:
-        return proxy_str
-    # Raw host:port:user:pass format — convert to primp-compatible URL
-    parts = proxy_str.split(':')
-    if len(parts) == 4:
-        return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-    # Bare host:port — add http:// scheme
-    return f"http://{proxy_str}"
+    try:
+        return parse_proxy(proxy_str)
+    except ValueError:
+        return None
 
 
 _PRIMP_CANDIDATE_TARGETS = [
