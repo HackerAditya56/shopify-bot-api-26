@@ -974,13 +974,9 @@ class RazorpaySession:
         Pure key-based pages use key_id. Page auth mode determines which to send."""
         params = {}
         kid = (self.tokens.get('key_id') or '').strip()
-        kh = (self.tokens.get('keyless_header') or '').strip()
-        # HAR (live) shows creat/ajax URL = key_id + session_token + keyless_header ALL THREE.
-        # key_id (merchant key from preferences) is required in the query even for keyless pages.
+        # HAR (live): prefill/order/iin = key_id + session_token. create/ajax adds keyless_header on top.
         if kid:
             params['key_id'] = kid
-        if kh:
-            params['keyless_header'] = kh
         if self.tokens.get('session_token'):
             params['session_token'] = self.tokens['session_token']
         if extra:
@@ -1404,6 +1400,9 @@ class RazorpaySession:
     def _create_payment(self):
         self._ensure_customer_details()
         url = f'{PAYMENT_CREATE}?{self._checkout_auth_query()}'
+        kh = (self.tokens.get('keyless_header') or '').strip()
+        if kh:
+            url += f'&keyless_header={quote(kh)}'
 
         body = self._build_payment_create_body(include_checkout_id=False)
         resp = self._request('POST', url, self._checkout_api_form_headers(), data=body,
@@ -2303,6 +2302,9 @@ class RazorpaySession:
     async def _create_payment_async(self):
         self._ensure_customer_details()
         url = f'{PAYMENT_CREATE}?{self._checkout_auth_query()}'
+        kh = (self.tokens.get('keyless_header') or '').strip()
+        if kh:
+            url += f'&keyless_header={quote(kh)}'
         body = self._build_payment_create_body(include_checkout_id=False)
         resp = await self._request_async('POST', url, self._checkout_api_form_headers(),
                                           data=body, use_proxy=True, raw=True)
