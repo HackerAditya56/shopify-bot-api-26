@@ -42,6 +42,24 @@ def load_sites():
         return []
 
 
+def _site_key(site):
+    k = (site or "").strip().lower().rstrip("/")
+    for p in ("http://", "https://"):
+        if k.startswith(p):
+            k = k[len(p):]
+    return k
+
+
+def _fetch_site_cooldowns() -> set:
+    """Query the API for the current site-cooldown set (1h auto-recover)."""
+    try:
+        with urllib.request.urlopen(f"{RZ_API}/pool-status", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        return {_site_key(e.get("site", "")) for e in data.get("site_cooldown_list", [])}
+    except Exception:
+        return set()
+
+
 def luhn_check(card_number):
     card_number = str(card_number).strip()
     if not card_number.isdigit():
@@ -243,6 +261,13 @@ async def mrz_command(message: types.Message):
         await safe_reply(message, "⚠️ <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀!</b>\nLoad with /proxy.", parse_mode="HTML")
         return
     _sites = load_sites()
+    # skip sites currently in cooldown (1h after "site issue")
+    try:
+        _site_cd = _fetch_site_cooldowns()
+        if _site_cd:
+            _sites = [s for s in _sites if _site_key(s) not in _site_cd]
+    except Exception:
+        pass
 
     total = len(valid)
     current_credits = await asyncio.to_thread(get_user_credits, user_id)

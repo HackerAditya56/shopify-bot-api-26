@@ -2407,6 +2407,12 @@ class RazorpaySession:
     # ── Result builder ─────────────────────────────────────────────────────
     def _build_result(self, elapsed: float) -> dict:
         outcome = self._classify_outcome()
+        # Site server-error -> cooldown the SITE for 1h (auto-recovers)
+        if outcome.get('reason') == 'rzp_server_error':
+            try:
+                proxy_manager.set_site_cooldown(self.payment_page_url, hours=1, reason="site_error")
+            except Exception:
+                pass
         year = self.card.get('expiry_year', '')
         if len(year) == 2:
             year = '20' + year

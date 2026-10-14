@@ -249,7 +249,7 @@ def remove_from_pool(proxy_host: str):
 # ── Cooldown — flagged proxies sit out for N hours (NOT removed) ─────────
 
 COOLDOWN_FILE = os.path.join(_DATA_DIR, "proxy_cooldown.json")
-COOLDOWN_HOURS = 10
+COOLDOWN_HOURS = 5
 
 _cooldown_lock = threading.Lock()
 _cooldowns_cache: dict[str, dict] = {}
@@ -329,6 +329,92 @@ def is_in_cooldown(proxy_host: str) -> bool:
 def get_cooldown_list() -> dict[str, dict]:
     """Return the active cooldown entries (host:port -> {until, reason, set_at})."""
     cds = _load_cooldowns()
+    now = time.time()
+    return {k: v for k, v in cds.items() if v.get("until", 0) >= now}
+
+
+# ── Site cooldown — "Razorpay server error / site issue" sites sit out 1h ──
+
+SITE_COOLDOWN_FILE = os.path.join(_DATA_DIR, "site_cooldown.json")
+SITE_COOLDOWN_HOURS = 1
+
+_site_cd_lock = threading.Lock()
+_site_cd_cache: dict[str, dict] = {}
+_site_cd_mtime: float = 0.0
+
+
+def _site_cd_key(site: str) -> str:
+    s = (site or "").strip().lower().rstrip("/")
+    for p in ("http://", "https://"):
+        if s.startswith(p):
+            s = s[len(p):]
+    return s
+
+
+def _load_site_cooldowns() -> dict[str, dict]:
+    global _site_cd_cache, _site_cd_mtime
+    try:
+        if os.path.exists(SITE_COOLDOWN_FILE):
+            mtime = os.path.getmtime(SITE_COOLDOWN_FILE)
+            if mtime == _site_cd_mtime:
+                return _site_cd_cache
+            with open(SITE_COOLDOWN_FILE) as f:
+                _site_cd_cache = json.load(f)
+            _site_cd_mtime = mtime
+            return _site_cd_cache
+    except Exception:
+        pass
+    _site_cd_cache = {}
+    _site_cd_mtime = 0.0
+    return _site_cd_cache
+
+
+def _save_site_cooldowns(cds: dict):
+    tmp = SITE_COOLDOWN_FILE + ".tmp"
+    lockfile = SITE_COOLDOWN_FILE + ".lock"
+    try:
+        with open(lockfile, "a") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            with open(tmp, "w") as f:
+                json.dump(cds, f, indent=2)
+            os.replace(tmp, SITE_COOLDOWN_FILE)
+            fcntl.flock(lf, fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+
+def set_site_cooldown(site: str, hours: int = SITE_COOLDOWN_HOURS, reason: str = "site_error"):
+    """Put a SITE in cooldown for `hours` (default 1h). Auto-recovers when time ends."""
+    key = _site_cd_key(site)
+    if not key:
+        return
+    now = time.time()
+    with _site_cd_lock:
+        cds = _load_site_cooldowns()
+        cds[key] = {"until": now + hours * 3600, "reason": reason, "set_at": now}
+        _save_site_cooldowns(cds)
+
+
+def is_site_in_cooldown(site: str) -> bool:
+    key = _site_cd_key(site)
+    if not key:
+        return False
+    cds = _load_site_cooldowns()
+    entry = cds.get(key)
+    if not entry:
+        return False
+    if entry.get("until", 0) < time.time():
+        with _site_cd_lock:
+            cds = _load_site_cooldowns()
+            cds.pop(key, None)
+            _save_site_cooldowns(cds)
+        return False
+    return True
+
+
+def get_site_cooldown_list() -> dict[str, dict]:
+    """Active site cooldowns (site -> {until, reason, set_at})."""
+    cds = _load_site_cooldowns()
     now = time.time()
     return {k: v for k, v in cds.items() if v.get("until", 0) >= now}
 

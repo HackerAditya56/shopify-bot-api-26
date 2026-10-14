@@ -456,12 +456,19 @@ async def pool_status():
         {"proxy": k, "until": v.get("until"), "reason": v.get("reason", "waf_403")}
         for k, v in sorted(cooldowns.items(), key=lambda x: x[1].get("until", 0))
     ]
+    site_cds = proxy_manager.get_site_cooldown_list()
+    site_list = [
+        {"site": k, "until": v.get("until"), "reason": v.get("reason", "site_error")}
+        for k, v in sorted(site_cds.items(), key=lambda x: x[1].get("until", 0))
+    ]
     return {
         "status": "ok",
         "total": stats.get("total", 0),
         "live": stats.get("live", 0),
         "cooldown": stats.get("cooldown", 0),
         "cooldown_list": cd_list,
+        "site_cooldown": len(site_list),
+        "site_cooldown_list": site_list,
     }
 
 
