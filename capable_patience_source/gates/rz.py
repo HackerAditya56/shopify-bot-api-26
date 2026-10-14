@@ -20,7 +20,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
 from bin import get_bin_info
 from sub import get_premium_status
-import urllib.request, urllib.parse, json, os, itertools
+import urllib.request, urllib.parse, urllib.error, json, os, itertools
 
 # ── Razorpay API (VPS:9000) ─────────────────────────────────────────────
 RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
@@ -43,6 +43,16 @@ def _rz_api_check(cc, proxy, site, amount_paise):
     try:
         resp = urllib.request.urlopen(url, timeout=180)
         data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        # server returned 4xx/5xx — surface the real error body
+        try:
+            data = json.loads(e.read().decode())
+        except Exception:
+            data = {}
+        return {"status": str(data.get("status") or "error").lower(),
+                "response": data.get("message") or f"HTTP {e.code}"}
+    except urllib.error.URLError as e:
+        return {"status": "error", "response": f"Connection error: {str(e.reason)[:60]}"}
     except Exception as e:
         return {"status": "error", "response": f"API: {str(e)[:80]}"}
     status = str(data.get("status") or "error").lower()
@@ -406,8 +416,6 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
             api_result = {"status": "error", "response": "No proxies loaded. Use /proxy."}
         else:
             api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
-            if api_result.get("status") == "error" and "API:" in str(api_result.get("response", "")):
-                api_result["response"] = "Connection Timed Out"
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
 

@@ -2633,12 +2633,18 @@ def parse_cc(cc_str: str) -> dict:
 
 
 def parse_proxy(proxy_str: str) -> str:
-    """Convert proxy string to curl_cffi-compatible URL."""
+    """Convert proxy string to curl_cffi-compatible URL.
+
+    Accepts: http://user:pass@host:port | user:pass@host:port | host:port:user:pass | host:port
+    """
     proxy_str = proxy_str.strip()
     if not proxy_str:
         raise ValueError('proxy is required')
     if proxy_str.startswith(('http://', 'https://', 'socks5://')):
         return proxy_str
+    # user:pass@host:port (curl-style without scheme)
+    if '@' in proxy_str:
+        return f'http://{proxy_str}'
     parts = proxy_str.split(':')
     if len(parts) >= 4 and parts[1].isdigit():
         host, port, user, pwd = parts[0], parts[1], ':'.join(parts[2:-1]), parts[-1]
