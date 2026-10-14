@@ -487,18 +487,52 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
 
 @router.message(F.text.startswith("/rzp") | F.caption.startswith("/rzp"))
 async def rzp_command(message: types.Message):
+    user_id = message.from_user.id
+
+    # 1) the user's proxies live in the BOT DB (not the API pool) — read them
+    proxies = []
+    try:
+        from mass_gates.msh import get_user_proxies
+        proxies = await get_user_proxies(user_id)
+    except Exception:
+        proxies = []
+
+    # 2) cooldown state lives in the API (recorded on WAF 403)
+    cd_hosts = {}
     try:
         import urllib.request as _ur
         with _ur.urlopen(f"{RZ_API}/pool-status", timeout=10) as resp:
             data = json.loads(resp.read().decode())
+        for e in data.get("cooldown_list", []):
+            h = (e.get("proxy") or "").lower().strip()
+            if h:
+                cd_hosts[h] = e
     except Exception as e:
         await safe_reply(message, f"❌ <b>API unreachable:</b> <code>{str(e)[:60]}</code>", parse_mode="HTML")
         return
 
-    total = data.get("total", 0)
-    live = data.get("live", 0)
-    cd = data.get("cooldown", 0)
-    cd_list = data.get("cooldown_list", [])
+    def _hostname(p):
+        h = (p or "").strip().lower()
+        for pr in ("http://", "https://", "socks5://"):
+            if h.startswith(pr):
+                h = h[len(pr):]
+        if "@" in h:
+            h = h.rsplit("@", 1)[1]
+        if ":" in h and h.rsplit(":", 1)[-1].isdigit():
+            h = h.rsplit(":", 1)[0]
+        return h
+
+    live = 0
+    cooled = []
+    for p in proxies:
+        h = _hostname(p)
+        if h in cd_hosts:
+            cooled.append((h, cd_hosts[h]))
+        else:
+            live += 1
+
+    total = len(proxies)
+    cd = len(cooled)
 
     lines = [
         "<b>𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐏𝐫𝐨𝐱𝐲 𝐏𝐨𝐨𝐥</b>",
@@ -507,18 +541,17 @@ async def rzp_command(message: types.Message):
         f"✅ <b>𝐋𝐢𝐯𝐞 ➠</b> <code>{live}</code>",
         f"❄️ <b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 ➠</b> <code>{cd}</code>",
     ]
-    if cd_list:
+    if cooled:
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
         lines.append("<b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 𝐥𝐢𝐬𝐭:</b>")
         import datetime as _dt
-        for e in cd_list[:20]:
-            p = e.get("proxy", "?")
+        for h, e in cooled[:20]:
             until = e.get("until", 0)
             try:
-                ts = _dt.datetime.fromtimestamp(until).strftime("%H:%M")
+                ts = _dt.datetime.fromtimestamp(until).strftime("%m-%d %H:%M")
             except Exception:
                 ts = "?"
-            lines.append(f"• <code>{p}</code> ⏳ <b>{ts}</b>")
-        if len(cd_list) > 20:
-            lines.append(f"… and {len(cd_list)-20} more")
+            lines.append(f"• <code>{h}</code> ⏳ <b>{ts}</b>")
+        if len(cooled) > 20:
+            lines.append(f"… and {len(cooled)-20} more")
     await safe_reply(message, "\n".join(lines), parse_mode="HTML")
