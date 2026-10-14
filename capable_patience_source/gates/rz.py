@@ -46,6 +46,8 @@ def _rz_api_check(cc, proxy, site, amount_paise):
     except Exception as e:
         return {"status": "error", "response": f"API: {str(e)[:80]}"}
     status = str(data.get("status") or "error").lower()
+    if status == "dead":
+        status = "declined"
     msg = data.get("message") or data.get("reason") or "N/A"
     return {"status": status, "response": msg}
 from mass_gates._tg_helpers import safe_reply
@@ -330,10 +332,9 @@ async def rz_command(message: types.Message):
 
     # 8. Send Processing Message (as reply)
     escaped_card = escape(formatted_cc)
-    proc_msg = await safe_reply(message, 
-        f"<pre><code>𝙋𝙧𝙤𝙘𝙚𝙨𝙨𝙞𝙣𝙜⏳...</code></pre>\n"
-        f"<pre><code>{escaped_card}</code></pre>\n"
-        f"<b>𝙂𝙖𝙩𝙚𝙬𝙖𝙮 ➠ 𝙍𝙖𝙯𝙤𝙧𝙥𝙖𝙮 ₹{amount_paise // 100}</b>\n",
+    proc_msg = await safe_reply(message,
+        f"<pre>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 𝗦𝗶𝗻𝗴𝗹𝗲 𝗖𝗮𝗿𝗱...</pre>\n"
+        f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{escaped_card}</code>",
         parse_mode="HTML"
     )
 
@@ -410,17 +411,17 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
 
-    # Determine Final Status Display
+    # Determine symbol (matches /sh single-gate format: 🔥 charged, ✅ approved, ❌ declined)
     if status_raw == "charged":
-        final_status = f'𝗖𝗛𝗔𝗥𝗚𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">💎</tg-emoji>'
+        symbol = f'<tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">🔥</tg-emoji>'
         is_charged = True
     elif status_raw == "approved":
-        final_status = f'𝗔𝗣𝗣𝗥𝗢𝗩𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji>'
-        is_charged = True 
+        symbol = f'<tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji>'
+        is_charged = True
     elif status_raw == "declined":
-        final_status = f'𝗗𝗘𝗖𝗟𝗜𝗡𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji>'
+        symbol = f'<tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji>'
     else:
-        final_status = "𝗘𝗥𝗥𝗢𝗥 ⚠️"
+        symbol = "⚠️"
 
     # UPDATED CREDIT DEDUCTION LOGIC (Applies to everyone)
     credits_to_deduct = 0
@@ -452,66 +453,19 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     elapsed = time.time() - start_time
     
     final_caption = (
-        f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
-        f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
-        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{amount_paise // 100}\n"
-        f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{res_message}</b>\n"
-        f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
-        f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"
-        f"𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➠ <b>{bin_country}</b>\n"
-        f"𝗨𝘀𝗲𝗿 ➠ {user_display}\n"
-        f"𝗗𝗲𝘃 ➠ {dev_link}"
+        f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{formatted_cc}</code>\n"
+        f"<b>𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠</b> {res_message}\n"
+        f"<b>𝗔𝗺𝗼𝘂𝗻𝘁 ➠</b> ₹{amount_paise // 100}\n"
+        f"<b>𝗕𝗿𝗮𝗻𝗱 ➠</b> {bin_scheme}\n"
+        f"<b>𝗕𝗜𝗡 ➠</b> {cc[:6]}\n"
+        f"{symbol}"
     )
 
-    # G. FETCH ANIME GIF
-    gif_url = await get_anime_gif()
-
-    # H. Send as Animation (GIF) with Caption
+    # Send result by editing the processing message (matches /sh single-gate flow)
     try:
-        # Try to delete the processing message first
-        try:
-            await proc_msg.delete()
-        except Exception:
-            pass
-        
-        # Send as animation with GIF
-        await message.reply_animation(
-            animation=gif_url,
-            caption=final_caption,
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
-    except (TelegramForbiddenError, TelegramBadRequest) as e:
-        # Fallback to editing the processing message if GIF sending fails
-        logging.warning(f"[RZ] Could not send GIF, falling back to text: {e}")
-        try:
-            await proc_msg.edit_text(
-                text=final_caption,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-        except Exception as edit_err:
-            logging.error(f"Error editing message: {edit_err}")
-            await safe_reply(message, 
-                text=final_caption,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-    except Exception as e:
-        # Ultimate fallback - just edit the processing message
-        logging.error(f"Error sending result: {e}")
-        try:
-            await proc_msg.edit_text(
-                text=final_caption,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-        except Exception:
-            await safe_reply(message, 
-                text=final_caption,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
+        await proc_msg.edit_text(final_caption, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception:
+        await safe_reply(message, final_caption, parse_mode="HTML", disable_web_page_preview=True)
     
     # Log timing
     logging.info(f"RZ command completed in {elapsed:.2f}s for user {user_id}")
