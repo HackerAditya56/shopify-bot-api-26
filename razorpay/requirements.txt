@@ -1,0 +1,23 @@
+# Razorpay Checker API — dependencies (host on the VPS)
+# Python 3.11+ / 3.12
+
+# ── Core (required) ────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+curl_cffi>=0.16.0,<0.17
+httpx>=0.26
+
+# ── Telegram notification bot ──────────────────────────────────────
+# NOTE: must be `python-telegram-bot` (NOT `telegram` — that is a
+# different unrelated package that causes "cannot import name Update").
+python-telegram-bot>=20.0,<21.0
+
+# ── shield_context forge (X25519 nacl.box) ─────────────────────────
+pynacl>=1.5
+
+# ── Optional WAF fallback backends (safe to skip — lazy imports) ───
+# primp
+# httpcloak
+# wreq
+# brotli
