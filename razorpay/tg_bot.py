@@ -39,7 +39,7 @@ import proxy_manager
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8203488959:AAHLi_nn5jdA0xt0lzgznXJHbSYvPCsQyAk")
+BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8497001548:AAHuwhzH41sELbYsBp2sNgKPQevqFk8RB6M")
 OWNER_ID = int(os.environ.get("TG_OWNER_ID", "8462705169"))
 _DATA_DIR = os.environ.get("PROXY_DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(_DATA_DIR, exist_ok=True)
