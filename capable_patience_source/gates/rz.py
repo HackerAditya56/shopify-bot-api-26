@@ -20,7 +20,34 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
 from bin import get_bin_info
 from sub import get_premium_status
-from gates.razorpay import check_gate  # Import local Razorpay gate
+import urllib.request, urllib.parse, json, os, itertools
+
+# ── Razorpay API (VPS:9000) ─────────────────────────────────────────────
+RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
+RZ_SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rz_site.txt")
+_site_ctr = itertools.count()
+
+
+def _load_rz_sites():
+    try:
+        with open(RZ_SITES_FILE, encoding="utf-8") as f:
+            return [l.strip() for l in f if l.strip().startswith("http")]
+    except Exception:
+        return []
+
+
+def _rz_api_check(cc, proxy, site, amount_paise):
+    """Single-card check against the Razorpay API. Returns {status, response}."""
+    q = urllib.parse.urlencode({"cc": cc, "site": site, "proxy": proxy, "amount": amount_paise, "region": "IN"})
+    url = f"{RZ_API}/razorpay?{q}"
+    try:
+        resp = urllib.request.urlopen(url, timeout=180)
+        data = json.loads(resp.read().decode())
+    except Exception as e:
+        return {"status": "error", "response": f"API: {str(e)[:80]}"}
+    status = str(data.get("status") or "error").lower()
+    msg = data.get("message") or data.get("reason") or "N/A"
+    return {"status": status, "response": msg}
 from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -264,6 +291,21 @@ async def rz_command(message: types.Message):
 
     formatted_cc = f"{cc}|{mm}|{yy}|{cvv}"
 
+    # Amount: amount=X (rupees) or random ₹50–₹100
+    amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
+    if amt_match:
+        amount_paise = int(amt_match.group(1)) * 100
+    else:
+        amount_paise = random.randint(5000, 10000)
+
+    # Site: site=URL or random from rz_site.txt
+    site_match = re.search(r'site\s*=\s*(https?://\S+)', raw_text, re.I)
+    if site_match:
+        site = site_match.group(1)
+    else:
+        sites = _load_rz_sites()
+        site = random.choice(sites) if sites else ""
+
     # 5. LUHN CHECK
     if not luhn_check(cc):
         await safe_reply(message, 
@@ -291,14 +333,14 @@ async def rz_command(message: types.Message):
     proc_msg = await safe_reply(message, 
         f"<pre><code>𝙋𝙧𝙤𝙘𝙚𝙨𝙨𝙞𝙣𝙜⏳...</code></pre>\n"
         f"<pre><code>{escaped_card}</code></pre>\n"
-        f"<b>𝙂𝙖𝙩𝙚𝙬𝙖𝙮 ➠ 𝙍𝙖𝙯𝙤𝙧𝙥𝙖𝙮 𝟭₹</b>\n",
+        f"<b>𝙂𝙖𝙩𝙚𝙬𝙖𝙮 ➠ 𝙍𝙖𝙯𝙤𝙧𝙥𝙖𝙮 ₹{amount_paise // 100}</b>\n",
         parse_mode="HTML"
     )
 
     # 9. Execute Background Task
     asyncio.create_task(
         process_rz_check(
-            message, proc_msg, user, user_id, formatted_cc, cc, plan_name
+            message, proc_msg, user, user_id, formatted_cc, cc, plan_name, site, amount_paise
         )
     )
 
@@ -306,7 +348,7 @@ async def rz_command(message: types.Message):
 # BACKGROUND PROCESSOR
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name):
+async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, site="", amount_paise=100):
     """
     Handles gate check, DB updates, and final message editing.
     Optimized for faster response times.
@@ -352,16 +394,19 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         # ═══════════════════════════════════════════════════════
         # NON-INDIA CARD - Proceed with actual gate check
         # ═══════════════════════════════════════════════════════
-        async def run_gate_check():
-            nonlocal api_result
-            try:
-                api_result = await check_gate(formatted_cc)
-            except Exception as e:
-                logging.error(f"RZ Gate Error: {e}")
+        # Get a proxy for this check
+        try:
+            from mass_gates.msh import get_user_proxies as _get_user_proxies
+            _proxies = await _get_user_proxies(user_id)
+            _proxy = random.choice(_proxies) if _proxies else ""
+        except Exception:
+            _proxy = ""
+        if not _proxy:
+            api_result = {"status": "error", "response": "No proxies loaded. Use /proxy."}
+        else:
+            api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
+            if api_result.get("status") == "error" and "API:" in str(api_result.get("response", "")):
                 api_result["response"] = "Connection Timed Out"
-                api_result["status"] = "error"
-        
-        await run_gate_check()
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
 
@@ -409,7 +454,7 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     final_caption = (
         f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
         f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
-        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝟭₹\n"
+        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{amount_paise // 100}\n"
         f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{res_message}</b>\n"
         f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
         f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"

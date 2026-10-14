@@ -480,7 +480,7 @@ if __name__ == '__main__':
     import uvicorn
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument('--port', type=int, default=8080)
+    p.add_argument('--port', type=int, default=9000)
     p.add_argument('--host', default='0.0.0.0')
     args = p.parse_args()
     print(f"\n  FastAPI server: http://{args.host}:{args.port}\n"

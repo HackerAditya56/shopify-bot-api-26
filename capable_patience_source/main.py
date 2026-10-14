@@ -75,6 +75,7 @@ from mass_gates.mst import (
 
 from mass_gates.mauth import router as mauth_router, mauth_command
 from mass_gates.mstripe import router as mstripe_router, mstripe_command
+from mass_gates.mrz import router as mrz_router, mrz_command
 from mass_gates._batch_common import sel_router
 from mass_gates.stop import router as stop_router
 
@@ -144,6 +145,7 @@ dp.include_router(auth_router)
 dp.include_router(stripe_router)
 dp.include_router(mauth_router)
 dp.include_router(mstripe_router)
+dp.include_router(mrz_router)
 dp.include_router(sel_router)
 dp.include_router(stop_router)
 dp.include_router(cmds_router)
@@ -669,7 +671,7 @@ DOT_COMMAND_MAP = {
     "rz": rz_command, "pyu": pyu_command, "py": py_command,
     "nmi": nmi_command, "nmi2": nmi2_command,  # "stco": stco_command,  # hitter OFF
     "mst": mst_command, "msh": msh_command,  # "hit": hit_command, "co": hit_command,  # hitter OFF
-    "auth": auth_command, "stripe": stripe_command, "mauth": mauth_command, "mstripe": mstripe_command, "bin": binn_command, "binn": binn_command,
+    "auth": auth_command, "stripe": stripe_command, "mauth": mauth_command, "mstripe": mstripe_command, "mrz": mrz_command, "bin": binn_command, "binn": binn_command,
     "sub": sub_command, "rc": rc_command, "suball": suball_command,
     "g_code": g_code_command, "claim": claim_command, "info": info_command,
     "rsub": rsub_command, "plan": plan_command, "adcr": adcr_command,
@@ -690,7 +692,7 @@ async def dot_command_handler(message: types.Message):
 
 
 # ========== CALLBACK HANDLER ==========
-_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_")
+_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_", "mrz_res_", "mrz_stop_")
 
 
 @router.callback_query()
@@ -779,6 +781,7 @@ for _cmd, _fn in [
     ("suball", suball_command), ("g_code", g_code_command), ("claim", claim_command),
     ("info", info_command), ("rsub", rsub_command), ("plan", plan_command),
     ("adcr", adcr_command), ("on", on_command), ("off", off_command),
+    ("mrz", mrz_command),
     ("stats", stats_command), ("bin", binn_command), ("binn", binn_command),
     ("qfake", qfake_command), ("fake", fake_command), ("gen", gen_command), ("cl", cl_command), ("gate", gate_command), ("py", py_command),
     ("gmass", gmass_command), ("gatehelp", gatehelp_command), ("fakehelp", fakehelp_command), ("genhelp", genhelp_command),
