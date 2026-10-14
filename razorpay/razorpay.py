@@ -9,7 +9,7 @@ Profiles: Chrome (Win/Mac/Linux/Android), Firefox (Win/Linux), Safari (macOS/iOS
 See profiles.py for the full multi-platform fingerprint diversity system.
 """
 
-import re, json, time, random, hashlib, os, sys, base64, asyncio, threading
+import re, json, time, random, hashlib, os, sys, base64, asyncio, threading, uuid
 from urllib.parse import urlparse, quote, unquote
 from dataclasses import dataclass, field
 from typing import Optional
@@ -139,10 +139,83 @@ def generate_device_id(profile: dict) -> str:
         p['color_depth'], p['device_memory'],
         str(w + h), str(w * h), p['device_pixel_ratio'],
     ]
-    hx = hashlib.sha1(''.join(parts).encode()).hexdigest()
+    hx = hashlib.sha1(','.join(parts).encode()).hexdigest()  # real browser: s.join() = comma-join
     ts = int(round(time.time() * 1000))
     rand8 = str(random.randint(10000000, 99999999))
     return f"1.{hx}.{ts}.{rand8}"
+
+# ── Shield context forge ────────────────────────────────────────────────
+# Reverse-engineered from v2-entry-a22a774c.modern.js module 96192 (activityRecorder).
+# _[shield_context] = "1-" + shield_context + "--" + base64(epk || nonce || nacl.box(behavioral, nonce, shield_key_pub, epk_sk))
+# shield_key from /v2/standard_checkout/preferences is an X25519 PUBLIC key (b64, 32B).
+def forge_shield_context(shield_key_b64: str, shield_context: str) -> str:
+    """Build a server-valid _[shield_context] for creat/ajax. Forgeable with just the preferences data."""
+    try:
+        from nacl.public import PrivateKey, PublicKey, Box
+        from nacl.utils import random as _nacl_random
+    except Exception:
+        # no pynacl -> fall back to the raw context (will likely 403; just don't crash)
+        return "1-" + shield_context + "--"
+    try:
+        pk = PublicKey(base64.b64decode(shield_key_b64))
+    except Exception:
+        return "1-" + shield_context + "--"
+    epk = PrivateKey.generate()
+    nonce = _nacl_random(24)
+    behavioral = {
+        "v": 2,
+        "d": random.randint(300, 2500),           # duration ms (mouse->pay)
+        "e": _fake_behavioral_events(),
+        "c": {},
+        "g": _shield_device_info(),
+        "a": 1,
+    }
+    for ev in behavioral["e"]:
+        t = ev.get("t", "mousemove")
+        behavioral["c"][t] = behavioral["c"].get(t, 0) + 1
+    box = Box(epk, pk)
+    ct = box.encrypt(json.dumps(behavioral).encode(), nonce)
+    boxed = bytes(epk.public_key) + nonce + ct.ciphertext
+    return "1-" + shield_context + "--" + base64.b64encode(boxed).decode()
+
+
+def _fake_behavioral_events() -> list:
+    """Synthetic human-like mousemove/click/keyup/input events (the activityRecorder set)."""
+    evs = []
+    t0 = 0
+    x = random.randint(200, 800); y = random.randint(150, 700)
+    for i in range(random.randint(18, 40)):
+        x = max(0, min(1900, x + random.randint(-60, 60)))
+        y = max(0, min(1050, y + random.randint(-40, 40)))
+        t0 += random.randint(8, 45)
+        evs.append({"t": "mousemove", "s": t0, "x": x, "y": y})
+    t0 += random.randint(40, 120)
+    evs.append({"t": "click", "s": t0, "x": x, "y": y, "b": 0})
+    for _ in range(random.randint(4, 10)):
+        t0 += random.randint(30, 80)
+        evs.append({"t": "keyup", "s": t0, "n": random.randint(48, 57)})
+    t0 += random.randint(30, 90)
+    evs.append({"t": "input", "s": t0, "i": str(random.randint(1000, 9999))})
+    return evs
+
+
+def _shield_device_info() -> dict:
+    return {
+        "cp": {"mt": 0, "te": False, "pc": 0, "pf": 0, "ap": 0, "hv": 0, "ah": 0},
+        "sc": {"w": 1920, "h": 1080, "cd": 24, "pr": 1},
+        "vp": {"w": 1920, "h": 1080},
+        "tz": "Asia/Kolkata",
+        "to": -330,
+        "lg": "en-IN",
+        "ls": ["en-IN", "en", "hi"],
+        "lc": 3,
+        "ce": True,
+        "dn": None,
+        "hc": 8,
+        "dm": 8,
+        "au": {"wd": False, "pn": 0, "ch": True, "nt": False, "wv": None, "wr": None},
+    }
+
 
 
 def generate_indian_mobile() -> str:
@@ -596,6 +669,14 @@ class RazorpaySession:
         parts = (self.tokens.get('rzp_device_id', '')).split('.')
         return parts[1] if len(parts) > 1 else ''
 
+    def _forged_shield_context(self) -> str:
+        """Return the server-valid _[shield_context] (encrypted behavioral blob)."""
+        if not self.tokens.get('_forged_shield'):
+            ctx = self.tokens.get('shield_context', '')
+            key = self.tokens.get('shield_key', '')
+            self.tokens['_forged_shield'] = forge_shield_context(key, ctx) if (key and ctx) else ctx
+        return self.tokens['_forged_shield']
+
     def _generate_stripe_radar_session(self) -> str:
         """Call the REAL Stripe Radar API to get a fraud verification token.
         Real browser calls api.stripe.com/v1/radar/session via Stripe.js.
@@ -1039,10 +1120,12 @@ class RazorpaySession:
                 f"{self.tokens.get('rzp_device_id', '')}|{self.profile['user_agent']}".encode()
             ).hexdigest()
             self.tokens['user_fingerprint_v2'] = fp_v2
-            # Set cookies on api.razorpay.com + .razorpay.com
+            self.tokens['client_id'] = str(uuid.uuid4())
+            # Set cookies on api.razorpay.com + .razorpay.com (fresh identity = "new user")
             for domain in ['api.razorpay.com', '.razorpay.com']:
                 self.session.cookies.set('user_fingerprint_v2', fp_v2, domain=domain, path='/')
                 self.session.cookies.set('testcookie', '1', domain=domain, path='/')
+                self.session.cookies.set('clientId', self.tokens['client_id'], domain=domain, path='/')
             time.sleep(_human_delay(320, 0.5))
 
             # Step 4: Create order
@@ -1438,7 +1521,7 @@ class RazorpaySession:
             ('save', '0'),
             # Billing address — uses real Indian pincodes via bharataddress
             *[(f'billing_address[{k}]', v) for k, v in generate_indian_address().items()],
-            ('_[shield_context]', self.tokens.get('shield_context', '')),
+            ('_[shield_context]', self._forged_shield_context()),
         ]
 
         if include_checkout_id and checkout_id:
@@ -1938,9 +2021,11 @@ class RazorpaySession:
                 f"{self.tokens.get('rzp_device_id', '')}|{self.profile['user_agent']}".encode()
             ).hexdigest()
             self.tokens['user_fingerprint_v2'] = fp_v2
+            self.tokens['client_id'] = str(uuid.uuid4())
             for domain in ['api.razorpay.com', '.razorpay.com']:
                 self._async_session.cookies.set('user_fingerprint_v2', fp_v2, domain=domain, path='/')
                 self._async_session.cookies.set('testcookie', '1', domain=domain, path='/')
+                self._async_session.cookies.set('clientId', self.tokens['client_id'], domain=domain, path='/')
             await asyncio.sleep(_human_delay(320, 0.5))
 
             # Step 4: Create order

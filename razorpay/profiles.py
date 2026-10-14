@@ -184,7 +184,7 @@ class PlatformProfile:
             p['color_depth'], p['device_memory'],
             str(w + h), str(w * h), p['device_pixel_ratio'],
         ]
-        hx = hashlib.sha1(''.join(parts).encode()).hexdigest()
+        hx = hashlib.sha1(','.join(parts).encode()).hexdigest()  # real browser: s.join() = comma-join
         ts = int(round(time.time() * 1000))
         rand8 = str(random.randint(10000000, 99999999))
         return f"1.{hx}.{ts}.{rand8}"
