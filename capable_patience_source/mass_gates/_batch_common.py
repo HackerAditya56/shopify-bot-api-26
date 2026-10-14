@@ -203,17 +203,33 @@ async def _deduct_one(user_id):
     await asyncio.to_thread(_f)
 
 
+PROGRESS_EMOJI_ID = "5258419835922030550"
+PROGRESS_BAR_WIDTH = 10
+
+
+def progress_bar(checked, total):
+    if not total:
+        return "░" * PROGRESS_BAR_WIDTH, "0.0%"
+    ratio = min(max(checked / total, 0.0), 1.0)
+    filled = int(ratio * PROGRESS_BAR_WIDTH)
+    bar = "█" * filled + "░" * (PROGRESS_BAR_WIDTH - filled)
+    return bar, f"{ratio * 100:.1f}%"
+
+
 def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, errors, elapsed_str):
-    """Unified mass-check progress layout — identical across all mass gates."""
+    """Unified mass-check progress layout — identical across all mass gates (matches /msh)."""
+    bar, percent = progress_bar(checked, total)
     return (
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐭𝐚𝐭𝐮𝐬   ➠</b>   <b>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴...</b> <tg-emoji emoji-id=\"6253754970349243649\">✨</tg-emoji>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐈𝐃 ➠</b> <code>{session_id}</code>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>「 {checked}/{total} 」</code>\n"
+        f"      <tg-emoji emoji-id=\"{PROGRESS_EMOJI_ID}\">⏳</tg-emoji> <b>𝐏𝐫𝐨𝐠𝐫𝐞𝐬𝐬 ➠</b> <code>{bar}</code> <b>{percent}</b>\n"
         f"      <tg-emoji emoji-id=\"{CUSTOM_CHARGED_EMOJI_ID}\">💎</tg-emoji> <b>𝐂𝐡𝐚𝐫𝐠𝐞𝐝 ➠</b> <b>{charged} </b>\n"
         f"      <tg-emoji emoji-id=\"{CUSTOM_APPROVED_EMOJI_ID}\">✅</tg-emoji> <b>𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ➠</b> <b>{approved} </b>\n"
         f"      <tg-emoji emoji-id=\"{CUSTOM_DECLINED_EMOJI_ID}\">❌</tg-emoji> <b>𝐃𝐞𝐜𝐥𝐢𝐧𝐞𝐝 ➠</b> <b>{declined} </b>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>π</a> <b>𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠</b> {gate_display}\n"
         f"      <tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝐄𝐫𝐫𝐨𝐫 ➠</b> <b>{errors} </b>\n"
+        f"      <tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> <b>𝐑𝐞𝐜𝐡𝐞𝐜𝐤 ➠</b> <b>0 recovered, 0 remaining</b>\n"
         f"      <tg-emoji emoji-id=\"5258419835922030550\">🕔</tg-emoji> <b>𝐄𝐥𝐚𝐩𝐬𝐞𝐝 ➠</b> <b>{elapsed_str}</b>\n"
         f"<b><tg-emoji emoji-id=\"5429495925284296642\">🚬</tg-emoji> 𝐃𝐞𝐯 ➠</b> {DEV_LINK}"
     )
