@@ -975,12 +975,12 @@ class RazorpaySession:
         params = {}
         kid = (self.tokens.get('key_id') or '').strip()
         kh = (self.tokens.get('keyless_header') or '').strip()
-        # Keyless pages: use keyless_header only (key_id causes SERVER_ERROR)
+        # HAR (live) shows creat/ajax URL = key_id + session_token + keyless_header ALL THREE.
+        # key_id (merchant key from preferences) is required in the query even for keyless pages.
+        if kid:
+            params['key_id'] = kid
         if kh:
             params['keyless_header'] = kh
-        elif kid:
-            # Pure key-based pages (no keyless_header): use key_id
-            params['key_id'] = kid
         if self.tokens.get('session_token'):
             params['session_token'] = self.tokens['session_token']
         if extra:
@@ -1223,7 +1223,7 @@ class RazorpaySession:
         http_code = 500
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'name': f'{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}'}, 'line_items': line_items}
+            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = self._request('POST', url, self._payment_page_api_headers(auth),
                                     json_data=payload, raw=True)
@@ -1242,7 +1242,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = self._request('POST', url, self._payment_page_api_headers(auth),
-                                         json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'name': f'{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}'},
+                                         json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                     'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
@@ -1338,6 +1338,9 @@ class RazorpaySession:
                 shield = data.get('shield_data', {})
                 self.tokens['shield_context'] = shield.get('shield_context', '')
                 self.tokens['shield_key'] = shield.get('shield_key', '')
+                # merchant key -> key_id for creat/ajax URL (page HTML has key_id:null for keyless pages)
+                if data.get('key'):
+                    self.tokens['key_id'] = data['key']
                 if self.tokens['shield_context']:
                     return
             except Exception as e:
@@ -1480,10 +1483,11 @@ class RazorpaySession:
                         else f"{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}"
 
         fields = [
-            # Customer notes (matching real browser HAR — name, email, phone)
-            ('notes[name]', customer_name),
+            # Customer notes (live HAR: email, phone, phone_imei_no, description)
             ('notes[email]', self.tokens['email']),
             ('notes[phone]', self.tokens['contact']),
+            ('notes[phone_imei_no]', self.tokens.get('phone_imei_no', '')),
+            ('notes[description]', self.tokens.get('description', '')),
             ('payment_link_id', self.tokens.get('payment_link_id', '')),
             ('key_id', self.tokens.get('key_id', '')),
             ('_[integration]', 'payment_pages'),
@@ -1533,9 +1537,8 @@ class RazorpaySession:
             fields.append(('currency_request_id', crid))
             fields.append(('dcc_currency', self.tokens.get('dcc_currency', self._order_currency())))
 
-        # Keyless pages: omit key_id from body (Razorpay rejects it as extra_field_sent)
-        if self.tokens.get('keyless_header'):
-            fields = [(k, v) for k, v in fields if k != 'key_id']
+        # key_id belongs in the URL query, NOT the body (live HAR never sends it in body)
+        fields = [(k, v) for k, v in fields if k != 'key_id']
 
         return '&'.join(f'{quote(k, safe="~")}={quote(str(v), safe="~")}' for k, v in fields)
 
@@ -2144,7 +2147,7 @@ class RazorpaySession:
 
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'name': f'{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}'}, 'line_items': line_items}
+            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = await self._request_async('POST', url, self._payment_page_api_headers(auth),
                                                  json_data=payload, raw=True)
@@ -2161,7 +2164,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = await self._request_async('POST', url, self._payment_page_api_headers(auth),
-                                                       json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'name': f'{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}'},
+                                                       json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                                   'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
@@ -2244,6 +2247,8 @@ class RazorpaySession:
             shield = data.get('shield_data', {})
             self.tokens['shield_context'] = shield.get('shield_context', '')
             self.tokens['shield_key'] = shield.get('shield_key', '')
+            if data.get('key'):
+                self.tokens['key_id'] = data['key']
         except Exception as e:
             self._log(f'  preferences skip: {e}')
 
