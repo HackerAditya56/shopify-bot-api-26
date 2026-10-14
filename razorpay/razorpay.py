@@ -517,19 +517,28 @@ class RazorpaySession:
         s = self.session if use_proxy else self._session_no_proxy()
 
         t0 = time.time()
-        if method == 'GET':
-            resp = s.get(url, headers=headers, timeout=self._per_request_timeout)
-        elif json_data is not None:
-            # Don't set Content-Type manually — let curl_cffi set it with json=.
-            # Pop BOTH capitalizations — Python dict keys are case-sensitive
-            # and our header builders use 'Content-type' (lowercase 't').
+        # Pop Content-Type once (curl_cffi sets it itself via json=).
+        if json_data is not None:
             headers.pop('Content-Type', None)
             headers.pop('Content-type', None)
-            resp = s.request(method, url, json=json_data, headers=headers, timeout=self._per_request_timeout)
-        elif data is not None:
-            resp = s.request(method, url, data=data, headers=headers, timeout=self._per_request_timeout)
-        else:
-            resp = s.request(method, url, headers=headers, timeout=self._per_request_timeout)
+
+        # curl retry — transient SSL/timeout/connection errors retry 2x before giving up.
+        for _attempt in range(3):
+            try:
+                if method == 'GET':
+                    resp = s.get(url, headers=headers, timeout=self._per_request_timeout)
+                elif json_data is not None:
+                    resp = s.request(method, url, json=json_data, headers=headers, timeout=self._per_request_timeout)
+                elif data is not None:
+                    resp = s.request(method, url, data=data, headers=headers, timeout=self._per_request_timeout)
+                else:
+                    resp = s.request(method, url, headers=headers, timeout=self._per_request_timeout)
+                break
+            except Exception as _e:
+                if _attempt < 2:
+                    time.sleep(0.5 * (_attempt + 1))
+                    continue
+                raise
 
         self.last_http_code = resp.status_code
         if self.verbose:

