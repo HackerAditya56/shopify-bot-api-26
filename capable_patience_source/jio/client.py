@@ -338,11 +338,10 @@ def build_card_payload(card: dict, customer_currency: str = "INR",
                        browser_details: dict | None = None,
                        cardinal_request: dict | None = None,
                        fingerprint_id: str | None = None) -> dict:
-    """The JSON that gets JWE-encrypted for paynow/ipay.
+    """PAYNOW payload (live-decoded): cardData + save prefs + browserDetails.
 
-    Matches the live HAR (api.payglocal.com.har): the payload always carries
-    cardinalRequest (empty when no 3DS) and reachData.fingerprintId — both of
-    which the previous build was omitting."""
+    agreedOnSaveCard is a BOOLEAN (the old string "false" was truthy -> the
+    issuer read it as save-the-card and refused)."""
     em = str(card.get("expiryMonth") or card.get("expiry_month") or "")
     ey = str(card.get("expiryYear") or card.get("expiry_year") or "")
     p = {
@@ -352,12 +351,10 @@ def build_card_payload(card: dict, customer_currency: str = "INR",
             "expiryYear": ey,
             "securityCode": card["cvv"],
         },
-        "agreedOnSaveCard": "false",
+        "agreedOnSaveCard": False,
         "sessionCardId": None,
         "saveCurrencyPreference": False,
         "customerCurrency": customer_currency,
-        "cardinalRequest": cardinal_request or {"messageType": "", "payload": ""},
-        "reachData": {"fingerprintId": fingerprint_id or ""},
         "browserDetails": browser_details or {
             "userAgent": UA, "screenWidth": 1920, "screenHeight": 1080,
             "colorDepth": 24, "timeZone": -330, "language": "en-US",
@@ -367,4 +364,26 @@ def build_card_payload(card: dict, customer_currency: str = "INR",
     if customer_currency == "INR":
         p["fallbackToInrCurrency"] = True
     return p
+
+
+def build_ipay_payload(card: dict, customer_currency: str = "INR",
+                       browser_details: dict | None = None,
+                       cardinal_request: dict | None = None,
+                       fingerprint_id: str | None = None) -> dict:
+    """IPAY payload (live-decoded): cardinalRequest + reachData, NO cardData."""
+    p = {
+        "customerCurrency": customer_currency,
+        "cardinalRequest": cardinal_request or {"messageType": "", "payload": ""},
+        "saveCurrencyPreference": False,
+        "browserDetails": browser_details or {
+            "userAgent": UA, "screenWidth": 1920, "screenHeight": 1080,
+            "colorDepth": 24, "timeZone": -330, "language": "en-US",
+            "javaScripEnabled": True, "javaEnabled": False,
+        },
+        "reachData": {"fingerprintId": fingerprint_id or ""},
+    }
+    if customer_currency == "INR":
+        p["fallbackToInrCurrency"] = True
+    return p
+
 
