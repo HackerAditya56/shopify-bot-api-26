@@ -967,6 +967,13 @@ async def start_bot() -> Application:
         _polling_lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
         fcntl.flock(_polling_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
+        # Delete any stale webhook first — polling fails with a Conflict
+        # ("can't use getUpdates while webhook is active") if one is left over.
+        try:
+            await app.bot.delete_webhook(drop_pending_updates=True)
+        except Exception as _e:
+            print(f"[tg_bot] delete_webhook warn: {_e}", file=sys.stderr)
+
         # We got the lock! Start listening for commands.
         await app.updater.start_polling(drop_pending_updates=True)
         print(f"[tg_bot] Worker {os.getpid()} acquired polling lock. "

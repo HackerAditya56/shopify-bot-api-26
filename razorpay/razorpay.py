@@ -148,7 +148,7 @@ def generate_device_id(profile: dict) -> str:
 # Reverse-engineered from v2-entry-a22a774c.modern.js module 96192 (activityRecorder).
 # _[shield_context] = "1-" + shield_context + "--" + base64(epk || nonce || nacl.box(behavioral, nonce, shield_key_pub, epk_sk))
 # shield_key from /v2/standard_checkout/preferences is an X25519 PUBLIC key (b64, 32B).
-def forge_shield_context(shield_key_b64: str, shield_context: str) -> str:
+def forge_shield_context(shield_key_b64: str, shield_context: str, device: dict | None = None) -> str:
     """Build a server-valid _[shield_context] for creat/ajax. Forgeable with just the preferences data."""
     try:
         from nacl.public import PrivateKey, PublicKey, Box
@@ -167,7 +167,7 @@ def forge_shield_context(shield_key_b64: str, shield_context: str) -> str:
         "d": random.randint(300, 2500),           # duration ms (mouse->pay)
         "e": _fake_behavioral_events(),
         "c": {},
-        "g": _shield_device_info(),
+        "g": _shield_device_info(device),
         "a": 1,
     }
     for ev in behavioral["e"]:
@@ -199,20 +199,35 @@ def _fake_behavioral_events() -> list:
     return evs
 
 
-def _shield_device_info() -> dict:
+def _shield_device_info(profile: dict | None = None) -> dict:
+    """Build the device-info (g) block from the browser profile so it matches
+    the fhash/rzp_device_id (the SHA-1 is computed from the same values)."""
+    p = profile or {}
+    def _i(key, default):
+        try:
+            return int(float(p.get(key, default)))
+        except Exception:
+            return default
+    w = _i('screen_width', 1920)
+    h = _i('screen_height', 1080)
+    dm = None
+    try:
+        dm = int(p.get('device_memory', 8) or 0) or None
+    except Exception:
+        dm = None
     return {
         "cp": {"mt": 0, "te": False, "pc": 0, "pf": 0, "ap": 0, "hv": 0, "ah": 0},
-        "sc": {"w": 1920, "h": 1080, "cd": 24, "pr": 1},
-        "vp": {"w": 1920, "h": 1080},
+        "sc": {"w": w, "h": h, "cd": _i('color_depth', 24), "pr": _i('device_pixel_ratio', 1)},
+        "vp": {"w": w, "h": h},
         "tz": "Asia/Kolkata",
-        "to": -330,
-        "lg": "en-IN",
-        "ls": ["en-IN", "en", "hi"],
+        "to": _i('timezone_offset', -330),
+        "lg": p.get('language', 'en-IN'),
+        "ls": [p.get('language', 'en-IN'), "en", "hi"],
         "lc": 3,
         "ce": True,
         "dn": None,
-        "hc": 8,
-        "dm": 8,
+        "hc": _i('hardware_concurrency', 8),
+        "dm": dm,
         "au": {"wd": False, "pn": 0, "ch": True, "nt": False, "wv": None, "wr": None},
     }
 
@@ -674,7 +689,7 @@ class RazorpaySession:
         if not self.tokens.get('_forged_shield'):
             ctx = self.tokens.get('shield_context', '')
             key = self.tokens.get('shield_key', '')
-            self.tokens['_forged_shield'] = forge_shield_context(key, ctx) if (key and ctx) else ctx
+            self.tokens['_forged_shield'] = forge_shield_context(key, ctx, getattr(self, 'profile', None)) if (key and ctx) else ctx
         return self.tokens['_forged_shield']
 
     def _generate_stripe_radar_session(self) -> str:
