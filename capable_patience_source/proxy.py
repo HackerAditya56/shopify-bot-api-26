@@ -578,7 +578,7 @@ async def check_db_proxies_background(bot, message: types.Message):
 # COMMAND 1: /proxy (Add Single, Bulk, or File)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.message(F.text.startswith("/proxy"))
+@router.message(F.text.startswith(("/proxy", "/rzpxy")))
 async def proxy_command(message: types.Message):
     # Extract proxies from all sources (text, reply, file)
     valid_proxies, total_lines, error_msg = await extract_proxies_from_input(message)
@@ -626,7 +626,7 @@ async def proxy_command(message: types.Message):
 # COMMAND 2: /checkproxy
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.message(F.text.startswith("/checkproxy"))
+@router.message(F.text.startswith(("/checkproxy", "/chkpxy")))
 async def checkproxy_command(message: types.Message):
     # Start background task - will reply when done with .txt file
     asyncio.create_task(check_db_proxies_background(message.bot, message))

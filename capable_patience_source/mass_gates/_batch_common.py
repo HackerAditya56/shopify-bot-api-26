@@ -65,11 +65,25 @@ def _selection_text(charged: bool, approved: bool, total: int) -> str:
 def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝", callback_data=BatchSelCallback(sel_id=sel_id, action="charged").pack()),
-            InlineKeyboardButton(text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝", callback_data=BatchSelCallback(sel_id=sel_id, action="approved").pack()),
+            InlineKeyboardButton(
+                text="𝐂𝐡𝐚𝐫𝐠𝐞𝐝",
+                callback_data=BatchSelCallback(sel_id=sel_id, action="charged").pack(),
+                style="success" if charged else "primary",
+                icon_custom_emoji_id=CUSTOM_CHARGED_EMOJI_ID,
+            ),
+            InlineKeyboardButton(
+                text="𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝",
+                callback_data=BatchSelCallback(sel_id=sel_id, action="approved").pack(),
+                style="success" if approved else "primary",
+                icon_custom_emoji_id=CUSTOM_APPROVED_EMOJI_ID,
+            ),
         ],
         [
-            InlineKeyboardButton(text="𝐒𝐭𝐚𝐫𝐭", callback_data=BatchSelCallback(sel_id=sel_id, action="start").pack()),
+            InlineKeyboardButton(
+                text="𝐒𝐭𝐚𝐫𝐭",
+                callback_data=BatchSelCallback(sel_id=sel_id, action="start").pack(),
+                style="primary",
+            ),
         ],
     ])
 
