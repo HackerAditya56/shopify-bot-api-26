@@ -246,6 +246,93 @@ def remove_from_pool(proxy_host: str):
             _save_pool()
 
 
+# ── Cooldown — flagged proxies sit out for N hours (NOT removed) ─────────
+
+COOLDOWN_FILE = os.path.join(_DATA_DIR, "proxy_cooldown.json")
+COOLDOWN_HOURS = 10
+
+_cooldown_lock = threading.Lock()
+_cooldowns_cache: dict[str, dict] = {}
+_cooldowns_mtime: float = 0.0
+
+
+def _load_cooldowns() -> dict[str, dict]:
+    global _cooldowns_cache, _cooldowns_mtime
+    try:
+        if os.path.exists(COOLDOWN_FILE):
+            mtime = os.path.getmtime(COOLDOWN_FILE)
+            if mtime == _cooldowns_mtime:
+                return _cooldowns_cache
+            with open(COOLDOWN_FILE) as f:
+                _cooldowns_cache = json.load(f)
+            _cooldowns_mtime = mtime
+            return _cooldowns_cache
+    except Exception:
+        pass
+    _cooldowns_cache = {}
+    _cooldowns_mtime = 0.0
+    return _cooldowns_cache
+
+
+def _save_cooldowns(cds: dict):
+    tmp = COOLDOWN_FILE + ".tmp"
+    lockfile = COOLDOWN_FILE + ".lock"
+    try:
+        with open(lockfile, "a") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            with open(tmp, "w") as f:
+                json.dump(cds, f, indent=2)
+            os.replace(tmp, COOLDOWN_FILE)
+            fcntl.flock(lf, fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+
+def _cooldown_key(proxy_host: str) -> str:
+    """Normalize any proxy id (hostname, host:port, http://user:pass@host:port) to bare hostname."""
+    host = (proxy_host or "").lower().strip()
+    for p in ("http://", "https://", "socks5://"):
+        if host.startswith(p):
+            host = host[len(p):]
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    if ":" in host and host.rsplit(":", 1)[-1].isdigit():
+        host = host.rsplit(":", 1)[0]
+    return host
+
+
+def set_cooldown(proxy_host: str, hours: int = COOLDOWN_HOURS, reason: str = "waf_403"):
+    """Put a proxy in cooldown for `hours` (default 10h). It is NOT removed."""
+    key = _cooldown_key(proxy_host)
+    now = time.time()
+    with _cooldown_lock:
+        cds = _load_cooldowns()
+        cds[key] = {"until": now + hours * 3600, "reason": reason, "set_at": now}
+        _save_cooldowns(cds)
+
+
+def is_in_cooldown(proxy_host: str) -> bool:
+    key = _cooldown_key(proxy_host)
+    cds = _load_cooldowns()
+    entry = cds.get(key)
+    if not entry:
+        return False
+    if entry.get("until", 0) < time.time():
+        with _cooldown_lock:
+            cds = _load_cooldowns()
+            cds.pop(key, None)
+            _save_cooldowns(cds)
+        return False
+    return True
+
+
+def get_cooldown_list() -> dict[str, dict]:
+    """Return the active cooldown entries (host:port -> {until, reason, set_at})."""
+    cds = _load_cooldowns()
+    now = time.time()
+    return {k: v for k, v in cds.items() if v.get("until", 0) >= now}
+
+
 def mark_proxy_used(proxy_host: str):
     """Record that a proxy was used for a checkout.
 
@@ -272,18 +359,20 @@ def mark_proxy_used(proxy_host: str):
 
 
 def get_pool_stats() -> dict:
-    """Return pool summary: total, live.
+    """Return pool summary: total, live, cooldown.
 
     Reloads from file to ensure cross-worker visibility."""
     _load_pool()   # cross-worker: reload from file
 
     with _pool_lock:
         total = len(_pool)
-        live_count = total  # all proxies in pool are live
+        cooldown = {k for k, _ in _pool.items() if is_in_cooldown(k)}
+        live_count = total - len(cooldown)
 
     return {
         "total": total,
         "live": live_count,
+        "cooldown": len(cooldown),
     }
 
 
@@ -295,6 +384,8 @@ def get_all_live_proxies() -> list[dict]:
     result = []
     with _pool_lock:
         for key, entry in _pool.items():
+            if is_in_cooldown(key):
+                continue
             entry_copy = dict(entry)
             result.append(entry_copy)
     return sorted(result, key=lambda x: x["host"])
@@ -306,7 +397,7 @@ def get_random_live_proxy() -> Optional[dict]:
     Reloads from file for cross-worker visibility."""
     _load_pool()  # cross-worker: reload from file
     with _pool_lock:
-        live = list(_pool.values())
+        live = [e for k, e in _pool.items() if not is_in_cooldown(k)]
     if not live:
         return None
     return random.choice(live)

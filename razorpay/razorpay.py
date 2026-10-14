@@ -3178,8 +3178,8 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                     continue
                 result['message'] += ' (retry exhausted)'
                 tg_bot.increment_stat('waf_403')
-                if proxy_manager._record_proxy_failure(proxy_host):
-                    proxy_manager.remove_from_pool(proxy_host)
+                proxy_manager._record_proxy_failure(proxy_host)
+                proxy_manager.set_cooldown(proxy_host, hours=10, reason="waf_403")
             # 406/401 = stale session token → invalidate cache + retry once
             if result.get('status') == 'error' and ('406' in msg or '401' in msg):
                 if attempt < 1:
@@ -3228,8 +3228,8 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
             # 403 exhausted via exception path
             if '403' in err_str:
                 tg_bot.increment_stat('waf_403')
-                if proxy_manager._record_proxy_failure(proxy_host):
-                    proxy_manager.remove_from_pool(proxy_host)
+                proxy_manager._record_proxy_failure(proxy_host)
+                proxy_manager.set_cooldown(proxy_host, hours=10, reason="waf_403")
             return {
                 'card': card_line or 'unknown', 'status': 'error',
                 'message': f"Proxy Error: {err_str[:200]}",
@@ -3252,8 +3252,8 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
         # If ALL targets were rate-limited by the token bucket, the proxy
         # is healthy — the bottleneck is JA4 capacity, not the proxy.
         tg_bot.increment_stat('waf_403')
-        if proxy_manager._record_proxy_failure(proxy_host):
-            proxy_manager.remove_from_pool(proxy_host)
+        proxy_manager._record_proxy_failure(proxy_host)
+        proxy_manager.set_cooldown(proxy_host, hours=10, reason="waf_403")
         msg = 'WAF 403 — all impersonation targets blocked'
     else:
         msg = 'All JA4 targets rate-limited (token bucket exhausted) — retry later'

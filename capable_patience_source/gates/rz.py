@@ -480,3 +480,45 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     
     # Log timing
     logging.info(f"RZ command completed in {elapsed:.2f}s for user {user_id}")
+
+# ─────────────────────────────────────────────────────────────────────────
+# /rzp — Razorpay proxy pool status (live + cooldown)
+# ─────────────────────────────────────────────────────────────────────────
+
+@router.message(F.text.startswith("/rzp") | F.caption.startswith("/rzp"))
+async def rzp_command(message: types.Message):
+    try:
+        import urllib.request as _ur
+        with _ur.urlopen(f"{RZ_API}/pool-status", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        await safe_reply(message, f"❌ <b>API unreachable:</b> <code>{str(e)[:60]}</code>", parse_mode="HTML")
+        return
+
+    total = data.get("total", 0)
+    live = data.get("live", 0)
+    cd = data.get("cooldown", 0)
+    cd_list = data.get("cooldown_list", [])
+
+    lines = [
+        "<b>𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐏𝐫𝐨𝐱𝐲 𝐏𝐨𝐨𝐥</b>",
+        "━━━━━━━━━━━━━━━━━━━━━",
+        f"<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total}</code>",
+        f"✅ <b>𝐋𝐢𝐯𝐞 ➠</b> <code>{live}</code>",
+        f"❄️ <b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 ➠</b> <code>{cd}</code>",
+    ]
+    if cd_list:
+        lines.append("━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("<b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 𝐥𝐢𝐬𝐭:</b>")
+        import datetime as _dt
+        for e in cd_list[:20]:
+            p = e.get("proxy", "?")
+            until = e.get("until", 0)
+            try:
+                ts = _dt.datetime.fromtimestamp(until).strftime("%H:%M")
+            except Exception:
+                ts = "?"
+            lines.append(f"• <code>{p}</code> ⏳ <b>{ts}</b>")
+        if len(cd_list) > 20:
+            lines.append(f"… and {len(cd_list)-20} more")
+    await safe_reply(message, "\n".join(lines), parse_mode="HTML")

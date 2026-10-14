@@ -447,6 +447,24 @@ async def health():
 
 class ProxyCheckRequest(BaseModel):
     proxies: list[str]  # list of "host:port:user:pass"
+@app.get('/pool-status')
+async def pool_status():
+    """Razorpay proxy pool status: live + cooldown."""
+    stats = proxy_manager.get_pool_stats()
+    cooldowns = proxy_manager.get_cooldown_list()
+    cd_list = [
+        {"proxy": k, "until": v.get("until"), "reason": v.get("reason", "waf_403")}
+        for k, v in sorted(cooldowns.items(), key=lambda x: x[1].get("until", 0))
+    ]
+    return {
+        "status": "ok",
+        "total": stats.get("total", 0),
+        "live": stats.get("live", 0),
+        "cooldown": stats.get("cooldown", 0),
+        "cooldown_list": cd_list,
+    }
+
+
 @app.post('/check-proxy')
 async def check_proxy(req: ProxyCheckRequest):
     """Bulk-check proxies against Razorpay. Returns live/blocked/dead status.
