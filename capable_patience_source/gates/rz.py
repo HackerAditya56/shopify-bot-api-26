@@ -94,9 +94,9 @@ async def get_anime_gif():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Custom Emoji IDs
-CUSTOM_CHARGED_EMOJI_ID = "4956719506027185156"
-CUSTOM_APPROVED_EMOJI_ID = "4958610528588008305"
-CUSTOM_DECLINED_EMOJI_ID = "4956612582816351459"
+CUSTOM_CHARGED_EMOJI_ID = "5359719332542718652"
+CUSTOM_APPROVED_EMOJI_ID = "6044254523009012231"
+CUSTOM_DECLINED_EMOJI_ID = "5893081007153746175"
 
 # In-memory dictionary for rate limiting
 user_last_command_time = {}
@@ -419,17 +419,17 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
 
-    # Determine symbol (matches /sh single-gate format: 🔥 charged, ✅ approved, ❌ declined)
+    # Determine Final Status Display (premium emojis — same IDs as /msh)
     if status_raw == "charged":
-        symbol = f'<tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">🔥</tg-emoji>'
+        final_status = f'𝗖𝗛𝗔𝗥𝗚𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">💎</tg-emoji>'
         is_charged = True
     elif status_raw == "approved":
-        symbol = f'<tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji>'
+        final_status = f'𝗔𝗣𝗣𝗥𝗢𝗩𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji>'
         is_charged = True
     elif status_raw == "declined":
-        symbol = f'<tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji>'
+        final_status = f'𝗗𝗘𝗖𝗟𝗜𝗡𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji>'
     else:
-        symbol = "⚠️"
+        final_status = "𝗘𝗥𝗥𝗢𝗥 ⚠️"
 
     # UPDATED CREDIT DEDUCTION LOGIC (Applies to everyone)
     credits_to_deduct = 0
@@ -461,12 +461,15 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     elapsed = time.time() - start_time
     
     final_caption = (
-        f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{formatted_cc}</code>\n"
-        f"<b>𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠</b> {res_message}\n"
-        f"<b>𝗔𝗺𝗼𝘂𝗻𝘁 ➠</b> ₹{amount_paise // 100}\n"
-        f"<b>𝗕𝗿𝗮𝗻𝗱 ➠</b> {bin_scheme}\n"
-        f"<b>𝗕𝗜𝗡 ➠</b> {cc[:6]}\n"
-        f"{symbol}"
+        f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
+        f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
+        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{amount_paise // 100}\n"
+        f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{res_message}</b>\n"
+        f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
+        f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"
+        f"𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➠ <b>{bin_country}</b>\n"
+        f"𝗨𝘀𝗲𝗿 ➠ {user_display}\n"
+        f"𝗗𝗲𝘃 ➠ {dev_link}"
     )
 
     # Send result by editing the processing message (matches /sh single-gate flow)
