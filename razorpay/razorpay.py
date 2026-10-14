@@ -969,9 +969,8 @@ class RazorpaySession:
         return '&'.join(f'{k}={quote(str(v))}' for k, v in params.items())
 
     def _checkout_auth_query(self, extra: dict = None) -> str:
-        """Build auth query params. Keyless pages must NOT include key_id —
-        Razorpay rejects it with 'key_id is/are not required' (extra_field_sent).
-        Pure key-based pages use key_id. Page auth mode determines which to send."""
+        """Build auth query params. Live HAR: key_id + session_token on every
+        standard_checkout endpoint. keyless_header is appended ONLY on create/ajax."""
         params = {}
         kid = (self.tokens.get('key_id') or '').strip()
         # HAR (live): prefill/order/iin = key_id + session_token. create/ajax adds keyless_header on top.
