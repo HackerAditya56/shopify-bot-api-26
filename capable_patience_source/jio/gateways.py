@@ -92,10 +92,12 @@ def _payglocal_once(xgl: str, card: dict, proxy: str) -> tuple:
     #    (userAgent must match the session's random profile UA)
     pem = decrypt_public_key(key_blob, visitor_id)
     payload = build_card_payload(card, customer_currency=issuing,
+                                 fingerprint_id=visitor_id,
                                  browser_details={"userAgent": pg.ua,
                                                   "screenWidth": 1920, "screenHeight": 1080,
-                                                  "colorDepth": 24, "timezone": "Asia/Kolkata",
-                                                  "language": "en-US"})
+                                                  "colorDepth": 24, "timeZone": -330,
+                                                  "language": "en-US",
+                                                  "javaScripEnabled": True, "javaEnabled": False})
 
     # 4) paynow (JWE) -> INPROGRESS -> ipay (JWE) -> terminal verdict
     pn = pg.paynow(rk, payload, pem)

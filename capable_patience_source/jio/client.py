@@ -241,8 +241,14 @@ class PayGlocalClient:
         self.session = SessionFactory().make(proxy)
         pf = getattr(self.session, "_pf", None)
         self.ua = pf["ua"] if pf else UA
-        self.session.headers.update({"Accept-Language": "en-US,en;q=0.9",
-                                     "Referer": f"https://api.payglocal.com/gl/payflow-ui/?x-gl-token={xgl_token}"})
+        self.session.headers.update({
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"https://api.payglocal.com/gl/payflow-ui/?x-gl-token={xgl_token}",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "Origin": "https://api.payglocal.com",
+        })
 
     def _url(self, path: str) -> str:
         return f"https://api.payglocal.com{path}?x-gl-token={self.token}"
@@ -255,13 +261,15 @@ class PayGlocalClient:
                                       "x-gl-pb-tag-id": "",
                                       "x-gl-previous-host": "https://pay.easebuzz.in/",
                                       "x-gl-referrer-mismatch": "false",
-                                      "x-gl-trusted-referrer": "https://pay.easebuzz.in"})
+                                      "x-gl-trusted-referrer": "https://pay.easebuzz.in",
+                                      "x-request-time": str(int(time.time() * 1000))})
         return r.json()
 
     def risk_fp(self, request_id: str, visitor_id: str) -> dict:
         r = self.session.post(
             self._url("/gl/v1/payments/risk/fp"),
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={"Content-Type": "application/json", "Accept": "application/json",
+                     "x-request-time": str(int(time.time() * 1000))},
             json={"requestId": request_id, "visitorId": visitor_id,
                   "visitorFound": True, "confidenceScore": 1},
         )
@@ -275,7 +283,8 @@ class PayGlocalClient:
         r = self.session.post(
             self._url("/gl/v2/payments/pd/paynow"),
             headers={"Content-Type": "application/json", "Accept": "application/json",
-                     "Origin": "https://api.payglocal.com"},
+                     "Origin": "https://api.payglocal.com",
+                     "x-request-time": str(int(time.time() * 1000))},
             json={"isEnc": "true", "kid": kid, "payload": jwe},
         )
         return r.json()
@@ -285,7 +294,8 @@ class PayGlocalClient:
         r = self.session.post(
             self._url("/gl/v2/payments/dc/ipay"),
             headers={"Content-Type": "application/json", "Accept": "application/json",
-                     "Origin": "https://api.payglocal.com"},
+                     "Origin": "https://api.payglocal.com",
+                     "x-request-time": str(int(time.time() * 1000))},
             json={"isEnc": "true", "kid": kid, "payload": jwe},
         )
         return r.json()
@@ -326,8 +336,13 @@ class PayGlocalClient:
 
 def build_card_payload(card: dict, customer_currency: str = "INR",
                        browser_details: dict | None = None,
-                       cardinal_request: dict | None = None) -> dict:
-    """The JSON that gets JWE-encrypted for paynow/ipay (from payflow UI JS)."""
+                       cardinal_request: dict | None = None,
+                       fingerprint_id: str | None = None) -> dict:
+    """The JSON that gets JWE-encrypted for paynow/ipay.
+
+    Matches the live HAR (api.payglocal.com.har): the payload always carries
+    cardinalRequest (empty when no 3DS) and reachData.fingerprintId — both of
+    which the previous build was omitting."""
     em = str(card.get("expiryMonth") or card.get("expiry_month") or "")
     ey = str(card.get("expiryYear") or card.get("expiry_year") or "")
     p = {
@@ -339,18 +354,17 @@ def build_card_payload(card: dict, customer_currency: str = "INR",
         },
         "agreedOnSaveCard": "false",
         "sessionCardId": None,
-        "saveCurrencyPreference": None,
+        "saveCurrencyPreference": False,
         "customerCurrency": customer_currency,
+        "cardinalRequest": cardinal_request or {"messageType": "", "payload": ""},
+        "reachData": {"fingerprintId": fingerprint_id or ""},
         "browserDetails": browser_details or {
             "userAgent": UA, "screenWidth": 1920, "screenHeight": 1080,
-            "colorDepth": 24, "timezone": "Asia/Kolkata", "language": "en-US",
-            "platform": "Linux x86_64", "hardwareConcurrency": 8,
-            "deviceMemoryGb": 8, "javaEnabled": False, "cookiesEnabled": True,
-            "screenAvailWidth": 1920, "screenAvailHeight": 1080,
+            "colorDepth": 24, "timeZone": -330, "language": "en-US",
+            "javaScripEnabled": True, "javaEnabled": False,
         },
     }
     if customer_currency == "INR":
         p["fallbackToInrCurrency"] = True
-    if cardinal_request:
-        p["cardinalRequest"] = cardinal_request
     return p
+
