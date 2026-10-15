@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import datetime
+import gc
 import hmac
 import logging
 import os
@@ -308,8 +310,41 @@ def _is_memory_exceeded() -> bool:
 #  FastAPI app
 # ══════════════════════════════════════════════════════════════
 
+def _mem_trim_loop(interval: float = 45.0):
+    """Periodically gc.collect() + malloc_trim to return freed heap to the OS.
+
+    Runs in a daemon thread per worker process. Pure memory management —
+    never touches checkout logic, so card results are identical. The trim only
+    helps AFTER a burst: it lets RSS drop when concurrency falls, so the next
+    burst doesn't start near the RAM ceiling."""
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        _trim = libc.malloc_trim
+        _trim.argtypes = [ctypes.c_size_t]
+        _trim.restype = ctypes.c_int
+    except Exception:
+        _trim = None
+    while True:
+        time.sleep(interval)
+        try:
+            gc.collect()
+            if _trim is not None:
+                _trim(0)
+        except Exception:
+            pass
+
+
+def _start_mem_trim():
+    """Start the trim thread if MEM_TRIM=1 (default on)."""
+    if os.environ.get("MEM_TRIM", "1") != "1":
+        return
+    t = threading.Thread(target=_mem_trim_loop, name="mem-trim", daemon=True)
+    t.start()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    _start_mem_trim()
     yield
 
 app = FastAPI(title="Shopify Checker API v2", docs_url=None, redoc_url=None,
