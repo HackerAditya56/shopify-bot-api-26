@@ -147,9 +147,27 @@ def _live_cpu_percent(sample_s: float = 0.6) -> str:
         return "unknown"
 
 
+def _bar(pct: float, segs: int = 10) -> str:
+    """Render a unicode progress bar: ████████░░"""
+    pct = max(0.0, min(100.0, pct))
+    filled = int(round(pct / 100.0 * segs))
+    return "█" * filled + "░" * (segs - filled)
+
+
+def _dot(pct: float) -> str:
+    """Colour-coded status dot by usage threshold."""
+    if pct >= 85:
+        return "🔴"
+    if pct >= 60:
+        return "🟡"
+    return "🟢"
+
+
 def _vps_status_text(live_cpu: str = None) -> str:
-    """Human-readable VPS health + public IP block.  Every call re-reads
-    /proc + re-fetches the WAN IP, so the values are always fresh (never cached)."""
+    """Human-readable VPS health + public IP block with progress bars.
+
+    Every call re-reads /proc + re-fetches the WAN IP, so the values are
+    always fresh (never cached)."""
     hostname = "unknown"
     try:
         hostname = open("/proc/sys/kernel/hostname").read().strip()
@@ -170,24 +188,28 @@ def _vps_status_text(live_cpu: str = None) -> str:
     except Exception:
         pass
 
-    mem = "unknown"
+    # RAM — numeric total/used + percentage
+    total_mb = avail_mb = 0
     try:
-        total_mb = avail_mb = 0
         for line in open("/proc/meminfo").read().splitlines():
             if line.startswith("MemTotal:"):
                 total_mb = int(line.split()[1]) // 1024
             elif line.startswith("MemAvailable:"):
                 avail_mb = int(line.split()[1]) // 1024
-        mem = f"{total_mb - avail_mb}/{total_mb} MB"
     except Exception:
         pass
+    used_mb = total_mb - avail_mb if total_mb else 0
+    ram_pct = (used_mb / total_mb * 100.0) if total_mb else 0.0
 
-    disk = "unknown"
+    # Disk — numeric used/total + percentage
+    disk_pct = 0.0
+    disk_txt = "unknown"
     try:
         st = os.statvfs("/")
         used_gb = (st.f_blocks - st.f_bfree) * st.f_frsize / 1024 ** 3
         total_gb = st.f_blocks * st.f_frsize / 1024 ** 3
-        disk = f"{used_gb:.1f}/{total_gb:.1f} GB"
+        disk_pct = (used_gb / total_gb * 100.0) if total_gb else 0.0
+        disk_txt = f"{used_gb:.1f}/{total_gb:.1f} GB"
     except Exception:
         pass
 
@@ -197,8 +219,16 @@ def _vps_status_text(live_cpu: str = None) -> str:
     except Exception:
         pass
 
+    # CPU — live percentage
     if live_cpu is None:
         live_cpu = _live_cpu_percent()
+    cpu_pct = 0.0
+    try:
+        cpu_pct = float(str(live_cpu).rstrip("%"))
+    except Exception:
+        pass
+
+    ram_txt = f"{used_mb}/{total_mb} MB" if total_mb else "unknown"
 
     return (
         "\n<b>🚀 VPS Online</b>\n"
@@ -207,9 +237,10 @@ def _vps_status_text(live_cpu: str = None) -> str:
         f"🌐 <b>Public IP:</b> <code>{_get_public_ip()}</code>\n"
         f"⏱ <b>Uptime:</b> {uptime}\n"
         f"⚙️ <b>Load:</b> {load}\n"
-        f"⚡ <b>CPU:</b> {live_cpu} ({cpus} cores)\n"
-        f"🧠 <b>RAM used:</b> {mem}\n"
-        f"💾 <b>Disk used:</b> {disk}\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        f"{_dot(cpu_pct)} <b>CPU:</b>  <code>{_bar(cpu_pct)}</code> {cpu_pct:.1f}% · {cpus} cores\n"
+        f"{_dot(ram_pct)} <b>RAM:</b>  <code>{_bar(ram_pct)}</code> {ram_pct:.1f}% · {ram_txt}\n"
+        f"{_dot(disk_pct)} <b>Disk:</b> <code>{_bar(disk_pct)}</code> {disk_pct:.1f}% · {disk_txt}\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     )
 
