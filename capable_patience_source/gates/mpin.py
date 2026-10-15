@@ -407,14 +407,16 @@ async def _run_batch(message, st, user_id):
         except Exception:
             pass
         r = await asyncio.to_thread(_mp_check, card, brand_key, amount, qty)
-        if not r.get("ok") and r.get("error") == "LOGIN_REQUIRED":
+        if not isinstance(r, dict):
+            results.append((card, "ERROR", "no response"))
+            continue
+        if r.get("error") == "LOGIN_REQUIRED":
             await proc.edit_text(f'{_tg(ID_WARNING, "⚠️")} <b>𝗟𝗼𝗴𝗶𝗻 𝗿𝗲𝗾𝘂𝗶𝗿𝗲𝗱.</b> 𝗟𝗼𝗴𝗶𝗻 𝗳𝗶𝗿𝘀𝘁 𝘃𝗶𝗮 /mpin → 𝗟𝗼𝗴𝗶𝗻.', parse_mode="HTML")
             return
-        if not r.get("ok"):
-            results.append((card, "ERROR", str(r.get("error", "unknown"))))
-            continue
+        # Magicpin _flow returns exit:1 for declines TOO — the real verdict is
+        # in result.Response, not in the ok flag.  Classify from Response.
         res = r.get("result") or {}
-        resp = res.get("Response") or res.get("message") or "UNKNOWN"
+        resp = res.get("Response") or res.get("message") or r.get("error") or "UNKNOWN"
         status_disp, status_key = _fmt_status(resp)
         voucher = res.get("voucher_code", "")
         results.append((card, status_key, status_disp, voucher))
