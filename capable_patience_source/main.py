@@ -42,6 +42,7 @@ from gates.bl import bl_command
 from gates.at import at_command
 from gates.pw import pw_command
 from gates.rz import rz_command, rzp_command
+from gates.mpin import mpin_command, mpin_callback_handler
 from gates.pyu import pyu_command
 from gates.py import py_command
 from gates.nmi import nmi_command
@@ -670,7 +671,7 @@ DOT_COMMAND_MAP = {
     "sp": sp_command, "hc": hc_command, "pf": pf_command,
     "vbv": vbv_command, "ft": ft_command, "bl": bl_command,
     "at": at_command, "pw": pw_command,
-    "rz": rz_command, "rzp": rzp_command, "pyu": pyu_command, "py": py_command,
+    "rz": rz_command, "rzp": rzp_command, "mpin": mpin_command, "pyu": pyu_command, "py": py_command,
     "nmi": nmi_command, "nmi2": nmi2_command,  # "stco": stco_command,  # hitter OFF
     "mst": mst_command, "msh": msh_command,  # "hit": hit_command, "co": hit_command,  # hitter OFF
     "auth": auth_command, "stripe": stripe_command, "mauth": mauth_command, "mstripe": mstripe_command, "mrz": mrz_command, "bin": binn_command, "binn": binn_command,
@@ -768,6 +769,7 @@ dp.callback_query.register(mchk_result_handler, MchkResultCallback.filter())
 dp.callback_query.register(mst_stop_handler, MstStopCallback.filter())
 dp.callback_query.register(mst_result_handler, MstResultCallback.filter())
 dp.callback_query.register(sh_callback_handler, F.data.startswith("sh_"))
+dp.callback_query.register(mpin_callback_handler, F.data.startswith("mpin_"))
 # dp.callback_query.register(stco_callback_handler, F.data.startswith("stco_"))  # hitter OFF
 dp.callback_query.register(regenerate_cards_callback, F.data.startswith("gen_reg"))
 
@@ -779,7 +781,7 @@ for _cmd, _fn in [
     ("hc", hc_command), ("sp", sp_command),  # ("stco", stco_command),  # hitter OFF
     ("vbv", vbv_command),
     ("ft", ft_command), ("nmi", nmi_command), ("nmi2", nmi2_command), ("bl", bl_command),
-    ("rz", rz_command), ("rzp", rzp_command), ("pyu", pyu_command), ("sub", sub_command), ("rc", rc_command),
+    ("rz", rz_command), ("rzp", rzp_command), ("mpin", mpin_command), ("pyu", pyu_command), ("sub", sub_command), ("rc", rc_command),
     ("suball", suball_command), ("g_code", g_code_command), ("claim", claim_command),
     ("info", info_command), ("rsub", rsub_command), ("plan", plan_command),
     ("adcr", adcr_command), ("on", on_command), ("off", off_command),
