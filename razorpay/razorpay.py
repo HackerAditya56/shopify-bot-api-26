@@ -343,7 +343,7 @@ class RazorpaySession:
                  region: str = 'IN',
                  ja4_config: Optional[JA4Config] = None,
                  session_cache: Optional[SessionCache] = None,
-                 per_request_timeout: float = 12.0):
+                 per_request_timeout: float = 20.0):
         self.payment_page_url = self._normalize_url(payment_page_url)
         self.payment_referer = self.payment_page_url
         self.card = card
@@ -524,6 +524,7 @@ class RazorpaySession:
         kwargs: dict = {
             'impersonate': target,
             'default_headers': True,
+            'verify': False,  # proxy MITM self-signed certs (curl error 60) — skip cert verification
             # ECH GREASE (TLS extension 65037) — real Chrome 119+ always sends
             # this extension.  Its ABSENCE is a detectable anomaly that WAFs
             # can use to distinguish impersonated traffic from real browsers.
@@ -655,6 +656,7 @@ class RazorpaySession:
         kwargs: dict = {
             'impersonate': target,
             'default_headers': True,
+            'verify': False,
             'max_clients': 1,  # sequential sub-requests within a checkout
             'curl_options': {CurlOpt.ECH: "grease"},
         }
@@ -678,8 +680,8 @@ class RazorpaySession:
             return self._async_no_proxy_sess
         target = (self._ja4_config.impersonate_target if self._ja4_config is not None
                   else self._impersonation_target)
-        kwargs = dict(impersonate=target, default_headers=True, max_clients=1,
-                      curl_options={CurlOpt.ECH: "grease"})
+        kwargs = dict(impersonate=target, default_headers=True, verify=False,
+                      max_clients=1, curl_options={CurlOpt.ECH: "grease"})
         if self._ja4_config is not None:
             kwargs['extra_fp'] = self._ja4_config.to_dict()
         s = curl_requests.AsyncSession(**kwargs)
@@ -693,7 +695,7 @@ class RazorpaySession:
             return self._no_proxy_session
         target = (self._ja4_config.impersonate_target if self._ja4_config is not None
                   else self._impersonation_target)
-        kwargs = dict(impersonate=target, default_headers=True)
+        kwargs = dict(impersonate=target, default_headers=True, verify=False)
         if self._ja4_config is not None:
             kwargs['extra_fp'] = self._ja4_config.to_dict()
         s = curl_requests.Session(**kwargs)
@@ -2847,7 +2849,7 @@ class PrimpCheckoutSession:
             'impersonate': self.primp_config['impersonate'],
             'timeout': 12,
             'cookie_store': True,
-            'verify': True,
+            'verify': False,
         }
         if self.proxy_url:
             client_kwargs['proxy'] = self.proxy_url
@@ -2985,7 +2987,7 @@ class PrimpCheckoutSession:
 
 def run_razorpay(cc: str, site: str, proxy: str, verbose: bool = False,
                  amount_paise: int = DEFAULT_AMOUNT_PAISE,
-                 per_request_timeout: float = 12.0) -> dict:
+                 per_request_timeout: float = 20.0) -> dict:
     """Run the full Razorpay checkout flow and return result.
 
     Args:
@@ -3042,8 +3044,8 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                               amount_paise: int = DEFAULT_AMOUNT_PAISE,
                               region: str = 'IN',
                               backend: str = 'auto',
-                              timeout: float = 60.0,
-                              per_request_timeout: float = 12.0) -> dict:
+                              timeout: float = 90.0,
+                              per_request_timeout: float = 20.0) -> dict:
     """Async entry point with multi-backend support.
 
     backend='auto': weighted via backend_router (wreq/curl_cffi/httpcloak)
