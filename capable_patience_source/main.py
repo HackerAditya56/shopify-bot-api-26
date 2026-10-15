@@ -42,7 +42,7 @@ from gates.bl import bl_command
 from gates.at import at_command
 from gates.pw import pw_command
 from gates.rz import rz_command, rzp_command
-from gates.mpin import mpin_command, mpin_callback_handler
+from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
 from gates.py import py_command
 from gates.nmi import nmi_command
@@ -148,6 +148,7 @@ dp.include_router(stripe_router)
 dp.include_router(mauth_router)
 dp.include_router(mstripe_router)
 dp.include_router(mrz_router)
+dp.include_router(mpin_router)
 dp.include_router(sel_router)
 dp.include_router(stop_router)
 dp.include_router(proxy_router)
@@ -390,6 +391,7 @@ _KB_GATES = InlineKeyboardMarkup(inline_keyboard=[
 _KB_HITTER = InlineKeyboardMarkup(inline_keyboard=[
     [
         colored_button(text="Jɪᴏ Rᴇᴄʜᴀʀɢᴇ", callback_data="info_hitter_jio", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
+        colored_button(text="Mᴀɢɪᴄᴘɪɴ", callback_data="info_hitter_magicpin", style="primary", icon_custom_emoji_id=EMOJI_STAR),
     ],
     [colored_button(text="« Bᴀᴄᴋ", callback_data="menu_gates", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
 ])
@@ -491,6 +493,16 @@ STATIC_MENU_MAP["info_hitter_jio"] = (
     f"<b><i>Command ➠ /jio</i></b>\n"
     f"<b><i>Usage ➠ /jio &lt;number&gt; [amount] + reply cards (max 5)</i></b>\n"
     f"<b><i>Example ➠ /jio 7667702392 19</i></b>\n"
+    f"{_SEP}",
+    _back("menu_hitter")
+)
+
+STATIC_MENU_MAP["info_hitter_magicpin"] = (
+    f"{_SEP}\n"
+    f"<b><i>Hitter ➠ Magicpin (real voucher charge)</i></b>\n"
+    f"<b><i>Command ➠ /mpin</i></b>\n"
+    f"<b><i>Usage ➠ /mpin → Login → Buy Card → brand/amount/qty → send up to 10 cards</i></b>\n"
+    f"<b><i>One-time OTP login, then check cards against real purchases</i></b>\n"
     f"{_SEP}",
     _back("menu_hitter")
 )
@@ -695,7 +707,7 @@ async def dot_command_handler(message: types.Message):
 
 
 # ========== CALLBACK HANDLER ==========
-_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_", "mrz_res_", "mrz_stop_")
+_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_", "mrz_res_", "mrz_stop_", "mpin_")
 
 
 @router.callback_query()
@@ -769,7 +781,6 @@ dp.callback_query.register(mchk_result_handler, MchkResultCallback.filter())
 dp.callback_query.register(mst_stop_handler, MstStopCallback.filter())
 dp.callback_query.register(mst_result_handler, MstResultCallback.filter())
 dp.callback_query.register(sh_callback_handler, F.data.startswith("sh_"))
-dp.callback_query.register(mpin_callback_handler, F.data.startswith("mpin_"))
 # dp.callback_query.register(stco_callback_handler, F.data.startswith("stco_"))  # hitter OFF
 dp.callback_query.register(regenerate_cards_callback, F.data.startswith("gen_reg"))
 
@@ -781,7 +792,7 @@ for _cmd, _fn in [
     ("hc", hc_command), ("sp", sp_command),  # ("stco", stco_command),  # hitter OFF
     ("vbv", vbv_command),
     ("ft", ft_command), ("nmi", nmi_command), ("nmi2", nmi2_command), ("bl", bl_command),
-    ("rz", rz_command), ("rzp", rzp_command), ("mpin", mpin_command), ("pyu", pyu_command), ("sub", sub_command), ("rc", rc_command),
+    ("rz", rz_command), ("rzp", rzp_command), ("pyu", pyu_command), ("sub", sub_command), ("rc", rc_command),
     ("suball", suball_command), ("g_code", g_code_command), ("claim", claim_command),
     ("info", info_command), ("rsub", rsub_command), ("plan", plan_command),
     ("adcr", adcr_command), ("on", on_command), ("off", off_command),

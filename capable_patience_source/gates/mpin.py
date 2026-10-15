@@ -1,9 +1,13 @@
-"""gates/mpin.py - Magicpin card-check gate (premium UI, button-controlled).
+"""gates/mpin.py - Magicpin card-check gate (button-controlled, premium UI).
 
 Flow:
-  /mpin cc|mm|yy|cvv [amount=X]   -> brand-selection buttons
-  pick a brand                    -> runs the check against the Magicpin API
-                                    (:9100), one card at a time (account-bound)
+  /mpin                 -> main menu (Login / Status / Buy / Brands)
+  Login                 -> send phone -> send OTP (session persisted on API)
+  Buy Card              -> pick brand -> pick amount -> pick qty -> send up to 10 cards
+  -> sequential check (account-bound) -> per-card results
+
+Magicpin is a REAL purchase (buys a voucher), so "charged" = genuine hit + the
+voucher code is harvested. One Magicpin account = one gateway session.
 """
 import asyncio
 import logging
@@ -38,21 +42,29 @@ EMOJI_PRICE = "5424976816530014958"
 EMOJI_BRAND = "6136275172283391020"
 EMOJI_WARN = "6255910249362885846"
 EMOJI_CARD = "4956719506027185156"
+EMOJI_LOCK = "5258419835922030550"
 
 BRANDS = {
-    "1": ("Amazon Pay", "\U0001F6D2"),
-    "2": ("Google Play Recharge", "\U0001F3AE"),
-    "3": ("Zomato", "\U0001F354"),
-    "4": ("Blinkit", "\U0001F6CD"),
-    "5": ("Uber", "\U0001F697"),
-    "6": ("Myntra", "\U0001F457"),
-    "7": ("Nykaa", "\U0001F484"),
-    "8": ("BookMyShow", "\U0001F3AC"),
-    "9": ("PVR Cinemas", "\U0001F3A5"),
-    "10": ("MakeMyTrip", "\u2708"),
+    "1": ("Amazon Pay", "🛒"),
+    "2": ("Google Play Recharge", "🎮"),
+    "3": ("Zomato", "🍔"),
+    "4": ("Blinkit", "🛍️"),
+    "5": ("Uber", "🚗"),
+    "6": ("Myntra", "👗"),
+    "7": ("Nykaa", "💄"),
+    "8": ("BookMyShow", "🎬"),
+    "9": ("PVR Cinemas", "🎥"),
+    "10": ("MakeMyTrip", "✈️"),
 }
 
-_PENDING = {}
+AMOUNTS = [("auto", "Auto"), ("10", "₹10"), ("25", "₹25"), ("50", "₹50"), ("100", "₹100")]
+
+_STATE = {}  # user_id -> {"step", "brand_key", "brand_name", "amount", "qty", "cards", "results"}
+
+
+def _in_wait(message: types.Message) -> bool:
+    st = _STATE.get(message.from_user.id)
+    return bool(st and str(st.get("step", "")).startswith("wait_"))
 
 
 def luhn_check(card_number: str) -> bool:
@@ -71,26 +83,33 @@ def luhn_check(card_number: str) -> bool:
     return total % 10 == 0
 
 
-def _brand_keyboard(token: str) -> InlineKeyboardMarkup:
-    rows = []
-    keys = list(BRANDS.keys())
-    for i in range(0, len(keys), 2):
-        row = []
-        for k in keys[i:i + 2]:
-            name, em = BRANDS[k]
-            row.append(InlineKeyboardButton(
-                text=f"{em} {name}",
-                callback_data=f"mpin_pick_{token}_{k}",
-            ))
-        rows.append(row)
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def _btn(text, data, style="primary", emoji=None):
+    kw = {"text": text, "callback_data": data, "style": style}
+    if emoji:
+        kw["icon_custom_emoji_id"] = emoji
+    return InlineKeyboardButton(**kw)
 
 
-def _mp_api_check(cc: str, brand_key: str, amount: str | None) -> dict:
-    q = urllib.parse.urlencode({"cc": cc, "brand": brand_key, "amount": amount or "", "qty": "1"})
-    url = f"{MP_API}/mp/check?{q}"
+def _menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🔐 𝗟𝗼𝗴𝗶𝗻", "mpin_login", "primary", EMOJI_LOCK),
+         _btn("📊 𝗦𝘁𝗮𝘁𝘂𝘀", "mpin_status", "primary", EMOJI_GATEWAY)],
+        [_btn("💳 𝗕𝘂𝘆 𝗖𝗮𝗿𝗱", "mpin_buy", "success", CUSTOM_APPROVED_EMOJI_ID),
+         _btn("🛒 𝗕𝗿𝗮𝗻𝗱𝘀", "mpin_brands", "primary", EMOJI_BRAND)],
+        [_btn("« 𝗠𝗮𝗶𝗻 𝗠𝗲𝗻𝘂", "back_main", "primary")],
+    ])
+
+
+def _mp_api(method, path, params=None, body=None):
+    url = f"{MP_API}{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
     try:
-        resp = urllib.request.urlopen(url, timeout=240)
+        if body is not None:
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        else:
+            req = urllib.request.Request(url, method=method)
+        resp = urllib.request.urlopen(req, timeout=240)
         return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:
@@ -101,8 +120,24 @@ def _mp_api_check(cc: str, brand_key: str, amount: str | None) -> dict:
         return {"ok": False, "error": str(e)[:120]}
 
 
-def _classify(response_text: str) -> str:
-    r = str(response_text or "").lower()
+def _mp_check(cc, brand_key, amount, qty):
+    return _mp_api("GET", "/mp/check", {"cc": cc, "brand": brand_key, "amount": amount or "", "qty": str(qty or 1)})
+
+
+def _mp_status():
+    return _mp_api("GET", "/mp/status")
+
+
+def _mp_login_send(phone):
+    return _mp_api("POST", "/mp/login/send", body={"phone": phone})
+
+
+def _mp_login_verify(phone, otp):
+    return _mp_api("POST", "/mp/login/verify", body={"phone": phone, "otp": otp})
+
+
+def _classify(resp_text):
+    r = str(resp_text or "").lower()
     if any(x in r for x in ("success", "charged", "settled", "voucher", "paid", "approved", "completed")):
         return "charged"
     if any(x in r for x in ("3ds", "3-d", "3d ", "otp", "challenge")):
@@ -113,189 +148,296 @@ def _classify(response_text: str) -> str:
     return "error"
 
 
-def _fmt_result(resp_text: str):
+def _fmt_status(resp_text):
     key = _classify(resp_text)
     if key == "charged":
-        return f'CHARGED <tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">\U0001F48E</tg-emoji>', "charged"
+        return f'𝗖𝗛𝗔𝗥𝗚𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">💎</tg-emoji>', "charged"
     if key == "three_d":
-        return f'3D <tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">\U0001F510</tg-emoji>', "three_d"
+        return f'𝟯𝗗 <tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">🔐</tg-emoji>', "three_d"
     if key == "declined":
-        return f'DECLINED <tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">\u274C</tg-emoji>', "declined"
-    return f'ERROR <tg-emoji emoji-id="{EMOJI_WARN}">\u26A0</tg-emoji>', "error"
+        return f'𝗗𝗘𝗖𝗟𝗜𝗡𝗘𝗗 <tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji>', "declined"
+    return f'𝗘𝗥𝗥𝗢𝗥 <tg-emoji emoji-id="{EMOJI_WARN}">⚠️</tg-emoji>', "error"
 
 
-@router.message(F.text.startswith("/mpin"))
+def _brand_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    keys = list(BRANDS.keys())
+    for i in range(0, len(keys), 2):
+        row = []
+        for k in keys[i:i + 2]:
+            name, em = BRANDS[k]
+            row.append(_btn(f"{em} {name}", f"mpin_brand_{k}", "primary"))
+        rows.append(row)
+    rows.append([_btn("« 𝗕𝗮𝗰𝗸", "mpin_menu", "primary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _amount_qty_keyboard(st) -> InlineKeyboardMarkup:
+    rows = []
+    for i in range(0, len(AMOUNTS), 5):
+        row = []
+        for key, label in AMOUNTS[i:i + 5]:
+            style = "success" if st.get("amount") == key else "primary"
+            row.append(_btn(label, f"mpin_amt_{key}", style))
+        rows.append(row)
+    qty_row = [_btn(str(n), f"mpin_qty_{n}", "success" if st.get("qty") == n else "primary") for n in range(1, 6)]
+    rows.append(qty_row)
+    rows.append([
+        _btn("▶ 𝗦𝘁𝗮𝗿𝘁", "mpin_start", "success", CUSTOM_APPROVED_EMOJI_ID),
+        _btn("« 𝗕𝗮𝗰𝗸", "mpin_buy", "primary"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(F.text.startswith("/mpin") | F.caption.startswith("/mpin"))
 async def mpin_command(message: types.Message):
     if not await asyncio.to_thread(is_gate_enabled, "mpin"):
-        await safe_reply(message,
-            f'<tg-emoji emoji-id="{EMOJI_WARN}">\U0001F6A7</tg-emoji> <b>Magicpin Gate under maintenance.</b>',
-            parse_mode="HTML")
+        await safe_reply(message, f'<tg-emoji emoji-id="{EMOJI_WARN}">🚧</tg-emoji> <b>𝗠𝗮𝗴𝗶𝗰𝗽𝗶𝗻 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗺𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>', parse_mode="HTML")
         return
 
     user = message.from_user
     user_id = user.id
     is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
     if not is_premium:
-        await safe_reply(message,
-            f'<tg-emoji emoji-id="{EMOJI_BRAND}">\U0001F48E</tg-emoji> Please upgrade your plan to use this feature.\n\nUse /plan to upgrade.',
-            parse_mode="HTML")
+        await safe_reply(message, f'<tg-emoji emoji-id="{EMOJI_BRAND}">💎</tg-emoji> 𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.', parse_mode="HTML")
         return
 
-    raw_text = ""
-    cmd_text = message.text or message.caption or ""
-    parts = cmd_text.split(maxsplit=1)
-    if len(parts) > 1:
-        raw_text += parts[1].strip() + " "
-    if message.reply_to_message:
-        rm = message.reply_to_message
-        raw_text += (rm.text or rm.caption or "") + " "
+    _STATE[user_id] = {"step": "menu", "qty": 1, "amount": "auto", "cards": [], "results": []}
 
-    if not raw_text.strip():
-        await safe_reply(message,
-            "Usage: /mpin cc|mm|yy|cvv [amount=X]  (or reply to a card with /mpin)",
-            parse_mode="HTML")
-        return
-
-    amount = None
-    amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
-    if amt_match:
-        amount = amt_match.group(1)
-
-    m = re.search(r'\b(\d{15,16})[|\s/?\\:]+(\d{1,2})[|\s/?\\:]+(\d{2,4})[|\s/?\\:]+(\d{3,4})\b', raw_text)
-    if not m:
-        await safe_reply(message, "Invalid Card Format. Provide 4242424242424242|05|27|123", parse_mode="HTML")
-        return
-    cc, mm, yy_raw, cvv = m.groups()
-    if len(yy_raw) == 4:
-        yy_raw = yy_raw[2:]
-    formatted_cc = f"{cc}|{mm}|{yy_raw}|{cvv}"
-
-    if not luhn_check(cc):
-        await safe_reply(message, "Invalid Card (Luhn failed).", parse_mode="HTML")
-        return
-
-    current_credits = await asyncio.to_thread(get_user_credits, user_id)
-    if current_credits is None or current_credits <= 0:
-        await safe_reply(message, "Insufficient Credits!", parse_mode="HTML")
-        return
-
-    token = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
-    _PENDING[token] = {"card": formatted_cc, "user_id": user_id, "user": user, "amount": amount}
+    st = await asyncio.to_thread(_mp_status)
+    authed = bool(st.get("authed")) if isinstance(st, dict) else False
+    phone = st.get("phone", "—") if isinstance(st, dict) else "—"
+    auth_line = f'<tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji> 𝗟𝗼𝗴𝗴𝗲𝗱 𝗶𝗻' if authed else f'<tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji> 𝗡𝗼𝘁 𝗹𝗼𝗴𝗴𝗲𝗱 𝗶𝗻'
 
     await safe_reply(message,
-        f'<tg-emoji emoji-id="{EMOJI_BRAND}">\u2B50</tg-emoji> <b>Pick a brand</b>\n\n'
-        f'<tg-emoji emoji-id="{EMOJI_CARD}">\U0001F4B3</tg-emoji> <b>Card</b> <code>{escape(formatted_cc)}</code>',
-        parse_mode="HTML",
-        reply_markup=_brand_keyboard(token))
+        f'<tg-emoji emoji-id="{EMOJI_BRAND}">⭐</tg-emoji> <b>𝗠𝗔𝗚𝗜𝗖𝗣𝗜𝗡 𝗚𝗔𝗧𝗘</b>\n'
+        f'━━━━━━━━━━━━━━━━\n'
+        f'{auth_line}\n'
+        f'<tg-emoji emoji-id="{EMOJI_CARD}">💳</tg-emoji> 𝗣𝗵𝗼𝗻𝗲 ➠ <code>{escape(str(phone))}</code>\n'
+        f'━━━━━━━━━━━━━━━━\n'
+        f'𝗕𝘂𝘆 𝗮 𝗿𝗲𝗮𝗹 𝘃𝗼𝘂𝗰𝗵𝗲𝗿 𝘁𝗼 𝗰𝗵𝗲𝗰𝗸 𝗮 𝗰𝗮𝗿𝗱 (𝗿𝗲𝗮𝗹 𝗰𝗵𝗮𝗿𝗴𝗲).',
+        parse_mode="HTML", reply_markup=_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("mpin_"))
 async def mpin_callback_handler(callback: types.CallbackQuery):
     data = callback.data or ""
-    parts = data.split("_")
-    if len(parts) < 3:
-        await callback.answer("Expired.")
-        return
-    action, token = parts[1], parts[2]
-    brand_key = parts[3] if len(parts) > 3 else None
-
-    pend = _PENDING.get(token)
-    if not pend:
-        await callback.answer("Session expired. Run /mpin again.", show_alert=True)
-        return
+    user_id = callback.from_user.id
+    st = _STATE.setdefault(user_id, {"step": "menu", "qty": 1, "amount": "auto", "cards": [], "results": []})
 
     await callback.answer()
 
-    if action == "pick" and brand_key in BRANDS:
-        brand_name, em = BRANDS[brand_key]
+    if data == "mpin_menu":
+        st["step"] = "menu"
+        s = await asyncio.to_thread(_mp_status)
+        authed = bool(s.get("authed")) if isinstance(s, dict) else False
+        auth_line = f'<tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji> 𝗟𝗼𝗴𝗴𝗲𝗱 𝗶𝗻' if authed else f'<tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji> 𝗡𝗼𝘁 𝗹𝗼𝗴𝗴𝗲𝗱 𝗶𝗻'
         await callback.message.edit_text(
-            f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">\u23F3</tg-emoji> <b>Checking...</b>\n\n'
-            f'<tg-emoji emoji-id="{EMOJI_CARD}">\U0001F4B3</tg-emoji> <b>Card</b> <code>{escape(pend["card"])}</code>\n'
-            f'<tg-emoji emoji-id="{EMOJI_BRAND}">\u2B50</tg-emoji> <b>Brand</b> {em} {brand_name}',
-            parse_mode="HTML")
-        asyncio.create_task(_run_check(callback, pend, brand_key, brand_name, em))
-    elif action == "again":
+            f'<tg-emoji emoji-id="{EMOJI_BRAND}">⭐</tg-emoji> <b>𝗠𝗔𝗚𝗜𝗖𝗣𝗜𝗡 𝗚𝗔𝗧𝗘</b>\n━━━━━━━━━━━━━━━━\n{auth_line}',
+            parse_mode="HTML", reply_markup=_menu_keyboard())
+        return
+
+    if data == "mpin_login":
+        st["step"] = "wait_phone"
         await callback.message.edit_text(
-            f'<tg-emoji emoji-id="{EMOJI_BRAND}">\u2B50</tg-emoji> <b>Pick a brand</b>\n\n'
-            f'<tg-emoji emoji-id="{EMOJI_CARD}">\U0001F4B3</tg-emoji> <b>Card</b> <code>{escape(pend["card"])}</code>',
-            parse_mode="HTML",
-            reply_markup=_brand_keyboard(token))
-
-
-async def _run_check(callback, pend, brand_key, brand_name, em):
-    user_id = pend["user_id"]
-    user = pend["user"]
-    card = pend["card"]
-    amount = pend["amount"]
-
-    result = await asyncio.to_thread(_mp_api_check, card, brand_key, amount)
-
-    if not result.get("ok") and result.get("error") == "LOGIN_REQUIRED":
-        await callback.message.edit_text(
-            f'<tg-emoji emoji-id="{EMOJI_WARN}">\u26A0</tg-emoji> <b>Login required</b>\n\n'
-            f'The Magicpin account is not logged in. Run login on the API then retry.',
+            f'<tg-emoji emoji-id="{EMOJI_LOCK}">🔐</tg-emoji> <b>𝗟𝗼𝗴𝗶𝗻</b>\n\n'
+            f'𝗦𝗲𝗻𝗱 𝘆𝗼𝘂𝗿 𝟭𝟬-𝗱𝗶𝗴𝗶𝘁 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿:',
             parse_mode="HTML")
         return
 
-    if not result.get("ok"):
+    if data == "mpin_status":
+        s = await asyncio.to_thread(_mp_status)
+        authed = bool(s.get("authed")) if isinstance(s, dict) else False
+        phone = s.get("phone", "—") if isinstance(s, dict) else "—"
+        uid = s.get("user_id", "—") if isinstance(s, dict) else "—"
         await callback.message.edit_text(
-            f'<tg-emoji emoji-id="{EMOJI_WARN}">\u26A0</tg-emoji> <b>Error</b>\n\n{escape(str(result.get("error") or "unknown"))}',
+            f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">📊</tg-emoji> <b>𝗦𝗲𝘀𝘀𝗶𝗼𝗻 𝗦𝘁𝗮𝘁𝘂𝘀</b>\n━━━━━━━━━━━━━━━━\n'
+            f'{"✅ 𝗟𝗼𝗴𝗴𝗲𝗱 𝗶𝗻" if authed else "❌ 𝗡𝗼𝘁 𝗹𝗼𝗴𝗴𝗲𝗱 𝗶𝗻"}\n'
+            f'𝗣𝗵𝗼𝗻𝗲 ➠ <code>{escape(str(phone))}</code>\n'
+            f'𝗨𝘀𝗲𝗿 𝗜𝗗 ➠ <code>{escape(str(uid))}</code>',
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[_btn("« 𝗕𝗮𝗰𝗸", "mpin_menu", "primary")]]))
+        return
+
+    if data == "mpin_brands":
+        lines = "\n".join(f"{em} {name}" for name, em in BRANDS.values())
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_BRAND}">🛒</tg-emoji> <b>𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗕𝗿𝗮𝗻𝗱𝘀</b>\n━━━━━━━━━━━━━━━━\n{lines}',
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[_btn("« 𝗕𝗮𝗰𝗸", "mpin_menu", "primary")]]))
+        return
+
+    if data == "mpin_buy":
+        st["step"] = "buy"
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_BRAND}">⭐</tg-emoji> <b>𝗣𝗶𝗰𝗸 𝗮 𝗯𝗿𝗮𝗻𝗱</b>',
+            parse_mode="HTML", reply_markup=_brand_keyboard())
+        return
+
+    if data.startswith("mpin_brand_"):
+        key = data[len("mpin_brand_"):]
+        if key in BRANDS:
+            st["brand_key"] = key
+            st["brand_name"], _ = BRANDS[key]
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_PRICE}">👛</tg-emoji> <b>𝗦𝗲𝗹𝗲𝗰𝘁 𝗮𝗺𝗼𝘂𝗻𝘁 & 𝗾𝘁𝘆</b>\n\n'
+            f'<tg-emoji emoji-id="{EMOJI_BRAND}">⭐</tg-emoji> 𝗕𝗿𝗮𝗻𝗱 ➠ <b>{escape(st.get("brand_name", "?"))}</b>\n'
+            f'<tg-emoji emoji-id="{EMOJI_PRICE}">👛</tg-emoji> 𝗔𝗺𝗼𝘂𝗻𝘁 ➠ <b>{st.get("amount", "auto")}</b>\n'
+            f'<tg-emoji emoji-id="{EMOJI_CARD}">🔢</tg-emoji> 𝗤𝘁𝘆 ➠ <b>{st.get("qty", 1)}</b>',
+            parse_mode="HTML", reply_markup=_amount_qty_keyboard(st))
+        return
+
+    if data.startswith("mpin_amt_"):
+        key = data[len("mpin_amt_"):]
+        st["amount"] = key
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_PRICE}">👛</tg-emoji> <b>𝗦𝗲𝗹𝗲𝗰𝘁 𝗮𝗺𝗼𝘂𝗻𝘁 & 𝗾𝘁𝘆</b>\n\n'
+            f'𝗕𝗿𝗮𝗻𝗱 ➠ <b>{escape(st.get("brand_name", "?"))}</b>\n'
+            f'𝗔𝗺𝗼𝘂𝗻𝘁 ➠ <b>{key}</b>\n'
+            f'𝗤𝘁𝘆 ➠ <b>{st.get("qty", 1)}</b>',
+            parse_mode="HTML", reply_markup=_amount_qty_keyboard(st))
+        return
+
+    if data.startswith("mpin_qty_"):
+        n = int(data[len("mpin_qty_"):])
+        st["qty"] = n
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_PRICE}">👛</tg-emoji> <b>𝗦𝗲𝗹𝗲𝗰𝘁 𝗮𝗺𝗼𝘂𝗻𝘁 & 𝗾𝘁𝘆</b>\n\n'
+            f'𝗕𝗿𝗮𝗻𝗱 ➠ <b>{escape(st.get("brand_name", "?"))}</b>\n'
+            f'𝗔𝗺𝗼𝘂𝗻𝘁 ➠ <b>{st.get("amount", "auto")}</b>\n'
+            f'𝗤𝘁𝘆 ➠ <b>{n}</b>',
+            parse_mode="HTML", reply_markup=_amount_qty_keyboard(st))
+        return
+
+    if data == "mpin_start":
+        st["step"] = "wait_cards"
+        st["cards"] = []
+        await callback.message.edit_text(
+            f'<tg-emoji emoji-id="{EMOJI_CARD}">💳</tg-emoji> <b>𝗦𝗲𝗻𝗱 𝗰𝗮𝗿𝗱𝘀 (𝗺𝗮𝘅 𝟭𝟬)</b>\n\n'
+            f'𝗣𝗮𝘀𝘁𝗲 𝗰𝗮𝗿𝗱𝘀 𝗶𝗻 𝗳𝗼𝗿𝗺𝗮𝘁 <code>number|mm|yy|cvv</code>\n'
+            f'𝗼𝗻𝗲 𝗽𝗲𝗿 𝗹𝗶𝗻𝗲, 𝘁𝗵𝗲𝗻 𝗱𝗼𝗻𝗲.',
             parse_mode="HTML")
         return
 
-    res = result.get("result") or {}
-    resp_text = res.get("Response") or res.get("message") or "UNKNOWN"
-    price = res.get("Price") or "0.00INR"
-    final_status, status_key = _fmt_result(resp_text)
 
-    deduct = {"charged": 2, "three_d": 1, "declined": 1, "error": 0}[status_key]
+@router.message(F.text & ~F.text.startswith("/") & F.func(_in_wait))
+async def mpin_input_handler(message: types.Message):
+    user_id = message.from_user.id
+    st = _STATE.get(user_id)
+    if not st:
+        return
+    step = st.get("step")
+
+    if step == "wait_phone":
+        phone = message.text.strip().replace("+", "").replace(" ", "")
+        if not phone.isdigit() or len(phone) not in (10, 12):
+            await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗽𝗵𝗼𝗻𝗲. 𝗦𝗲𝗻𝗱 𝗮 𝟭𝟬-𝗱𝗶𝗴𝗶𝘁 𝗻𝘂𝗺𝗯𝗲𝗿.", parse_mode="HTML")
+            return
+        await safe_reply(message, f'<tg-emoji emoji-id="{EMOJI_LOCK}">⏳</tg-emoji> 𝗦𝗲𝗻𝗱𝗶𝗻𝗴 𝗢𝗧𝗣...', parse_mode="HTML")
+        r = await asyncio.to_thread(_mp_login_send, phone)
+        st["phone"] = phone
+        st["step"] = "wait_otp"
+        await safe_reply(message,
+            f'<tg-emoji emoji-id="{EMOJI_LOCK}">🔐</tg-emoji> <b>𝗢𝗧𝗣 𝗦𝗲𝗻𝘁</b>\n\n'
+            f'𝗦𝗲𝗻𝗱 𝘁𝗵𝗲 𝗢𝗧𝗣 𝗰𝗼𝗱𝗲 𝗿𝗲𝗰𝗲𝗶𝘃𝗲𝗱 𝗼𝗻 {escape(phone)}.',
+            parse_mode="HTML")
+        return
+
+    if step == "wait_otp":
+        otp = message.text.strip()
+        if not otp.isdigit() or len(otp) < 4:
+            await safe_reply(message, "❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗢𝗧𝗣.", parse_mode="HTML")
+            return
+        await safe_reply(message, f'<tg-emoji emoji-id="{EMOJI_LOCK}">⏳</tg-emoji> 𝗩𝗲𝗿𝗶𝗳𝘆𝗶𝗻𝗴...', parse_mode="HTML")
+        r = await asyncio.to_thread(_mp_login_verify, st.get("phone", ""), otp)
+        ok = bool(r.get("ok")) or bool(r.get("authed"))
+        st["step"] = "menu"
+        if ok:
+            await safe_reply(message,
+                f'<tg-emoji emoji-id="{CUSTOM_APPROVED_EMOJI_ID}">✅</tg-emoji> <b>𝗟𝗼𝗴𝗴𝗲𝗱 𝗶𝗻!</b>\n'
+                f'𝗦𝗲𝘀𝘀𝗶𝗼𝗻 𝘀𝗮𝘃𝗲𝗱. 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗻𝗼𝘄 /mpin 𝘁𝗼 𝗰𝗵𝗲𝗰𝗸 𝗰𝗮𝗿𝗱𝘀.',
+                parse_mode="HTML")
+        else:
+            await safe_reply(message,
+                f'<tg-emoji emoji-id="{CUSTOM_DECLINED_EMOJI_ID}">❌</tg-emoji> <b>𝗟𝗼𝗴𝗶𝗻 𝗳𝗮𝗶𝗹𝗲𝗱.</b>\n{escape(str(r.get("response") or r.get("error") or "unknown"))[:200]}',
+                parse_mode="HTML")
+        return
+
+    if step == "wait_cards":
+        raw = message.text or ""
+        cards = re.findall(r'\b(\d{15,16})[|\s/?\\:]+(\d{1,2})[|\s/?\\:]+(\d{2,4})[|\s/?\\:]+(\d{3,4})\b', raw)
+        if not cards:
+            await safe_reply(message, "❌ 𝗡𝗼 𝘃𝗮𝗹𝗶𝗱 𝗰𝗮𝗿𝗱𝘀 𝗳𝗼𝘂𝗻𝗱.", parse_mode="HTML")
+            return
+        for cc, mm, yy, cvv in cards:
+            yy2 = yy[2:] if len(yy) == 4 else yy
+            st["cards"].append(f"{cc}|{mm}|{yy2}|{cvv}")
+        st["cards"] = st["cards"][:10]
+        if not luhn_check(st["cards"][0].split("|")[0]):
+            await safe_reply(message, "❌ 𝗙𝗶𝗿𝘀𝘁 𝗰𝗮𝗿𝗱 𝗳𝗮𝗶𝗹𝗲𝗱 𝗟𝘂𝗵𝗻.", parse_mode="HTML")
+            st["step"] = "menu"
+            return
+        await asyncio.create_task(_run_batch(message, st, user_id))
+        return
+
+
+async def _run_batch(message, st, user_id):
+    brand_key = st.get("brand_key", "1")
+    brand_name = st.get("brand_name", "Auto")
+    amount = st.get("amount", "auto")
+    qty = st.get("qty", 1)
+    cards = st.get("cards", [])
+    st["step"] = "menu"
+
+    proc = await safe_reply(message,
+        f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">⏳</tg-emoji> <b>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 {len(cards)} 𝗰𝗮𝗿𝗱(𝘀)...</b>\n'
+        f'<tg-emoji emoji-id="{EMOJI_BRAND}">⭐</tg-emoji> 𝗕𝗿𝗮𝗻𝗱 ➠ {escape(brand_name)} | 𝗤𝘁𝘆 ➠ {qty} | 𝗔𝗺𝗼𝘂𝗻𝘁 ➠ {escape(amount)}',
+        parse_mode="HTML")
+
+    results = []
+    for i, card in enumerate(cards, 1):
+        try:
+            await proc.edit_text(
+                f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">⏳</tg-emoji> <b>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 {i}/{len(cards)}...</b>\n'
+                f'<tg-emoji emoji-id="{EMOJI_CARD}">💳</tg-emoji> <code>{escape(card)}</code>',
+                parse_mode="HTML")
+        except Exception:
+            pass
+        r = await asyncio.to_thread(_mp_check, card, brand_key, amount, qty)
+        if not r.get("ok") and r.get("error") == "LOGIN_REQUIRED":
+            results.append((card, "LOGIN_REQUIRED", "account not logged in"))
+            await proc.edit_text(f'<tg-emoji emoji-id="{EMOJI_WARN}">⚠️</tg-emoji> <b>𝗟𝗼𝗴𝗶𝗻 𝗿𝗲𝗾𝘂𝗶𝗿𝗲𝗱.</b> 𝗟𝗼𝗴𝗶𝗻 𝗳𝗶𝗿𝘀𝘁 𝘃𝗶𝗮 /mpin → 𝗟𝗼𝗴𝗶𝗻.', parse_mode="HTML")
+            return
+        if not r.get("ok"):
+            results.append((card, "ERROR", str(r.get("error", "unknown"))))
+            continue
+        res = r.get("result") or {}
+        resp = res.get("Response") or res.get("message") or "UNKNOWN"
+        status_disp, status_key = _fmt_status(resp)
+        price = res.get("Price", "—")
+        voucher = res.get("voucher_code", "")
+        results.append((card, status_key, status_disp, price, voucher))
+        if status_key == "charged":
+            await asyncio.to_thread(update_user_stats, user_id, True)
+
+    # credits deduction (per card): charged 2, three_d 1, declined 1, error 0
+    deduct = sum({"charged": 2, "three_d": 1, "declined": 1, "error": 0}.get(r[1], 0) for r in results)
     if deduct:
         await asyncio.to_thread(lambda: update_credits(user_id, max(0, get_user_credits(user_id) - deduct)))
-    await asyncio.to_thread(update_user_stats, user_id, status_key == "charged")
 
-    bin_scheme = bin_bank = bin_country = "N/A"
-    try:
-        cc_num = card.split("|")[0]
-        bin_info = await get_bin_info(cc_num[:6]) or {}
-        bin_scheme = bin_info.get("scheme", "N/A")
-        bin_bank = bin_info.get("bank", "N/A")
-        cname = bin_info.get("country", "N/A")
-        cflag = bin_info.get("country_emoji", "")
-        bin_country = f"{cflag} {cname}" if cflag else cname
-    except Exception:
-        pass
+    from collections import Counter
+    counts = Counter(r[1] for r in results)
+    lines = []
+    for r in results:
+        card, key = r[0], r[1]
+        disp = r[2] if len(r) > 2 else key
+        extra = f' 🎁 <code>{escape(str(r[4]))}</code>' if len(r) > 4 and r[4] else ""
+        lines.append(f'<code>{escape(card)}</code> ➠ {disp}{extra}')
+    body = "\n".join(lines) if lines else "𝗡𝗼 𝗿𝗲𝘀𝘂𝗹𝘁𝘀"
 
-    user_link = build_user_link(user)
-    dev_link = '<a href="https://t.me/Enchanted_linux_0x">Enchanted_linux_0x</a>'
-
-    voucher = ""
-    if res.get("voucher_code"):
-        voucher = f'\n<tg-emoji emoji-id="{EMOJI_BRAND}">\U0001F381</tg-emoji> <b>Voucher</b> <code>{escape(str(res.get("voucher_code")))}</code>'
-        if res.get("voucher_pin"):
-            voucher += f':{escape(str(res.get("voucher_pin")))}'
-
-    caption = (
-        f'Status {final_status}\n'
-        f'<tg-emoji emoji-id="{EMOJI_CARD}">\U0001F4B3</tg-emoji> Card <code>{escape(card)}</code>\n'
-        f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">\u26A1</tg-emoji> Gateway Magicpin {em}\n'
-        f'<tg-emoji emoji-id="{EMOJI_PRICE}">\U0001F45B</tg-emoji> Price <b>{escape(str(price))}</b>\n'
-        f'<tg-emoji emoji-id="{EMOJI_BRAND}">\u2B50</tg-emoji> Brand <b>{escape(brand_name)}</b>\n'
-        f'Response <b>{escape(str(resp_text)[:120])}</b>\n'
-        f'Brand <b>{bin_scheme}</b>\n'
-        f'Issuer <b>{bin_bank}</b>\n'
-        f'Country <b>{bin_country}</b>'
-        f'{voucher}\n'
-        f'User {user_link}\n'
-        f'Dev {dev_link}'
-    )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Check Again", callback_data=f"mpin_again_{token}", style="primary"),
-        InlineKeyboardButton(text="Change Brand", callback_data=f"mpin_pick_{token}_1",
-                             style="success", icon_custom_emoji_id=CUSTOM_APPROVED_EMOJI_ID),
-    ]])
-
-    try:
-        await callback.message.edit_text(caption, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
-    except Exception as e:
-        logging.warning(f"mpin result edit failed: {e}")
+    await proc.edit_text(
+        f'<tg-emoji emoji-id="{EMOJI_GATEWAY}">⚡</tg-emoji> <b>𝗠𝗮𝗴𝗶𝗰𝗽𝗶𝗻 𝗥𝗲𝘀𝘂𝗹𝘁</b>\n'
+        f'━━━━━━━━━━━━━━━━\n'
+        f'💎 𝗖𝗵𝗮𝗿𝗴𝗲𝗱 ➠ {counts.get("charged", 0)}   ✅ 𝟯𝗗 ➠ {counts.get("three_d", 0)}\n'
+        f'❌ 𝗗𝗲𝗰𝗹𝗶𝗻𝗲𝗱 ➠ {counts.get("declined", 0)}   ⚠️ 𝗘𝗿𝗿𝗼𝗿 ➠ {counts.get("error", 0)}\n'
+        f'━━━━━━━━━━━━━━━━\n'
+        f'{body}',
+        parse_mode="HTML", disable_web_page_preview=True)
