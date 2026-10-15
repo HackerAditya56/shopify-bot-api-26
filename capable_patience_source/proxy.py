@@ -270,23 +270,11 @@ async def extract_proxies_from_input(message: types.Message):
             return None, 0, f"<b>⚠️ 𝐔𝐧𝐬𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐟𝐢𝐥𝐞 𝐭𝐲𝐩𝐞: {file_ext}\n𝐏𝐥𝐞𝐚𝐬𝐞 𝐮𝐬𝐞 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞𝐬 𝐨𝐧𝐥𝐲.</b>"
         
         try:
-            # Get file from bot
             file = await message.bot.get_file(document.file_id)
-            
-            # Method 1: Using Bot.download_file() - Most compatible
-            file_bytes = await message.bot.download_file(file.file_path)
-            raw_text += file_bytes.decode('utf-8', errors='ignore')
-            
-        except AttributeError:
-            # Method 2: Alternative method for older aiogram versions
-            try:
-                from aiogram.types import InputFile
-                file_content = await document.download()
-                raw_text += file_content.read().decode('utf-8', errors='ignore')
-            except Exception as e2:
-                logging.error(f"Alternative file read error: {e2}")
-                return None, 0, f"<b>❌ 𝐄𝐫𝐫𝐨𝐫 𝐫𝐞𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞: {str(e2)[:100]}</b>"
-                
+            data = await message.bot.download_file(file.file_path)
+            # download_file returns BytesIO in aiogram 3 — read() then decode.
+            content = data.read() if hasattr(data, 'read') else data
+            raw_text += content.decode('utf-8', errors='ignore')
         except Exception as e:
             logging.error(f"File read error: {e}")
             return None, 0, f"<b>❌ 𝐄𝐫𝐫𝐨𝐫 𝐫𝐞𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞: {str(e)[:100]}</b>"
