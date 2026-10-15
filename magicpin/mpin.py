@@ -20,18 +20,46 @@ AUTH_SECRET_KEY = "kQLMCQBrfevxhzuPpFWT"
 APP_VERSION = "5001"
 CAPTCHA_SITE_KEY = "6Ld16sUhAAAAAFvZrLRlgs1FMOK-NDAgMyeXTZai"
 
-BRD_USER = "brd-customer-hl_fdf5824f-zone-isp_proxy1"
-BRD_PASS = "ydxo52dib4p8"
-BRD_HOST = "brd.superproxy.io"
-BRD_PORT = "33335"
+PROXY_FILE = os.environ.get(
+    "MP_PROXY_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy.txt"),
+)
+
+_proxy_pool: list = []
+_proxy_pool_loaded = False
+
+
+def _load_proxies() -> list:
+    """Load the proxy pool from proxy.txt (one proxy per line, user:pass@host:port)."""
+    global _proxy_pool, _proxy_pool_loaded
+    if _proxy_pool_loaded:
+        return _proxy_pool
+    pool = []
+    try:
+        with open(PROXY_FILE, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith(("http://", "https://", "socks5://", "socks4://")):
+                    pool.append(line)
+                else:
+                    pool.append("http://" + line)
+    except Exception:
+        pool = []
+    _proxy_pool = pool
+    _proxy_pool_loaded = True
+    return _proxy_pool
 
 
 def build_proxy(override=None):
+    """Return override if given, else a random proxy from proxy.txt."""
     if override and isinstance(override, str) and override.startswith(("http", "socks")):
         return override
-    sess = "".join(random.choices("0123456789abcdef", k=8))
-    user = f"{BRD_USER}-country-in-session-{sess}"
-    return f"http://{user}:{BRD_PASS}@{BRD_HOST}:{BRD_PORT}"
+    pool = _load_proxies()
+    if not pool:
+        return ""
+    return random.choice(pool)
 
 VOUCHERS_CATALOG = {
     "1": {"name": "Amazon Pay", "merchant_id": 5980613, "url": "https://magicpin.in/Amazon-Pay-offers/292901/", "category": "Shopping & Payments"},
