@@ -427,6 +427,7 @@ async def _run_batch(message, st, user_id):
 
     # results: (card, status_key, status_disp, voucher, pin, resp, price)
     results = []
+    charged_found = False
     for i, card in enumerate(cards, 1):
         try:
             await proc.edit_text(
@@ -451,6 +452,8 @@ async def _run_batch(message, st, user_id):
         results.append((card, status_key, status_disp, voucher, pin, resp, price))
         if status_key == "charged":
             await asyncio.to_thread(update_user_stats, user_id, True)
+            charged_found = True
+            break  # STOP on charge — do not burn the remaining cards
 
     from collections import Counter
     counts = Counter(r[1] for r in results)
@@ -499,10 +502,12 @@ async def _run_batch(message, st, user_id):
         blocks.append(block)
 
     body = "\n".join(blocks) if blocks else "𝗡𝗼 𝗿𝗲𝘀𝘂𝗹𝘁𝘀"
+    stop_note = f'\n{_tg(ID_CHARGED, "💎")} <b>𝗖𝗵𝗮𝗿𝗴𝗲𝗱 — 𝘀𝘁𝗼𝗽𝗽𝗲𝗱, 𝗿𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 𝗰𝗮𝗿𝗱𝘀 𝘀𝗸𝗶𝗽𝗽𝗲𝗱</b>' if charged_found else ""
 
     await proc.edit_text(
         f'{_tg(ID_GATEWAY, "⚡")} <b>𝗠𝗮𝗴𝗶𝗰𝗽𝗶𝗻 𝗥𝗲𝘀𝘂𝗹𝘁</b>\n'
         f'{_tg(ID_CHARGED, "💎")} 𝗖𝗵𝗮𝗿𝗴𝗲𝗱 ➠ {counts.get("charged", 0)}   {_tg(ID_LOCK, "🔐")} 𝟯𝗗 ➠ {counts.get("three_d", 0)}\n'
         f'{_tg(ID_DECLINED, "❌")} 𝗗𝗲𝗰𝗹𝗶𝗻𝗲𝗱 ➠ {counts.get("declined", 0)}   {_tg(ID_WARNING, "⚠️")} 𝗘𝗿𝗿𝗼𝗿 ➠ {counts.get("error", 0)}\n'
-        f'{body}',
+        f'{body}'
+        f'{stop_note}',
         parse_mode="HTML", disable_web_page_preview=True)
