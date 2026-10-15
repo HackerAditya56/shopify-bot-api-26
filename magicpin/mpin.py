@@ -140,6 +140,7 @@ class Magicpin:
             pass
 
     def _rebuild_pg(self):
+        self._egress_fingerprint = ""  # guard: never left unset if proxy setup fails
         proxy = build_proxy(self._proxy_override)
         self.proxy = proxy
         try:
@@ -176,6 +177,7 @@ class Magicpin:
                 self.px = self.http
         except Exception:
             self.px = self.http
+            self._egress_fingerprint = getattr(self, "_direct_fingerprint", "") or ""
         return self._egress_fingerprint
 
     def _log(self, msg):
