@@ -2987,7 +2987,8 @@ class PrimpCheckoutSession:
 
 def run_razorpay(cc: str, site: str, proxy: str, verbose: bool = False,
                  amount_paise: int = DEFAULT_AMOUNT_PAISE,
-                 per_request_timeout: float = 20.0) -> dict:
+                 per_request_timeout: float = 20.0,
+                 browser_profile: Optional[PlatformProfile] = None) -> dict:
     """Run the full Razorpay checkout flow and return result.
 
     Args:
@@ -3016,6 +3017,7 @@ def run_razorpay(cc: str, site: str, proxy: str, verbose: bool = False,
             verbose=verbose,
             amount_paise=amount_paise,
             per_request_timeout=per_request_timeout,
+            browser_profile=browser_profile,
         )
         return session.run()
     except ValueError as e:
@@ -3045,7 +3047,8 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                               region: str = 'IN',
                               backend: str = 'auto',
                               timeout: float = 90.0,
-                              per_request_timeout: float = 20.0) -> dict:
+                              per_request_timeout: float = 20.0,
+                              browser_profile: Optional[PlatformProfile] = None) -> dict:
     """Async entry point with multi-backend support.
 
     backend='auto': weighted via backend_router (wreq/curl_cffi/httpcloak)
@@ -3117,6 +3120,7 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                     traffic_env=os.environ.get('RAZORPAY_TRAFFIC_ENV', 'canary'),
                     verbose=verbose, amount_paise=amount_paise, region=region,
                     session_cache=cache, per_request_timeout=per_request_timeout,
+                    browser_profile=browser_profile,
                 )
                 session._async_session = tls_session
             elif use_tlshttp:
@@ -3130,6 +3134,7 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                     verbose=verbose, amount_paise=amount_paise, region=region,
                     ja4_config=ja4_config, session_cache=cache,
                     per_request_timeout=per_request_timeout,
+                    browser_profile=browser_profile,
                 )
             elif use_primp:
                 is_primp = True
@@ -3188,6 +3193,7 @@ async def run_razorpay_async(cc: str, site: str, proxy: str, verbose: bool = Fal
                     ja4_config=ja4_config,
                     session_cache=cache,
                     per_request_timeout=per_request_timeout,
+                    browser_profile=browser_profile,
                 )
             # Configurable timeout per proxy attempt — gives slow proxies more budget
             # to complete the full 11-step checkout. Per-request timeout scales with proxy speed.
