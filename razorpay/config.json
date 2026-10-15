@@ -1,0 +1,6 @@
+{
+  "TM_WARM_ENABLED": 0,
+  "MAX_CHECKS_PER_SITE": 3,
+  "SITE_PAUSE_SECONDS": 300,
+  "NOTE": "Set TM_WARM_ENABLED to 1 to run the ThreatMetrix browser warm-up per checkout (slower/heavier, cleaner risk score). MAX_CHECKS_PER_SITE/SITE_PAUSE_SECONDS are read by the bot-side /mrz site rotation."
+}

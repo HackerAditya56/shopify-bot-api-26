@@ -47,6 +47,31 @@ def _get_primp_executor() -> ThreadPoolExecutor:
 
 # ── Constants ──────────────────────────────────────────────────────────────
 DEFAULT_AMOUNT_PAISE = 100  # ₹1.00 fallback if no custom amount provided
+
+# ── Runtime config (config.json — edit on disk, takes effect without restart) ──
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+_config_cache = {"ts": 0.0, "data": {}}
+
+
+def load_config() -> dict:
+    """Read config.json with a 10s TTL cache so edits apply live."""
+    global _config_cache
+    now = time.time()
+    if now - _config_cache["ts"] < 10.0:
+        return _config_cache["data"]
+    data = {}
+    try:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    _config_cache = {"ts": now, "data": data}
+    return data
+
+
+def tm_warm_enabled() -> bool:
+    """TM browser warm-up gate — 1/0 in config.json."""
+    return bool(int(load_config().get("TM_WARM_ENABLED", 0)))
 CHECKOUT_JS_URL = 'https://checkout.razorpay.com/v1/checkout.js'
 CHECKOUT_PUBLIC = 'https://api.razorpay.com/v1/checkout/public'
 API_BASE = 'https://api.razorpay.com'
@@ -2107,6 +2132,25 @@ class RazorpaySession:
             await self._create_order_async()
             await asyncio.sleep(_human_delay(240, 0.5))
 
+            # TM warm-up (opt-in via config.json TM_WARM_ENABLED=1): run the
+            # ThreatMetrix fingerprint in a stealth browser from the SAME proxy,
+            # in a background thread, so steps 5-8 proceed in parallel.
+            self._warm_thread = None
+            if tm_warm_enabled():
+                cid = self.tokens.get('checkout_id', '')
+                if cid:
+                    try:
+                        from browser_warm import warm_threatmetrix_sync
+                        self._warm_thread = threading.Thread(
+                            target=warm_threatmetrix_sync,
+                            args=(cid, self.proxy),
+                            daemon=True,
+                        )
+                        self._warm_thread.start()
+                        self._log('  TM warm-up started (background)')
+                    except Exception as _warm_err:
+                        self._log(f'  TM warm-up skipped: {_warm_err}')
+
             # Step 5: Prefill encrypt
             if not self.forced_outcome:
                 self._log('\n=== Step 5: Prefill encrypt ===')
@@ -2133,6 +2177,8 @@ class RazorpaySession:
 
             # Step 9: Create payment (light pause for mass concurrency)
             if not self.forced_outcome:
+                if getattr(self, '_warm_thread', None) and self._warm_thread.is_alive():
+                    self._warm_thread.join(timeout=6)  # let TM beacons land first
                 self._log('\n=== Step 9: Create payment ===')
                 self._fire_lumberjack_sequence()  # Human signals — prevent WAF
                 await asyncio.sleep(_human_delay(240, 0.4))  # Reduced from 2000ms

