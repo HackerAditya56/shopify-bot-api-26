@@ -124,8 +124,32 @@ def _fmt_uptime(sec: float) -> str:
     return f"{d}d {h}h {m}m"
 
 
-def _vps_status_text() -> str:
-    """Human-readable VPS health + public IP block sent on startup."""
+def _read_cpu_times():
+    with open("/proc/stat") as f:
+        line = f.readline()
+    parts = [int(x) for x in line.split()[1:]]
+    idle = parts[3] + (parts[4] if len(parts) > 4 else 0)  # idle + iowait
+    return idle, sum(parts)
+
+
+def _live_cpu_percent(sample_s: float = 0.6) -> str:
+    """Live CPU usage across all cores (two-sample /proc/stat delta)."""
+    try:
+        idle1, total1 = _read_cpu_times()
+        time.sleep(sample_s)
+        idle2, total2 = _read_cpu_times()
+        didle = idle2 - idle1
+        dtotal = total2 - total1
+        if dtotal <= 0:
+            return "unknown"
+        return f"{100.0 * (dtotal - didle) / dtotal:.1f}%"
+    except Exception:
+        return "unknown"
+
+
+def _vps_status_text(live_cpu: str = None) -> str:
+    """Human-readable VPS health + public IP block.  Every call re-reads
+    /proc + re-fetches the WAN IP, so the values are always fresh (never cached)."""
     hostname = "unknown"
     try:
         hostname = open("/proc/sys/kernel/hostname").read().strip()
@@ -173,6 +197,9 @@ def _vps_status_text() -> str:
     except Exception:
         pass
 
+    if live_cpu is None:
+        live_cpu = _live_cpu_percent()
+
     return (
         "\n<b>🚀 VPS Online</b>\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
@@ -180,9 +207,9 @@ def _vps_status_text() -> str:
         f"🌐 <b>Public IP:</b> <code>{_get_public_ip()}</code>\n"
         f"⏱ <b>Uptime:</b> {uptime}\n"
         f"⚙️ <b>Load:</b> {load}\n"
+        f"⚡ <b>CPU:</b> {live_cpu} ({cpus} cores)\n"
         f"🧠 <b>RAM used:</b> {mem}\n"
         f"💾 <b>Disk used:</b> {disk}\n"
-        f"🔢 <b>CPU cores:</b> {cpus}\n"
         "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     )
 
@@ -520,6 +547,17 @@ def is_admin(user_id: int) -> bool:
 
 
 # ── Bot commands ─────────────────────────────────────────────────────────────
+
+async def _cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show live VPS health — RAM, CPU, disk, public IP, uptime, load."""
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        await update.message.reply_text("⚠️ Not authorized.")
+        return
+    msg = await update.message.reply_text("⏳ Measuring live CPU...")
+    text = "🖥 <b>VPS Status</b>\n" + _vps_status_text()
+    await msg.edit_text(text, parse_mode="HTML")
+
 
 async def _cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user their ID so they can request access from owner."""
@@ -1025,6 +1063,7 @@ async def start_bot() -> Application:
 
     # Register command handlers
     app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("admin", _cmd_admin))
     app.add_handler(CommandHandler("log", _cmd_log))
     app.add_handler(CommandHandler("addproxies", _cmd_addproxies))
