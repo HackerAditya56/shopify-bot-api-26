@@ -102,6 +102,90 @@ def _save_admins(admins: set[int]):
         print(f"[tg_bot] ERROR saving admins: {e}", file=sys.stderr)
 
 
+
+def _get_public_ip() -> str:
+    """Fetch the VPS public IP from an external echo service (not the local iface)."""
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
+        try:
+            r = httpx.get(url, timeout=6.0, follow_redirects=True)
+            ip = r.text.strip()
+            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
+                return ip
+        except Exception:
+            continue
+    return "unknown"
+
+
+def _fmt_uptime(sec: float) -> str:
+    sec = int(sec)
+    d, rem = divmod(sec, 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
+    return f"{d}d {h}h {m}m"
+
+
+def _vps_status_text() -> str:
+    """Human-readable VPS health + public IP block sent on startup."""
+    hostname = "unknown"
+    try:
+        hostname = open("/proc/sys/kernel/hostname").read().strip()
+    except Exception:
+        pass
+
+    uptime = "unknown"
+    try:
+        up = float(open("/proc/uptime").read().split()[0])
+        uptime = _fmt_uptime(up)
+    except Exception:
+        pass
+
+    load = "unknown"
+    try:
+        parts = open("/proc/loadavg").read().split()
+        load = " ".join(parts[:3])
+    except Exception:
+        pass
+
+    mem = "unknown"
+    try:
+        total_mb = avail_mb = 0
+        for line in open("/proc/meminfo").read().splitlines():
+            if line.startswith("MemTotal:"):
+                total_mb = int(line.split()[1]) // 1024
+            elif line.startswith("MemAvailable:"):
+                avail_mb = int(line.split()[1]) // 1024
+        mem = f"{total_mb - avail_mb}/{total_mb} MB"
+    except Exception:
+        pass
+
+    disk = "unknown"
+    try:
+        st = os.statvfs("/")
+        used_gb = (st.f_blocks - st.f_bfree) * st.f_frsize / 1024 ** 3
+        total_gb = st.f_blocks * st.f_frsize / 1024 ** 3
+        disk = f"{used_gb:.1f}/{total_gb:.1f} GB"
+    except Exception:
+        pass
+
+    cpus = "unknown"
+    try:
+        cpus = str(open("/proc/cpuinfo").read().count("processor"))
+    except Exception:
+        pass
+
+    return (
+        "\n<b>🚀 VPS Online</b>\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+        f"🖥 <b>Hostname:</b> {hostname}\n"
+        f"🌐 <b>Public IP:</b> <code>{_get_public_ip()}</code>\n"
+        f"⏱ <b>Uptime:</b> {uptime}\n"
+        f"⚙️ <b>Load:</b> {load}\n"
+        f"🧠 <b>RAM used:</b> {mem}\n"
+        f"💾 <b>Disk used:</b> {disk}\n"
+        f"🔢 <b>CPU cores:</b> {cpus}\n"
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    )
+
 # ── Stats counters (file-backed for cross-worker visibility) ──────────────
 # Gunicorn pre-forks workers — each has its own memory space.  In-memory stats
 # would show different values per worker.  We write each worker's stats to a
@@ -978,6 +1062,16 @@ async def start_bot() -> Application:
         await app.updater.start_polling(drop_pending_updates=True)
         print(f"[tg_bot] Worker {os.getpid()} acquired polling lock. "
               f"Bot is live.", file=sys.stderr)
+
+        # Send a startup ping with the VPS public IP + health to the owner.
+        try:
+            await app.bot.send_message(
+                chat_id=OWNER_ID,
+                text="🔥 <b>Razorpay Bot started</b>\n" + _vps_status_text(),
+                parse_mode="HTML",
+            )
+        except Exception as _e:
+            print(f"[tg_bot] startup ping failed: {_e}", file=sys.stderr)
     except (BlockingIOError, OSError):
         # Lock denied — another worker is already polling.
         # We stay in sender-only mode: can still send notifications + stats.
