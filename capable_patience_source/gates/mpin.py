@@ -425,6 +425,7 @@ async def _run_batch(message, st, user_id):
         f'{_tg(ID_STAR, "⭐")} 𝗕𝗿𝗮𝗻𝗱 ➠ {escape(brand_name)} | 𝗤𝘁𝘆 ➠ {qty} | 𝗔𝗺𝗼𝘂𝗻𝘁 ➠ {escape(amount)}',
         parse_mode="HTML")
 
+    # results: (card, status_key, status_disp, voucher, pin, resp, price)
     results = []
     for i, card in enumerate(cards, 1):
         try:
@@ -436,38 +437,72 @@ async def _run_batch(message, st, user_id):
             pass
         r = await asyncio.to_thread(_mp_check, card, brand_key, amount, qty)
         if not isinstance(r, dict):
-            results.append((card, "ERROR", "no response"))
+            results.append((card, "error", "𝗘𝗥𝗥𝗢𝗥", "", "", "no response", "—"))
             continue
         if r.get("error") == "LOGIN_REQUIRED":
             await proc.edit_text(f'{_tg(ID_WARNING, "⚠️")} <b>𝗟𝗼𝗴𝗶𝗻 𝗿𝗲𝗾𝘂𝗶𝗿𝗲𝗱.</b> 𝗟𝗼𝗴𝗶𝗻 𝗳𝗶𝗿𝘀𝘁 𝘃𝗶𝗮 /mpin → 𝗟𝗼𝗴𝗶𝗻.', parse_mode="HTML")
             return
-        # Magicpin _flow returns exit:1 for declines TOO — the real verdict is
-        # in result.Response, not in the ok flag.  Classify from Response.
         res = r.get("result") or {}
         resp = res.get("Response") or res.get("message") or r.get("error") or "UNKNOWN"
         status_disp, status_key = _fmt_status(resp)
         voucher = res.get("voucher_code", "")
-        results.append((card, status_key, status_disp, voucher, resp))
+        pin = res.get("voucher_pin", "")
+        price = res.get("Price", "—")
+        results.append((card, status_key, status_disp, voucher, pin, resp, price))
         if status_key == "charged":
             await asyncio.to_thread(update_user_stats, user_id, True)
 
     from collections import Counter
     counts = Counter(r[1] for r in results)
-    lines = []
+
+    # credits deduction (per card): charged 2, three_d 1, declined 1, error 0
+    deduct = sum({"charged": 2, "three_d": 1, "declined": 1, "error": 0}.get(r[1], 0) for r in results)
+    if deduct:
+        await asyncio.to_thread(lambda: update_credits(user_id, max(0, get_user_credits(user_id) - deduct)))
+
+    # ── Design 1: full per-card detail blocks ──
+    blocks = []
     for r in results:
-        card, key = r[0], r[1]
-        disp = r[2] if len(r) > 2 else key
-        extra = f' {_tg(ID_SPARKLE, "🎁")} <code>{escape(str(r[3]))}</code>' if len(r) > 3 and r[3] else ""
-        resp_txt = r[4] if len(r) > 4 else ""
-        rline = f' — <b>{escape(str(resp_txt)[:100])}</b>' if resp_txt else ""
-        lines.append(f'<code>{escape(card)}</code> ➠ {disp}{rline}{extra}')
-    body = "\n".join(lines) if lines else "𝗡𝗼 𝗿𝗲𝘀𝘂𝗹𝘁𝘀"
+        card, key, disp, voucher, pin, resp, price = r
+        bin_scheme = bin_bank = bin_country = "N/A"
+        try:
+            cc_num = card.split("|")[0]
+            bi = await get_bin_info(cc_num[:6]) or {}
+            bin_scheme = bi.get("scheme", "N/A")
+            btype = bi.get("type", "")
+            if btype:
+                bin_scheme = f"{bin_scheme} · {btype}"
+            bin_bank = bi.get("bank", "N/A")
+            cname = bi.get("country", "N/A")
+            cflag = bi.get("country_emoji", "")
+            bin_country = f"{cflag} {cname}" if cflag else cname
+        except Exception:
+            pass
+        vline = ""
+        if voucher:
+            vpin = f":{escape(str(pin))}" if pin else ""
+            vline = f'\n{_tg(ID_SPARKLE, "🎁")} 𝗩𝗼𝘂𝗰𝗵𝗲𝗿 ➠ <code>{escape(str(voucher))}{vpin}</code>'
+        block = (
+            f'━━━━━━━━━━━━━━━━\n'
+            f'{_tg(ID_CHARGED, "💎")} <code>{escape(card)}</code>\n'
+            f'━━━━━━━━━━━━━━━━\n'
+            f'𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {disp}\n'
+            f'{_tg(ID_GATEWAY, "⚡")} 𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ <b>𝗠𝗮𝗴𝗶𝗰𝗽𝗶𝗻</b>\n'
+            f'{_tg(ID_STAR, "⭐")} 𝗕𝗿𝗮𝗻𝗱 ➠ <b>{escape(brand_name)}</b>\n'
+            f'{_tg(ID_WALLET, "👛")} 𝗣𝗿𝗶𝗰𝗲 ➠ <b>{escape(str(price))}</b>\n'
+            f'𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{escape(str(resp)[:120])}</b>\n'
+            f'𝗕𝗜𝗡 ➠ <b>{bin_scheme}</b>\n'
+            f'{_tg(ID_BAT, "🦇")} 𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n'
+            f'{_tg(ID_TOP, "🔝")} 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➠ <b>{bin_country}</b>'
+            f'{vline}'
+        )
+        blocks.append(block)
+
+    body = "\n".join(blocks) if blocks else "𝗡𝗼 𝗿𝗲𝘀𝘂𝗹𝘁𝘀"
 
     await proc.edit_text(
         f'{_tg(ID_GATEWAY, "⚡")} <b>𝗠𝗮𝗴𝗶𝗰𝗽𝗶𝗻 𝗥𝗲𝘀𝘂𝗹𝘁</b>\n'
-        f'━━━━━━━━━━━━━━━━\n'
         f'{_tg(ID_CHARGED, "💎")} 𝗖𝗵𝗮𝗿𝗴𝗲𝗱 ➠ {counts.get("charged", 0)}   {_tg(ID_LOCK, "🔐")} 𝟯𝗗 ➠ {counts.get("three_d", 0)}\n'
         f'{_tg(ID_DECLINED, "❌")} 𝗗𝗲𝗰𝗹𝗶𝗻𝗲𝗱 ➠ {counts.get("declined", 0)}   {_tg(ID_WARNING, "⚠️")} 𝗘𝗿𝗿𝗼𝗿 ➠ {counts.get("error", 0)}\n'
-        f'━━━━━━━━━━━━━━━━\n'
         f'{body}',
         parse_mode="HTML", disable_web_page_preview=True)
