@@ -419,7 +419,7 @@ async def _run_batch(message, st, user_id):
         resp = res.get("Response") or res.get("message") or r.get("error") or "UNKNOWN"
         status_disp, status_key = _fmt_status(resp)
         voucher = res.get("voucher_code", "")
-        results.append((card, status_key, status_disp, voucher))
+        results.append((card, status_key, status_disp, voucher, resp))
         if status_key == "charged":
             await asyncio.to_thread(update_user_stats, user_id, True)
 
@@ -430,7 +430,9 @@ async def _run_batch(message, st, user_id):
         card, key = r[0], r[1]
         disp = r[2] if len(r) > 2 else key
         extra = f' {_tg(ID_SPARKLE, "🎁")} <code>{escape(str(r[3]))}</code>' if len(r) > 3 and r[3] else ""
-        lines.append(f'<code>{escape(card)}</code> ➠ {disp}{extra}')
+        resp_txt = r[4] if len(r) > 4 else ""
+        rline = f' — <b>{escape(str(resp_txt)[:100])}</b>' if resp_txt else ""
+        lines.append(f'<code>{escape(card)}</code> ➠ {disp}{rline}{extra}')
     body = "\n".join(lines) if lines else "𝗡𝗼 𝗿𝗲𝘀𝘂𝗹𝘁𝘀"
 
     await proc.edit_text(
