@@ -39,7 +39,8 @@ _check_lock = threading.Lock()
 
 
 def _run_check(card: str, brand_key: str | None, amount: str | None,
-               qty: str, proxy: str | None, fresh: bool) -> dict:
+               qty: str, proxy: str | None, fresh: bool,
+               wait_unlock: bool = False, unlock_mins: int = 360) -> dict:
     """Run a single card check via mpin._flow, capturing all emit() outputs."""
     results: list[dict] = []
     orig_emit = mpin.emit
@@ -58,6 +59,9 @@ def _run_check(card: str, brand_key: str | None, amount: str | None,
             opts["proxy"] = proxy
         if fresh:
             opts["fresh"] = True
+        if wait_unlock:
+            opts["wait_unlock"] = True
+        opts["unlock_mins"] = int(unlock_mins or 360)
         code = mpin._flow(opts, pos, True)
         last = results[-1] if results else {}
         return {
@@ -143,6 +147,8 @@ async def route_check(
     qty: str | None = Query("1"),
     proxy: str | None = Query(None),
     fresh: bool = Query(False),
+    wait_unlock: bool = Query(False),
+    unlock_mins: int = Query(360),
 ):
     if not cc or "|" not in cc:
         return JSONResponse({"ok": False, "error": "cc must be number|mm|yy|cvv"}, status_code=400)
@@ -154,7 +160,7 @@ async def route_check(
 
     def _blocking():
         with _check_lock:
-            return _run_check(cc, brand, amount, qty, proxy, fresh)
+            return _run_check(cc, brand, amount, qty, proxy, fresh, wait_unlock, unlock_mins)
 
     result = await asyncio.to_thread(_blocking)
     return JSONResponse(result)

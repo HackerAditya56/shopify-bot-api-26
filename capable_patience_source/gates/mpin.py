@@ -173,8 +173,11 @@ def _mp_api(method, path, params=None, body=None):
         return {"ok": False, "error": str(e)[:120]}
 
 
-def _mp_check(cc, brand_key, amount, qty):
-    return _mp_api("GET", "/mp/check", {"cc": cc, "brand": brand_key, "amount": amount or "", "qty": str(qty or 1)})
+def _mp_check(cc, brand_key, amount, qty, wait_unlock=False, unlock_mins=360):
+    return _mp_api("GET", "/mp/check", {
+        "cc": cc, "brand": brand_key, "amount": amount or "", "qty": str(qty or 1),
+        "wait_unlock": str(wait_unlock).lower(), "unlock_mins": str(unlock_mins),
+    })
 
 
 def _mp_variants(brand_key):
@@ -229,7 +232,19 @@ async def mpin_command(message: types.Message):
         await safe_reply(message, f'{_tg(ID_STAR, "💎")} 𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.', parse_mode="HTML")
         return
 
-    _STATE[user_id] = {"step": "menu", "qty": 1, "amount": "auto", "cards": [], "results": []}
+    # optional flags: waitunlock=1 / unlockmins=<minutes>
+    wu = False
+    um = 360
+    try:
+        mwu = re.search(r'waitunlock\s*=\s*1', message.text or "", re.I)
+        wu = bool(mwu)
+        mum = re.search(r'unlockmins\s*=\s*(\d+)', message.text or "", re.I)
+        if mum:
+            um = int(mum.group(1))
+    except Exception:
+        pass
+    _STATE[user_id] = {"step": "menu", "qty": 1, "amount": "auto", "cards": [], "results": [],
+                       "wait_unlock": wu, "unlock_mins": um}
 
     st = await asyncio.to_thread(_mp_status)
     authed = bool(st.get("authed")) if isinstance(st, dict) else False
@@ -445,7 +460,8 @@ async def _run_batch(message, st, user_id):
                 parse_mode="HTML")
         except Exception:
             pass
-        r = await asyncio.to_thread(_mp_check, card, brand_key, amount, qty)
+        r = await asyncio.to_thread(_mp_check, card, brand_key, amount, qty,
+                                    st.get("wait_unlock", False), st.get("unlock_mins", 360))
         if not isinstance(r, dict):
             results.append((card, "error", "𝗘𝗥𝗥𝗢𝗥", "", "", "no response", "—"))
             continue

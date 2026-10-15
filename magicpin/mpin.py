@@ -883,7 +883,7 @@ class Magicpin:
             pass
         return ""
 
-    def resolve_3ds(self, txn_id, challenge_url=None, retries=5, delay=0.6):
+    def resolve_3ds(self, txn_id, challenge_url=None, retries=8, delay=0.8):
         order_token = self.order_token_from(challenge_url or "")
         if challenge_url:
             try:
@@ -1020,7 +1020,7 @@ class Magicpin:
             "order_id": str(it.get("transaction_id") or it.get("order_id") or txn_id or ""),
         }
 
-    def collect_vouchers(self, txn_id=None, retries=5, delay=0.6, order_token=None):
+    def collect_vouchers(self, txn_id=None, retries=6, delay=0.8, order_token=None):
         out = []
         for _ in range(max(1, retries)):
             items = self.purchased()
@@ -1354,21 +1354,21 @@ def _flow(opts, pos, quiet):
             log(f"[>] rotated proxy IP: {ip or 'unknown'}")
         txn_id = engine.initiate_gateway(merchant_id, roa_id, amount, qty, payable, retries=1, cooldown=0)
         if not txn_id and getattr(engine, "last_pg_code", None) == "PG_ATTEMPT_LIMIT":
-            started = time.time()
-            ttl = unlock_mins * 60
-            gap = 60
-            while not txn_id and time.time() - started < ttl:
-                waited = int((time.time() - started) // 60)
-                log(f"[>] account frozen {waited}m; next poll in {gap}s (ttl {unlock_mins}m)...")
-                time.sleep(gap)
-                if len(cards) > 1:
-                    engine._rebuild_pg()
-                txn_id = engine.initiate_gateway(merchant_id, roa_id, amount, qty, payable, retries=1, cooldown=0)
-                gap = min(300, gap + 30)
-            if not txn_id and time.time() - started >= ttl:
-                emit({"Gateway": "Magic Pin", "Price": f"{payable:.2f}INR", "Response": f"payment attempt limit; still frozen after {unlock_mins}min, try again later", "brand": catalog["merchant_name"], "code": "PG_ATTEMPT_LIMIT_TIMEOUT", "cc": card_raw})
-                return 1
-                return 1
+            if wait_unlock:
+                started = time.time()
+                ttl = unlock_mins * 60
+                gap = 60
+                while not txn_id and time.time() - started < ttl:
+                    waited = int((time.time() - started) // 60)
+                    log(f"[>] account frozen {waited}m; next poll in {gap}s (ttl {unlock_mins}m)...")
+                    time.sleep(gap)
+                    if len(cards) > 1:
+                        engine._rebuild_pg()
+                    txn_id = engine.initiate_gateway(merchant_id, roa_id, amount, qty, payable, retries=1, cooldown=0)
+                    gap = min(300, gap + 30)
+                if not txn_id and time.time() - started >= ttl:
+                    emit({"Gateway": "Magic Pin", "Price": f"{payable:.2f}INR", "Response": f"payment attempt limit; still frozen after {unlock_mins}min, try again later", "brand": catalog["merchant_name"], "code": "PG_ATTEMPT_LIMIT_TIMEOUT", "cc": card_raw})
+                    return 1
         if not txn_id:
             code = getattr(engine, "last_pg_code", None) or "UNKNOWN"
             gw_msg = getattr(engine, "last_pg_message", "") or ""
