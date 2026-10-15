@@ -1429,7 +1429,14 @@ def _flow(opts, pos, quiet):
             first = vs[0] if vs else {}
             resp = res.get("status", "PENDING")
             if resp == "FAILURE":
-                resp = res.get("reason") or res.get("message") or "FAILURE"
+                reason = str(res.get("reason") or "").strip()
+                msg = str(res.get("message") or "").strip()
+                if reason and reason.lower() != "failure":
+                    resp = reason
+                elif msg:
+                    resp = msg
+                else:
+                    resp = "FAILURE"
             out = {"Gateway": "Magic Pin", "Price": f"{final_amt:.2f}INR", "Response": resp, "brand": catalog["merchant_name"], "cc": card_raw, "txn_id": txn_id, "voucher_code": first.get("voucher_code", ""), "voucher_pin": first.get("voucher_pin", ""), "expiry": first.get("expiry", ""), "vouchers": vs or None}
             if res.get("message"):
                 out["message"] = res["message"]
