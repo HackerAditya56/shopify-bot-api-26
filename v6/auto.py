@@ -621,6 +621,14 @@ def find_cheapest_product(client: TLSClient, shop_url: str, min_price: float = 0
     except Exception as e:
         pass  # لو فشل products.json، نكمل بالطريقة التانية
 
+    # Close the 8 scraping sub-sessions — each holds a libcurl handle + a
+    # connection pool. Leaving them open leaks ~1-2MB + 8 FDs per checkout.
+    for _c in pool:
+        try:
+            _c.close()
+        except Exception:
+            pass
+
     if catalog_blocked is not None:
         raise Exception(f"No available products at {shop_url} (catalog blocked: HTTP {catalog_blocked})")
     
