@@ -81,6 +81,26 @@ async def route_brands():
     return JSONResponse({"ok": True, "brands": catalog})
 
 
+@app.get("/mp/variants")
+async def route_variants(brand: str = Query("1")):
+    """Return the REAL voucher variants (amount + roa_id + in_stock) for a brand,
+    scraped live from the brand page so the bot can show the actual amounts."""
+    if brand not in VOUCHERS_CATALOG:
+        return JSONResponse({"ok": False, "error": "unknown brand"}, status_code=400)
+    item = VOUCHERS_CATALOG[brand]
+    engine = Magicpin(quiet=True)
+    try:
+        catalog = await asyncio.to_thread(
+            engine.fetch_variants, item["url"], item["merchant_id"])
+        return JSONResponse({
+            "ok": True,
+            "merchant": catalog.get("merchant_name", ""),
+            "variants": catalog.get("vouchers", []),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:160]})
+
+
 @app.get("/mp/status")
 async def route_status():
     engine = Magicpin(quiet=True)

@@ -64,7 +64,8 @@ BRANDS = {
     "10": "MakeMyTrip",
 }
 
-AMOUNTS = [("auto", "Auto"), ("10", "₹10"), ("25", "₹25"), ("50", "₹50"), ("100", "₹100")]
+def _amt_label(a):
+    return f"₹{int(a)}" if float(a) == int(float(a)) else f"₹{float(a):g}"
 
 _STATE = {}
 
@@ -120,11 +121,27 @@ def _brand_keyboard() -> InlineKeyboardMarkup:
 
 
 def _amount_qty_keyboard(st) -> InlineKeyboardMarkup:
+    # live in-stock amounts from the selected brand
+    variants = st.get("variants") or []
+    seen = set()
+    amts = []
+    for v in variants:
+        if not v.get("in_stock", True):
+            continue
+        a = float(v.get("amount", 0) or 0)
+        key = f"{a:.2f}"
+        if key in seen or a <= 0:
+            continue
+        seen.add(key)
+        amts.append(a)
+    amts = sorted(amts)[:6]
+
     rows = []
-    amt_row = []
-    for key, label in AMOUNTS:
+    amt_row = [_btn("Auto", "mpin_amt_auto", "success" if st.get("amount") == "auto" else "primary")]
+    for a in amts:
+        key = f"{a:.2f}"
         style = "success" if st.get("amount") == key else "primary"
-        amt_row.append(_btn(label, f"mpin_amt_{key}", style))
+        amt_row.append(_btn(_amt_label(a), f"mpin_amt_{key}", style))
     rows.append(amt_row)
     qty_row = [_btn(str(n), f"mpin_qty_{n}", "success" if st.get("qty") == n else "primary") for n in range(1, 6)]
     rows.append(qty_row)
@@ -158,6 +175,10 @@ def _mp_api(method, path, params=None, body=None):
 
 def _mp_check(cc, brand_key, amount, qty):
     return _mp_api("GET", "/mp/check", {"cc": cc, "brand": brand_key, "amount": amount or "", "qty": str(qty or 1)})
+
+
+def _mp_variants(brand_key):
+    return _mp_api("GET", "/mp/variants", {"brand": brand_key})
 
 
 def _mp_status():
@@ -284,6 +305,13 @@ async def mpin_callback_handler(callback: types.CallbackQuery):
         if key in BRANDS:
             st["brand_key"] = key
             st["brand_name"] = BRANDS[key]
+            st["amount"] = "auto"
+        # fetch the LIVE voucher variants so amount buttons are real
+        await callback.message.edit_text(
+            f'{_tg(ID_GATEWAY, "⏳")} <b>𝗟𝗼𝗮𝗱𝗶𝗻𝗴 𝘃𝗮𝗿𝗶𝗮𝗻𝘁𝘀...</b>',
+            parse_mode="HTML")
+        v = await asyncio.to_thread(_mp_variants, key)
+        st["variants"] = v.get("variants", []) if isinstance(v, dict) else []
         await callback.message.edit_text(
             f'{_tg(ID_WALLET, "👛")} <b>𝗦𝗲𝗹𝗲𝗰𝘁 𝗮𝗺𝗼𝘂𝗻𝘁 & 𝗾𝘁𝘆</b>\n\n'
             f'{_tg(ID_STAR, "⭐")} 𝗕𝗿𝗮𝗻𝗱 ➠ <b>{escape(st.get("brand_name", "?"))}</b>\n'
