@@ -883,7 +883,7 @@ class Magicpin:
             pass
         return ""
 
-    def resolve_3ds(self, txn_id, challenge_url=None, retries=8, delay=0.8):
+    def resolve_3ds(self, txn_id, challenge_url=None, retries=5, delay=0.6):
         order_token = self.order_token_from(challenge_url or "")
         if challenge_url:
             try:
@@ -1020,7 +1020,7 @@ class Magicpin:
             "order_id": str(it.get("transaction_id") or it.get("order_id") or txn_id or ""),
         }
 
-    def collect_vouchers(self, txn_id=None, retries=6, delay=0.8, order_token=None):
+    def collect_vouchers(self, txn_id=None, retries=5, delay=0.6, order_token=None):
         out = []
         for _ in range(max(1, retries)):
             items = self.purchased()

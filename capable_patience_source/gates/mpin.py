@@ -400,14 +400,23 @@ async def mpin_input_handler(message: types.Message):
         if not cards:
             await safe_reply(message, f'{_tg(ID_WARNING, "❌")} 𝗡𝗼 𝘃𝗮𝗹𝗶𝗱 𝗰𝗮𝗿𝗱𝘀 𝗳𝗼𝘂𝗻𝗱.', parse_mode="HTML")
             return
+        seen = set()
+        dupes = 0
         for cc, mm, yy, cvv in cards:
             yy2 = yy[2:] if len(yy) == 4 else yy
-            st["cards"].append(f"{cc}|{mm}|{yy2}|{cvv}")
+            fmt = f"{cc}|{mm}|{yy2}|{cvv}"
+            if fmt in seen:
+                dupes += 1
+                continue
+            seen.add(fmt)
+            st["cards"].append(fmt)
         st["cards"] = st["cards"][:10]
         if not luhn_check(st["cards"][0].split("|")[0]):
             await safe_reply(message, f'{_tg(ID_WARNING, "❌")} 𝗙𝗶𝗿𝘀𝘁 𝗰𝗮𝗿𝗱 𝗳𝗮𝗶𝗹𝗲𝗱 𝗟𝘂𝗵𝗻.', parse_mode="HTML")
             st["step"] = "menu"
             return
+        if dupes:
+            await safe_reply(message, f'{_tg(ID_SPARKLE, "✨")} {dupes} 𝗱𝘂𝗽𝗹𝗶𝗰𝗮𝘁𝗲 𝗰𝗮𝗿𝗱(𝘀) 𝗿𝗲𝗺𝗼𝘃𝗲𝗱.', parse_mode="HTML")
         await asyncio.create_task(_run_batch(message, st, user_id))
         return
 
