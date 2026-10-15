@@ -141,19 +141,35 @@ class Magicpin:
 
     def _init_http(self):
         self.proxy = build_proxy(self._proxy_override)
+        # direct IP (no proxy) — only for the egress-engagement check
+        try:
+            self._direct_fingerprint = httpx.get("https://api.ipify.org?format=json", timeout=15).json().get("ip", "")
+        except Exception:
+            self._direct_fingerprint = ""
+        # main magicpin.in API — THROUGH the residential proxy so the VPS IP
+        # never touches magicpin.in directly (avoids 503 rate-limit).
+        proxy = self.proxy
         try:
             self.http = httpx.Client(
                 http2=True,
                 follow_redirects=True,
                 timeout=20.0,
+                proxy=proxy or None,
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=6),
             )
+        except TypeError:
+            try:
+                self.http = httpx.Client(
+                    http2=True,
+                    follow_redirects=True,
+                    timeout=20.0,
+                    proxies={"http://": proxy, "https://": proxy} if proxy else None,
+                    limits=httpx.Limits(max_connections=10, max_keepalive_connections=6),
+                )
+            except Exception:
+                self.http = httpx.Client(follow_redirects=True, timeout=20.0)
         except Exception:
             self.http = httpx.Client(follow_redirects=True, timeout=20.0)
-        try:
-            self._direct_fingerprint = self.http.get("https://api.ipify.org?format=json", timeout=15).json().get("ip", "")
-        except Exception:
-            self._direct_fingerprint = ""
         self._rebuild_pg()
         if self.px is not self.http:
             try:
@@ -492,9 +508,21 @@ class Magicpin:
         return data
 
     def fetch_variants(self, url, default_mid=None):
-        r = self.http.get(url, timeout=20)
-        if r.status_code != 200:
-            raise ValueError(f"page http {r.status_code}")
+        r = None
+        last_code = 0
+        for attempt in range(3):
+            try:
+                r = self.http.get(url, timeout=20)
+                last_code = r.status_code
+                if r.status_code == 200:
+                    break
+                if r.status_code < 500:
+                    break
+            except Exception:
+                last_code = 0
+            time.sleep(1.0 * (attempt + 1))
+        if r is None or r.status_code != 200:
+            raise ValueError(f"page http {last_code or 0}")
         html = r.text
         mid = default_mid
         name = ""
