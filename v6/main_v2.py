@@ -351,6 +351,17 @@ app = FastAPI(title="Shopify Checker API v2", docs_url=None, redoc_url=None,
               lifespan=_lifespan)
 
 
+@app.middleware("http")
+async def _log_client_ip(request: Request, call_next):
+    """Log the requester IP for every call (like the Jio API access log)."""
+    ip = request.client.host if request.client else "unknown"
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        ip = xff.split(",")[0].strip()
+    _log.info("[req] ip=%s %s %s", ip, request.method, request.url.path)
+    return await call_next(request)
+
+
 @app.get("/")
 @app.get("/health")
 async def route_health():
