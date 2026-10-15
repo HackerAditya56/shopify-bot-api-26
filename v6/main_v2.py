@@ -351,14 +351,46 @@ app = FastAPI(title="Shopify Checker API v2", docs_url=None, redoc_url=None,
               lifespan=_lifespan)
 
 
+IP_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ip.txt")
+_ip_log_lock = threading.Lock()
+
+
+def _load_seen_ips() -> set:
+    try:
+        with open(IP_LOG_FILE, encoding="utf-8") as f:
+            return {line.strip() for line in f if line.strip()}
+    except Exception:
+        return set()
+
+
+_seen_ips = _load_seen_ips()
+
+
+def _log_new_ip(ip: str):
+    """Append an IP to ip.txt only if it hasn't been seen before."""
+    if not ip or ip == "unknown":
+        return
+    global _seen_ips
+    with _ip_log_lock:
+        if ip in _seen_ips:
+            return
+        _seen_ips.add(ip)
+        try:
+            with open(IP_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(ip + "\n")
+        except Exception:
+            pass
+
+
 @app.middleware("http")
 async def _log_client_ip(request: Request, call_next):
-    """Log the requester IP for every call (like the Jio API access log)."""
-    ip = request.client.host if request.client else "unknown"
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        ip = xff.split(",")[0].strip()
-    _log.info("[req] ip=%s %s %s", ip, request.method, request.url.path)
+    """Record the requester IP to ip.txt (new IPs only, /sh endpoint only)."""
+    if request.url.path.rstrip("/") == "/sh":
+        ip = request.client.host if request.client else "unknown"
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            ip = xff.split(",")[0].strip()
+        _log_new_ip(ip)
     return await call_next(request)
 
 
