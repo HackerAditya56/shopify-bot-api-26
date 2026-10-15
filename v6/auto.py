@@ -522,6 +522,7 @@ import time
 _product_cache: Dict[str, tuple] = {}
 _product_cache_lock = threading.Lock()
 _PRODUCT_CACHE_TTL = 3600
+_PRODUCT_CACHE_MAX = 5000  # bound the cache — purge expired + evict oldest when full
 
 def find_cheapest_product(client: TLSClient, shop_url: str, min_price: float = 0.01, max_price: float | None = None) -> Tuple[str, str, str, str]:
     """
@@ -718,6 +719,20 @@ def find_cheapest_product(client: TLSClient, shop_url: str, min_price: float = 0
     
     with _product_cache_lock:
         _product_cache[shop_url] = best_product + (time.time(),)
+        # Bound the cache: purge expired entries on write, then evict oldest
+        # (by timestamp) if still over the cap. Prevents unbounded growth when
+        # churning through thousands of unique shops per hour.
+        if len(_product_cache) > _PRODUCT_CACHE_MAX:
+            expired = [k for k, v in _product_cache.items()
+                       if now - v[-1] >= _PRODUCT_CACHE_TTL]
+            for k in expired:
+                _product_cache.pop(k, None)
+            if len(_product_cache) > _PRODUCT_CACHE_MAX:
+                oldest = sorted(
+                    _product_cache.items(), key=lambda kv: kv[1][-1]
+                )[:_PRODUCT_CACHE_MAX // 10]
+                for k, _ in oldest:
+                    _product_cache.pop(k, None)
     return best_product
 
 
