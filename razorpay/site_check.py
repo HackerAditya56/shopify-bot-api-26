@@ -55,18 +55,23 @@ def classify(result):
     reason = str(result.get("reason") or "").lower()
     msg = str(result.get("message") or "").lower()
 
-    if status in ("charged", "approved") or reason in ("charged", "approved"):
-        return "GOOD", f"charged/approved ({reason})"
-    if "3ds" in msg or "3d secure" in msg or "3-d secure" in msg or "3ds" in reason:
-        return "GOOD", "3DS"
-    if reason in SERVER_ERROR_REASONS or "server error" in msg:
-        return "RECHECK", "server_error (site soft-block)"
-    if reason in ("declined", "rzp_risk_decline") or status == "dead":
-        return "GOOD", f"declined ({reason})"
+    # hard SKIPs first (site unusable) — must beat the "dead = declined" fallback
     if "international" in msg and ("not support" in msg or "not allowed" in msg):
         return "SKIP", "international not supported"
     if reason in SKIP_REASONS:
         return "SKIP", reason
+
+    # site soft-block (rate limit) -> recheck after cooldown
+    if reason in SERVER_ERROR_REASONS or "server error" in msg:
+        return "RECHECK", "server_error (site soft-block)"
+
+    # real card responses -> site is fine
+    if status in ("charged", "approved") or reason in ("charged", "approved"):
+        return "GOOD", f"charged/approved ({reason})"
+    if "3ds" in msg or "3d secure" in msg or "3-d secure" in msg or "3ds" in reason:
+        return "GOOD", "3DS"
+    if reason in ("declined", "rzp_risk_decline") or status == "dead":
+        return "GOOD", f"declined ({reason or "dead"})"
     if status == "error":
         return "SKIP", f"error: {reason or msg[:60]}"
     return "SKIP", f"unclassified: {status}/{reason}"
