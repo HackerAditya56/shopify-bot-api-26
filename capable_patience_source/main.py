@@ -374,8 +374,67 @@ _MAIN_KB = InlineKeyboardMarkup(inline_keyboard=[
     [
         colored_button(text="OᴡɴᴇƦ", callback_data="open_owner", style="success", icon_custom_emoji_id=EMOJI_BAT),
         colored_button(text="Dᴇᴠ", callback_data="open_dev", style="primary", icon_custom_emoji_id=EMOJI_STAR)
+    ],
+    [
+        colored_button(text="Pʀᴏxʏ", callback_data="menu_proxy", style="primary", icon_custom_emoji_id=EMOJI_WALLET),
     ]
 ])
+
+# PROXY SECTION
+PROXY_INFO_TEXT = (
+    "<tg-emoji emoji-id=\"5424976816530014958\">👛</tg-emoji> <b>𝐏𝐑𝐎𝐗𝐘 𝐒𝐘𝐒𝐓𝐄𝐌</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "<tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> <b>𝐆𝐋𝐎𝐁𝐀𝐋 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b> (𝐞𝐱𝐜𝐥𝐮𝐝𝐢𝐧𝐠 𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲)\n"
+    "➤ 𝐀𝐝𝐝 ➠ <code>/proxy ip:port</code> (or send .txt)\n"
+    "➤ 𝐂𝐡𝐞𝐜𝐤 ➠ <code>/chkpxy</code> (removes dead ones)\n"
+    "➤ 𝐔𝐬𝐞𝐝 𝐛𝐲 ➠ /sh /msh /cl /hc /sp + all charge gates\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n"
+    "<tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b> (𝐬𝐞𝐩𝐚𝐫𝐚𝐭𝐞 𝐩𝐨𝐨𝐥)\n"
+    "➤ 𝐀𝐮𝐭𝐨-𝐦𝐚𝐧𝐚𝐠𝐞𝐝 𝐛𝐲 𝐭𝐡𝐞 𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐀𝐏𝐈\n"
+    "➤ 𝐒𝐭𝐚𝐭𝐮𝐬 ➠ <code>/rzp</code>\n"
+    "➤ 𝐍𝐨𝐭 𝐜𝐨𝐧𝐧𝐞𝐜𝐭𝐞𝐝 𝐭𝐨 𝐲𝐨𝐮𝐫 /proxy 𝐩𝐨𝐨𝐥"
+)
+
+PROXY_ADD_TEXT = (
+    "<tg-emoji emoji-id=\"6044254523009012231\">✅</tg-emoji> <b>𝐀𝐃𝐃 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "➤ <code>/proxy ip:port</code>\n"
+    "➤ <code>/proxy user:pass@ip:port</code>\n"
+    "➤ Send a .txt file with proxies\n"
+    "➤ Reply to a message with <code>/proxy</code>\n\n"
+    "𝐓𝐡𝐞𝐬𝐞 𝐟𝐞𝐞𝐝 𝐚𝐥𝐥 𝐠𝐚𝐭𝐞𝐬 𝐞𝐱𝐜𝐞𝐩𝐭 𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲."
+)
+
+PROXY_CHK_TEXT = (
+    "<tg-emoji emoji-id=\"5424976816530014958\">👛</tg-emoji> <b>𝐂𝐇𝐄𝐂𝐊 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "➤ <code>/chkpxy</code> tests your /proxy pool\n"
+    "➤ Dead proxies are removed automatically\n"
+    "➤ Live ones are saved back\n\n"
+    "𝐔𝐬𝐞 /myproxy 𝐭𝐨 𝐬𝐞𝐞 𝐲𝐨𝐮𝐫 𝐜𝐨𝐮𝐧𝐭."
+)
+
+PROXY_RZ_TEXT = (
+    "<tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐎𝐎𝐋</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "➤ <code>/rzp</code> shows the Razorpay pool\n"
+    "➤ Live + cooldown status\n"
+    "➤ Managed separately from /proxy\n\n"
+    "𝐓𝐡𝐢𝐬 𝐩𝐨𝐨𝐥 𝐢𝐬 𝐮𝐬𝐞𝐝 𝐛𝐲 /rz 𝐚𝐧𝐝 /mrz."
+)
+
+_KB_PROXY = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        colored_button(text="Aᴅᴅ Pʀᴏxʏ", callback_data="info_proxy_add", style="success", icon_custom_emoji_id=EMOJI_APPROVED),
+        colored_button(text="Cʜᴇᴄᴋ Pʀᴏxʏ", callback_data="info_proxy_chk", style="primary", icon_custom_emoji_id=EMOJI_WALLET),
+    ],
+    [
+        colored_button(text="Rᴀᴢᴏʀᴘᴀʏ Pᴏᴏʟ", callback_data="info_proxy_rz", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
+    ],
+    [colored_button(text="« Bᴀᴄᴋ", callback_data="back_main", style="primary", icon_custom_emoji_id=EMOJI_TOP)]
+])
+
+_KB_BACK_PROXY = _back("menu_proxy")
 
 # GATES SECTION
 _KB_GATES = InlineKeyboardMarkup(inline_keyboard=[
@@ -478,6 +537,10 @@ STATIC_MENU_MAP: dict = {
     "menu_mass": ("<b><tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> 𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗠𝗮𝘀𝘀 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 𝗢𝗽𝘁𝗶𝗼𝗻𝘀:</b>\n\n➤ 𝗦𝗧𝗥𝗜𝗣𝗘 𝗠𝗔𝗦𝗦 - Mass Stripe Auth Checking\n➤ 𝗣𝗔𝗬𝗣𝗔𝗟 𝗠𝗔𝗦𝗦 - Mass PayPal Checking\n➤ 𝗦𝗞𝗕𝗔𝗦𝗘𝗗 𝗠𝗔𝗦𝗦 - Mass SK Based Checking\n➤ 𝗦𝗛𝗢𝗣𝗜𝗙𝗬 𝗠𝗔𝗦𝗦 - Mass Shopify Charge Checking", _KB_MASS),
     "menu_profile": (None, None),
     "menu_tools": (TOOLS_TEXT, _KB_BACK_TOOLS),
+    "menu_proxy": (PROXY_INFO_TEXT, _KB_PROXY),
+    "info_proxy_add": (PROXY_ADD_TEXT, _KB_BACK_PROXY),
+    "info_proxy_chk": (PROXY_CHK_TEXT, _KB_BACK_PROXY),
+    "info_proxy_rz": (PROXY_RZ_TEXT, _KB_BACK_PROXY),
 }
 
 
