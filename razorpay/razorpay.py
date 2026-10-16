@@ -614,6 +614,17 @@ class RazorpaySession:
                 raise
 
         self.last_http_code = resp.status_code
+        if getattr(self, '_response_log', None) is not None:
+            try:
+                self._response_log.append({
+                    'method': method, 'url': url, 'status': resp.status_code,
+                    'headers': dict(resp.headers),
+                    'body': (resp.text or '')[:4000],
+                    'timing_ms': round((time.time() - t0) * 1000, 1),
+                    'ts': round(time.time(), 3),
+                })
+            except Exception:
+                pass
         if self.verbose:
             print(f'HTTP {resp.status_code} ← {self._short_url(url)} ({len(resp.content)} bytes) [{time.time()-t0:.1f}s]')
 
@@ -655,6 +666,17 @@ class RazorpaySession:
             resp = await s.request(method, url, headers=headers, timeout=self._per_request_timeout)
 
         self.last_http_code = resp.status_code
+        if getattr(self, '_response_log', None) is not None:
+            try:
+                self._response_log.append({
+                    'method': method, 'url': url, 'status': resp.status_code,
+                    'headers': dict(resp.headers),
+                    'body': (resp.text or '')[:4000],
+                    'timing_ms': round((time.time() - t0) * 1000, 1),
+                    'ts': round(time.time(), 3),
+                })
+            except Exception:
+                pass
         if self.verbose:
             print(f'HTTP {resp.status_code} ← {self._short_url(url)} ({len(resp.content)} bytes) [{time.time()-t0:.1f}s]')
 
