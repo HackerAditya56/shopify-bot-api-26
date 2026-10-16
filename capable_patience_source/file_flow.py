@@ -53,6 +53,23 @@ GATES = {
 }
 
 
+def _detect_year_format(content: str) -> str:
+    """'yy' (all 2-digit years), 'yyyy' (all 4-digit), or 'mixed'."""
+    yrs = []
+    cc_re = re.compile(r'\d{13,19}\s*[|/:=\s]\s*\d{1,2}\s*[|/:]\s*(\d{2,4})\s*[|/:]\s*\d{3,4}')
+    for line in content.splitlines():
+        m = cc_re.search(line.strip())
+        if m:
+            yrs.append(len(m.group(1)))
+    if not yrs:
+        return "yy"
+    if all(x == 2 for x in yrs):
+        return "yy"
+    if all(x == 4 for x in yrs):
+        return "yyyy"
+    return "mixed"
+
+
 def _detect_type(text: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
     if not lines:
@@ -121,19 +138,25 @@ async def on_file(message: types.Message):
         if not cards:
             await safe_reply(message, f'{_tg(ID_WARNING, "⚠️")} 𝗡𝗼 𝗰𝗮𝗿𝗱𝘀 𝗳𝗼𝘂𝗻𝗱 𝗶𝗻 𝘁𝗵𝗲 𝗳𝗶𝗹𝗲.', parse_mode="HTML")
             return
-        _STATE[uid] = {"type": "cc", "cards": cards}
+        year_fmt = _detect_year_format(content)
+        # mixed YY/YYYY -> no cook question, process straight through
+        if year_fmt == "mixed":
+            _STATE[uid] = {"type": "cc", "cards": cards, "cook": "yy"}
+            await _show_gates(message, _STATE[uid], edit=False)
+            return
+        _STATE[uid] = {"type": "cc", "cards": cards, "cook": year_fmt}
         text = (
             f'{_tg(ID_CHARGED, "💎")} <b>𝗖𝗖 𝗙𝗜𝗟𝗘 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗</b>\n'
             f"━━━━━━━━━━━━━━━━\n"
-            f'{_tg(ID_STAR, "⭐")} 𝗖𝗮𝗿𝗱𝘀 ➠ <code>{len(cards)}</code>\n\n'
-            f'{_tg(ID_GATEWAY, "⚡")} 𝗖𝗵𝗼𝗼𝘀𝗲 𝘆𝗲𝗮𝗿 𝗳𝗼𝗿𝗺𝗮𝘁 (𝗰𝗼𝗼𝗸):\n'
+            f'{_tg(ID_STAR, "⭐")} 𝗖𝗮𝗿𝗱𝘀 ➠ <code>{len(cards)}</code>\n'
+            f'{_tg(ID_GATEWAY, "⚡")} 𝗬𝗲𝗮𝗿 ➠ <b>{year_fmt.upper()}</b> (auto)\n\n'
+            f'𝗖𝗼𝗼𝗸 𝘁𝗵𝗲 𝗰𝗮𝗿𝗱𝘀 𝗼𝗿 𝗰𝗮𝗻𝗰𝗲𝗹?'
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                _btn("𝗬𝗬 (𝟮-𝗱𝗶𝗴𝗶𝘁)", "ff_cook_yy", "success", ID_APPROVED),
-                _btn("𝗬𝗬𝗬𝗬 (𝟰-𝗱𝗶𝗴𝗶𝘁)", "ff_cook_yyyy", "primary", ID_CHARGED),
+                _btn("𝗖𝗼𝗼𝗸", "ff_cook", "success", ID_APPROVED),
+                _btn("𝗖𝗮𝗻𝗰𝗲𝗹", "ff_cancel", "danger", ID_STOP),
             ],
-            [_btn("𝗖𝗮𝗻𝗰𝗲𝗹", "ff_cancel", "danger", ID_STOP)],
         ])
         await message.answer(text, parse_mode="HTML", reply_markup=kb)
         return
@@ -164,9 +187,8 @@ async def ff_cb(callback: types.CallbackQuery):
         await _add_global(callback, st)
     elif data == "ff_rz":
         await _add_rz(callback, st)
-    elif data in ("ff_cook_yy", "ff_cook_yyyy"):
-        st["cook"] = "yy" if data == "ff_cook_yy" else "yyyy"
-        await _show_gates(callback, st)
+    elif data == "ff_cook":
+        await _show_gates(callback.message, st, edit=True)
     elif data.startswith("ff_gate_"):
         gate = data.split("_", 2)[2]
         await _run_gate(callback, st, gate)
@@ -231,7 +253,7 @@ async def _add_rz(callback, st):
         await callback.message.edit_text(f'{_tg(ID_DECLINED, "❌")} 𝗥𝗭 𝗔𝗣𝗜 𝗲𝗿𝗿𝗼𝗿: {str(e)[:80]}', parse_mode="HTML")
 
 
-async def _show_gates(callback, st):
+async def _show_gates(msg, st, edit=False):
     cards = st.get("cards", [])
     cook = st.get("cook", "yy")
     rows = []
@@ -246,7 +268,13 @@ async def _show_gates(callback, st):
         f'{_tg(ID_GATEWAY, "⚡")} 𝗬𝗲𝗮𝗿 ➠ <b>{cook.upper()}</b>\n\n'
         f"𝗣𝗶𝗰𝗸 𝘁𝗵𝗲 𝗴𝗮𝘁𝗲 — 𝗶𝘁 𝘄𝗶𝗹𝗹 𝗮𝘀𝗸 𝗰𝗵𝗮𝗿𝗴𝗲𝗱-𝗼𝗻𝗹𝘆 𝗼𝗿 𝗮𝗽𝗽𝗿𝗼𝘃𝗲𝗱+𝗰𝗵𝗮𝗿𝗴𝗲𝗱."
     )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    if edit:
+        try:
+            await msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await msg.answer(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await msg.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def _run_gate(callback, st, gate):
@@ -307,18 +335,18 @@ class _FakeMsg:
 
     async def reply(self, *a, **kw):
         kw.pop("reply_to_message_id", None)
-        return await self.bot.send_message(chat_id=self.chat_id, *a, **kw)
+        return await self.bot.send_message(self.chat_id, *a, **kw)
 
     async def answer(self, *a, **kw):
         kw.pop("reply_to_message_id", None)
-        return await self.bot.send_message(chat_id=self.chat_id, *a, **kw)
+        return await self.bot.send_message(self.chat_id, *a, **kw)
 
     async def reply_document(self, *a, **kw):
         kw.pop("reply_to_message_id", None)
-        return await self.bot.send_document(chat_id=self.chat_id, *a, **kw)
+        return await self.bot.send_document(self.chat_id, *a, **kw)
 
     async def answer_photo(self, *a, **kw):
-        return await self.bot.send_photo(chat_id=self.chat_id, *a, **kw)
+        return await self.bot.send_photo(self.chat_id, *a, **kw)
 
     async def edit_text(self, *a, **kw):
         return None
