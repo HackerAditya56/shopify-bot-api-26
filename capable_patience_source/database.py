@@ -197,6 +197,35 @@ def is_owner_user(user_id: int) -> bool:
     return val
 
 
+def has_rz_access(user_id: int) -> bool:
+    """Razorpay gate access. ONLY the dev (OWNER_IDS) is auto-allowed; everyone
+    else — premium, owners included — needs the explicit rz_access DB flag."""
+    if user_id in OWNER_IDS:
+        return True
+    try:
+        with PooledConn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT rz_access FROM users WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def set_rz_access(user_id: int, val: int) -> None:
+    """Toggle razorpay access for a user (0/1). Dev is never toggled off."""
+    if user_id in OWNER_IDS and val == 0:
+        return
+    try:
+        with PooledConn() as conn:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS rz_access INTEGER DEFAULT 0")
+            cur.execute("UPDATE users SET rz_access = %s WHERE user_id = %s", (val, user_id))
+            conn.commit()
+    except Exception:
+        pass
+
+
 def set_owner_flag(user_id: int, val: int) -> None:
     with PooledConn() as conn:
         cur = conn.cursor()
@@ -252,6 +281,10 @@ def ensure_stats_columns():
                 pass
             try:
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS rz_access INTEGER DEFAULT 0")
             except Exception:
                 pass
             conn.commit()

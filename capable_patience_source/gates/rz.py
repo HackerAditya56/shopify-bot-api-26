@@ -17,7 +17,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LOCAL IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
+from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection, has_rz_access
 from bin import get_bin_info
 from sub import get_premium_status
 import urllib.request, urllib.parse, urllib.error, json, os, itertools
@@ -29,26 +29,6 @@ RZ_SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 _site_ctr = itertools.count()
 
 
-def _load_rz_sites():
-    try:
-        with open(RZ_SITES_FILE, encoding="utf-8") as f:
-            return [l.strip() for l in f if l.strip().startswith("http")]
-    except Exception:
-        return []
-
-
-async def _get_rz_pool_proxies():
-    """Razorpay's own proxy pool from the :9000 API (NOT the /proxy DB)."""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"{RZ_API}/pool-list", timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("proxies", [])
-    except Exception as e:
-        logging.error(f"[rz] pool-list error: {e}")
-    return []
 
 
 def _rz_api_check(cc, proxy, site, amount_paise):
@@ -65,16 +45,21 @@ def _rz_api_check(cc, proxy, site, amount_paise):
         except Exception:
             data = {}
         return {"status": str(data.get("status") or "error").lower(),
-                "response": data.get("message") or f"HTTP {e.code}"}
+                "response": data.get("message") or f"HTTP {e.code}",
+                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
     except urllib.error.URLError as e:
-        return {"status": "error", "response": f"Connection error: {str(e.reason)[:60]}"}
+        return {"status": "error", "response": f"Connection error: {str(e.reason)[:60]}",
+                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
     except Exception as e:
-        return {"status": "error", "response": f"API: {str(e)[:80]}"}
+        return {"status": "error", "response": f"API: {str(e)[:80]}",
+                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
     status = str(data.get("status") or "error").lower()
     if status == "dead":
         status = "declined"
     msg = data.get("message") or data.get("reason") or "N/A"
-    return {"status": status, "response": msg}
+    actual_paise = int(data.get("amount_paise") or amount_paise)
+    return {"status": status, "response": msg,
+            "amount_paise": actual_paise, "amount_inr": actual_paise / 100}
 from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -258,25 +243,15 @@ async def rz_command(message: types.Message):
     user_id = user.id
     current_time = time.time()
 
-    # 2. GET PREMIUM STATUS
-    is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
-
-    # 3. RATE LIMITING CHECK
-    if not is_premium:
-        # Apply 10s cooldown only to FREE users
-        if user_id in user_last_command_time:
-            elapsed = current_time - user_last_command_time[user_id]
-            if elapsed < 10:
-                remaining_time = round(10 - elapsed, 1)
-                await safe_reply(message, 
-                    f"<tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝗔𝗰𝘁𝗶𝘃𝗲 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻 !</b>\n\n"
-                    f"𝗣𝗹𝗲𝗮𝘀𝗲 𝘄𝗮𝗶𝘁 <code>{remaining_time}</code> 𝘀𝗲𝗰𝗼𝗻𝗱𝘀 𝗯𝗲𝗳𝗼𝗿𝗲 𝗰𝗼𝗻𝘁𝗶𝗻𝘂𝗶𝗻𝗴.\n\n"
-                    f"<tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> 𝗣𝘂𝗿𝗰𝗵𝗮𝘀𝗲 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝗽𝗹𝗮𝗻 𝗳𝗼𝗿 𝘂𝘀𝗲 𝗰𝗼𝗺𝗺𝗮𝗻𝗱𝘀 𝘄𝗶𝘁𝗵𝗼𝘂𝘁 𝗰𝗼𝗼𝗹𝗱𝗼𝘄𝗻.",
-                    parse_mode="HTML"
-                )
-                return
-        
-        user_last_command_time[user_id] = current_time
+    # 2. RAZORPAY ACCESS CHECK (dev-only grant; premium/owner do NOT auto-qualify)
+    if not await asyncio.to_thread(has_rz_access, user_id):
+        await safe_reply(message,
+            "🔒 <b>𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗔𝗰𝗰𝗲𝘀𝘀 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>\n\n"
+            "𝗬𝗼𝘂 𝗱𝗼𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗮𝗰𝗰𝗲𝘀𝘀 𝘁𝗼 𝘁𝗵𝗲 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗴𝗮𝘁𝗲.\n"
+            "𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗱𝗲𝘃 𝗰𝗮𝗻 𝗴𝗿𝗮𝗻𝘁 𝗶𝘁.",
+            parse_mode="HTML"
+        )
+        return
     
     # 4. Extract Card Details
     parts = message.text.split(maxsplit=1)
@@ -321,9 +296,9 @@ async def rz_command(message: types.Message):
     # Amount: amount=X (rupees) or random ₹50–₹100
     amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
     if amt_match:
-        amount_paise = int(amt_match.group(1)) * 100
+        amount_paise = min(int(amt_match.group(1)), 100) * 100  # cap ₹100
     else:
-        amount_paise = random.randint(5000, 10000)
+        amount_paise = random.randint(5000, 10000)  # ₹50-100
 
     # Site: site=URL or random from rz_site.txt
     site_match = re.search(r'site\s*=\s*(https?://\S+)', raw_text, re.I)
@@ -433,6 +408,8 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
                 rz_rotation.record_site_result(site, api_result.get("response", ""))
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
+    actual_inr = float(api_result.get("amount_inr") or (amount_paise / 100))
+    amount_warn = f"\n⚠️ <b>𝗔𝗺𝗼𝘂𝗻𝘁 𝘁𝗼𝗼 𝗵𝗶𝗴𝗵 (₹{actual_inr:.0f} > ₹100)</b>" if actual_inr > 100 else ""
 
     # Determine Final Status Display (premium emojis — same IDs as /msh)
     if status_raw == "charged":
@@ -478,7 +455,7 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     final_caption = (
         f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
         f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
-        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{amount_paise // 100}\n"
+        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{actual_inr:.2f}{amount_warn}\n"
         f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{res_message}</b>\n"
         f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
         f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"
@@ -495,73 +472,3 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     
     # Log timing
     logging.info(f"RZ command completed in {elapsed:.2f}s for user {user_id}")
-
-# ─────────────────────────────────────────────────────────────────────────
-# /rzp — Razorpay proxy pool status (live + cooldown)
-# ─────────────────────────────────────────────────────────────────────────
-
-@router.message(F.text.startswith("/rzp") | F.caption.startswith("/rzp"))
-async def rzp_command(message: types.Message):
-    user_id = message.from_user.id
-
-    # 1) Razorpay proxies live in the API's own pool (not the /proxy DB)
-    proxies = await _get_rz_pool_proxies()
-
-    # 2) cooldown state lives in the API (recorded on WAF 403)
-    cd_hosts = {}
-    try:
-        import urllib.request as _ur
-        with _ur.urlopen(f"{RZ_API}/pool-status", timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        for e in data.get("cooldown_list", []):
-            h = (e.get("proxy") or "").lower().strip()
-            if h:
-                cd_hosts[h] = e
-    except Exception as e:
-        await safe_reply(message, f"❌ <b>API unreachable:</b> <code>{str(e)[:60]}</code>", parse_mode="HTML")
-        return
-
-    def _hostname(p):
-        h = (p or "").strip().lower()
-        for pr in ("http://", "https://", "socks5://"):
-            if h.startswith(pr):
-                h = h[len(pr):]
-        if "@" in h:
-            h = h.rsplit("@", 1)[1]
-        if ":" in h and h.rsplit(":", 1)[-1].isdigit():
-            h = h.rsplit(":", 1)[0]
-        return h
-
-    live = 0
-    cooled = []
-    for p in proxies:
-        h = _hostname(p)
-        if h in cd_hosts:
-            cooled.append((h, cd_hosts[h]))
-        else:
-            live += 1
-
-    total = len(proxies)
-    cd = len(cooled)
-
-    lines = [
-        "<b>𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐏𝐫𝐨𝐱𝐲 𝐏𝐨𝐨𝐥</b>",
-        "━━━━━━━━━━━━━━━━━━━━━",
-        f"<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total}</code>",
-        f"✅ <b>𝐋𝐢𝐯𝐞 ➠</b> <code>{live}</code>",
-        f"❄️ <b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 ➠</b> <code>{cd}</code>",
-    ]
-    if cooled:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("<b>𝐂𝐨𝐨𝐥𝐝𝐨𝐰𝐧 𝐥𝐢𝐬𝐭:</b>")
-        import datetime as _dt
-        for h, e in cooled[:20]:
-            until = e.get("until", 0)
-            try:
-                ts = _dt.datetime.fromtimestamp(until).strftime("%m-%d %H:%M")
-            except Exception:
-                ts = "?"
-            lines.append(f"• <code>{h}</code> ⏳ <b>{ts}</b>")
-        if len(cooled) > 20:
-            lines.append(f"… and {len(cooled)-20} more")
-    await safe_reply(message, "\n".join(lines), parse_mode="HTML")

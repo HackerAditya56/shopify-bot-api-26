@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from aiogram import types, F, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_db_connection, OWNER_IDS
+from database import get_db_connection, OWNER_IDS, has_rz_access, set_rz_access
 from mass_gates._tg_helpers import safe_reply
 from ban import _is_banned_sync, _ban_user_sync, _unban_user_sync
 
@@ -151,6 +151,8 @@ def _user_detail_text(row, plan) -> str:
     uname = username or "N/A"
     banned_line = f'{_tg(ID_STOP, "⛔")} 𝗕𝗹𝗼𝗰𝗸𝗲𝗱 ➠ <b>𝗬𝗘𝗦</b>' if banned else f'{_tg(ID_APPROVED, "✅")} 𝗕𝗹𝗼𝗰𝗸𝗲𝗱 ➠ <b>𝗡𝗢</b>'
     plan_str = plan or ("𝗗𝗘𝗩" if master else ("𝗢𝗪𝗡𝗘𝗥" if is_owner else "𝗙𝗥𝗘𝗘"))
+    rz_on = has_rz_access(uid)
+    rz_line = f'{_tg(ID_APPROVED, "✅")} 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ➠ <b>𝗢𝗡</b>' if rz_on else f'{_tg(ID_DECLINED, "❌")} 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ➠ <b>𝗢𝗙𝗙</b>'
     return (
         f'{_tg(ID_STAR, "⭐")} <b>𝗨𝗦𝗘𝗥 𝗗𝗘𝗧𝗔𝗜𝗟</b>\n'
         f"━━━━━━━━━━━━━━━━\n"
@@ -160,6 +162,7 @@ def _user_detail_text(row, plan) -> str:
         f"━━━━━━━━━━━━━━━━\n"
         f"{access_line}\n"
         f'{_tg(ID_CHARGED, "💎")} 𝗣𝗹𝗮𝗻 ➠ <b>{plan_str}</b>\n'
+        f"{rz_line}\n"
         f'{_tg(ID_LOCK, "🔐")} 𝗥𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 ➠ {days_line}\n'
         f"𝗘𝘅𝗽𝗶𝗿𝘆 ➠ <code>{expiry_str}</code>\n"
         f"━━━━━━━━━━━━━━━━\n"
@@ -272,6 +275,10 @@ def _detail_kb(uid, row):
             _btn("𝗚𝗿𝗮𝗻𝘁 𝟯𝟬𝗱", f"g_{uid}_30", "success", ID_APPROVED),
             _btn("𝗚𝗿𝗮𝗻𝘁 𝟵𝟬𝗱", f"g_{uid}_90", "success", ID_APPROVED),
         ])
+        rz_on = has_rz_access(uid)
+        rows.append([
+            _btn(f"𝗥𝗭 ➠ {'𝗢𝗡' if rz_on else '𝗢𝗙𝗙'}", f"rzt_{uid}", "success" if rz_on else "primary", ID_CHARGED),
+        ])
         rows.append([_btn("𝗥𝗲𝘃𝗼𝗸𝗲", f"rv_{uid}", "danger", ID_DECLINED)])
         if banned:
             rows.append([_btn("𝗨𝗻𝗯𝗹𝗼𝗰𝗸", f"unblk_{uid}", "success", ID_APPROVED)])
@@ -373,6 +380,29 @@ async def unblock_cb(callback: types.CallbackQuery):
     except Exception:
         pass
     await callback.answer("𝗨𝗻𝗯𝗹𝗼𝗰𝗸𝗲𝗱")
+
+@router.callback_query(F.data.startswith("rzt_"))
+async def rz_toggle_cb(callback: types.CallbackQuery):
+    if not _is_master(callback.from_user.id):
+        await callback.answer("𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗱𝗲𝘃 𝗰𝗮𝗻 𝘁𝗼𝗴𝗴𝗹𝗲 𝗥𝗭.", show_alert=True)
+        return
+    uid = int(callback.data.split("_", 1)[1])
+    if _is_master(uid):
+        await callback.answer("𝗧𝗵𝗲 𝗱𝗲𝘃 𝗮𝗹𝘄𝗮𝘆𝘀 𝗵𝗮𝘀 𝗥𝗭.", show_alert=True)
+        return
+    currently = has_rz_access(uid)
+    await asyncio.to_thread(set_rz_access, uid, 0 if currently else 1)
+    row, plan = await asyncio.to_thread(_user_sync, uid)
+    text = _user_detail_text(row, plan)
+    new_state = "𝗢𝗡" if not currently else "𝗢𝗙𝗙"
+    text += f"\n\n{_tg(ID_CHARGED, '💎')} 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ➠ <b>{new_state}</b>"
+    kb = _detail_kb(uid, row)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer(f"𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ➠ {new_state}")
+
 
 @router.callback_query(F.data == "noop")
 async def noop_cb(callback: types.CallbackQuery):

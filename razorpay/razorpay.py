@@ -376,7 +376,7 @@ class RazorpaySession:
         self.traffic_env = traffic_env
         self.order_comment = order_comment
         self.verbose = verbose
-        self.amount_paise = max(1, amount_paise)  # minimum 1 paise
+        self.amount_paise = min(10000, max(1, amount_paise))  # ₹1..₹100 cap
         self._per_request_timeout = per_request_timeout  # configurable per-HTTP-request timeout
 
         # Multi-platform browser profile: TLS target + headers + device metrics

