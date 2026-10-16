@@ -70,6 +70,13 @@ _OPERATION_NAMES = _auto._OPERATION_NAMES
 extract_receipt_session_token = _auto.extract_receipt_session_token
 extract_receipt_status_code = _auto.extract_receipt_status_code
 extract_any_error = _auto.extract_any_error
+normalize_card_result = _auto.normalize_card_result
+result_status_for = _auto.result_status_for
+classify_receipt = _auto.classify_receipt
+no_code_failure = _auto.no_code_failure
+submit_body_reports_success = _auto.submit_body_reports_success
+classify_pci_rejection = _auto.classify_pci_rejection
+_pci_error_reason = _auto._pci_error_reason
 extract_tax_from_rejected = _auto.extract_tax_from_rejected
 extract_total_from_rejected = _auto.extract_total_from_rejected
 extract_rejected_totals = _auto.extract_rejected_totals
@@ -78,6 +85,8 @@ CURRENCY_TO_COUNTRY = _auto.CURRENCY_TO_COUNTRY
 _RE_CURRENCY_CART = _auto._RE_CURRENCY_CART
 extract_gateway_name = _auto.extract_gateway_name
 extract_delivery_from_proposal = _auto.extract_delivery_from_proposal
+resolve_delivery = _auto.resolve_delivery
+extract_payment_flexibility_terms_id = _auto.extract_payment_flexibility_terms_id
 _proposal_headers = _auto._proposal_headers
 patch_payload = _auto.patch_payload
 check_submit_errors = _auto.check_submit_errors
@@ -1314,10 +1323,16 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
                                      total_amount: str, pci_session_id: str, attempt_token: str,
                                      currency: str, country: str, signed_handles,
                                      is_digital: bool = False, tax_amount: str = None,
-                                     total_any: bool = False) -> tuple:
+                                     total_any: bool = False,
+                                     payment_flexibility_terms_id: str = "") -> tuple:
     handle_lines        = [json.dumps({"signedHandle": h}) for h in (signed_handles or [])]
     signed_handles_json = "[" + ",".join(handle_lines) + "]"
     page_id             = generate_page_id()
+
+    flex_line = ""
+    if payment_flexibility_terms_id:
+        flex_line = (',\n        "paymentFlexibilityTermsId": "'
+                     + payment_flexibility_terms_id + '"')
 
     if is_digital or total_any:
         total_amount_block = '"totalAmount": {"any": true}'
@@ -1465,7 +1480,7 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
             "zoneCode": "{addr.zone_code}",
             "phone": "{addr.phone}"
           }}
-        }}
+        }}{flex_line}
       }},
       "buyerIdentity": {{
         "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
@@ -1763,11 +1778,35 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 f"{addr.first_name} {addr.last_name}",
                 card_month, card_year, card_cvv, site_name, proxy_url,
                 impersonate=client.impersonate, logger=logger)
-            _ = pci_status
+
             pci_session_id = extract_pci_session_id(pci_body)
             if not pci_session_id:
+                verdict = classify_pci_rejection(pci_status, pci_body)
+                if verdict == "invalid_cvc":
+                    result.retryable = False
+                    result.status = CheckStatus.DECLINED
+                    result.error = Exception(
+                        f"CVV rejected for this card type (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
+                if verdict == "card_declined":
+                    result.retryable = False
+                    result.status = CheckStatus.DECLINED
+                    result.error = Exception(
+                        f"Card refused at tokenisation (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
+                if verdict == "pci_error":
+                    result.retryable = False
+                    result.status = CheckStatus.ERROR
+                    result.error = Exception(
+                        f"PCI tokenisation refused the card data (HTTP {pci_status}): "
+                        f"{_pci_error_reason(pci_body)}")
+                    return result
                 result.retryable = True
-                raise Exception("could not extract session ID")
+                raise Exception(
+                    f"could not extract session ID (HTTP {pci_status}): "
+                    f"{_pci_error_reason(pci_body)}")
             await tracker.card_entered()
         except Exception as e:
             result.status = CheckStatus.ERROR
@@ -1781,31 +1820,25 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 raise Exception("could not extract queueToken")
 
             is_digital      = not extract_is_shipping_required(proposal5_body)
-            delivery_handle, dh_shipping = extract_delivery_from_proposal(proposal5_body)
-            if not delivery_handle:
-                delivery_handle = extract_delivery_handle(proposal5_body)
-            if not delivery_handle and not is_digital:
+            delivery_handle, shipping_amount, needs_delivery = resolve_delivery(proposal5_body)
+            if not delivery_handle and needs_delivery:
                 result.retryable = True
                 raise Exception("Step 10 failed: could not extract delivery handle")
-
-            signed_handles = extract_signed_handles(proposal5_body)
-
-            shipping_amount = dh_shipping or extract_shipping_amount(proposal5_body)
-            if not shipping_amount and not is_digital:
-                result.retryable = True
-                raise Exception("Step 10 failed: could not extract shipping amount")
             if not shipping_amount:
                 shipping_amount = "0.00"
+
+            signed_handles = extract_signed_handles(proposal5_body)
 
             total_amount = extract_checkout_total(proposal5_body)
             if not total_amount:
                 total_amount = extract_seller_total(proposal5_body)
-            if not total_amount and is_digital:
+            if not total_amount:
                 total_amount = extract_running_total(proposal5_body)
             if not total_amount:
                 raise Exception("Step 10 failed: could not extract total amount")
             result.amount = total_amount
 
+            flex_terms_id = extract_payment_flexibility_terms_id(proposal5_body)
             attempt_token = generate_attempt_token(checkout_token)
             current_tax   = extract_tax_amount(proposal5_body)
             current_total = total_amount
@@ -1818,7 +1851,8 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                     queue_token5, email, addr, delivery_handle, shipping_amount,
                     current_total, pci_session_id, attempt_token, currency, country,
                     signed_handles, is_digital=is_digital, tax_amount=current_tax,
-                    total_any=cover_any)
+                    total_any=cover_any,
+                    payment_flexibility_terms_id=flex_terms_id)
 
                 if "TAX_NEW_TAX_MUST_BE_ACCEPTED" in submit_body:
                     new_tax   = extract_tax_from_rejected(submit_body)
@@ -1866,19 +1900,21 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
 
             receipt_id = extract_receipt_id(submit_body)
             if not receipt_id:
-                error_msg = extract_any_error(submit_body)
-                if "CAPTCHA" in (error_msg or ""):
-                    error_msg = "CARD_DECLINED"
-                if error_msg:
-                    result.status      = CheckStatus.DECLINED
+                raw = extract_any_error(submit_body)
+                if raw:
+                    error_msg = normalize_card_result(raw)
+                    result.status      = result_status_for(error_msg)
                     result.status_code = error_msg
                     result.error       = Exception(error_msg)
-                    result.retryable   = any(k in error_msg.lower()
-                                             for k in ['inventory', 'retry', 'try again', 'generic'])
+                    result.retryable   = (error_msg in ("GENERIC_ERROR", "CHECKOUT_RETRYABLE")
+                                          or any(k in error_msg.lower()
+                                                 for k in ['inventory', 'retry', 'try again']))
                 else:
-                    result.status    = CheckStatus.ERROR
-                    result.error     = Exception("Step 10 failed: could not extract receiptId or error message")
-                    result.retryable = True
+                    error_msg, retry = no_code_failure(submit_body)
+                    result.status    = CheckStatus.APPROVED if retry else CheckStatus.ERROR
+                    result.status_code = error_msg
+                    result.error     = Exception(error_msg)
+                    result.retryable = retry
                 return result
 
             receipt_session_token = extract_receipt_session_token(submit_body)
@@ -1893,10 +1929,13 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
 
         # Step 11 — poll for receipt
         poll_delay_re = re.compile(r'"pollDelay"\s*:\s*(\d+)')
-        type_name_re  = re.compile(
-            r'"__typename"\s*:\s*"(ProcessingReceipt|FailedReceipt|SuccessfulReceipt|ProcessedReceipt|ActionRequiredReceipt)"')
+        type_name_re  = re.compile(r'"__typename"\s*:\s*"([A-Za-z_]*Receipt[A-Za-z_]*)"')
+        seen_rounds = 0
+        max_patient_rounds = 120
+        patient_rounds = 0
+        last_outcome = "unknown"
 
-        for poll_num in range(1, 31):
+        while seen_rounds < 30:
             try:
                 _, poll_body = await send_poll_for_receipt(
                     client, shop_url, checkout_url, checkout_token, session_token,
@@ -1908,49 +1947,46 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 if m:
                     receipt_type = m.group(1)
 
+                outcome = classify_receipt(poll_body, receipt_type)
+                last_outcome = outcome
                 result.status_code = extract_receipt_status_code(poll_body, receipt_type)
 
-                if receipt_type in ("SuccessfulReceipt", "ProcessedReceipt"):
+                if outcome == "success":
                     result.status      = CheckStatus.CHARGED
                     result.status_code = "ORDER_PAID"
                     result.receipt_url = checkout_url + "/thank_you"
                     return result
 
-                if receipt_type == "ActionRequiredReceipt":
+                if outcome == "action":
                     result.status      = CheckStatus.APPROVED
                     result.status_code = "3DS_REQUIRED"
                     return result
 
-                if receipt_type == "FailedReceipt":
-                    error_re   = re.compile(r'"code"\s*:\s*"([^"]+)"')
-                    em         = error_re.search(poll_body)
-                    error_code = em.group(1) if em else ""
-                    if "CAPTCHA" in error_code:
-                        error_code = "CARD_DECLINED"
-                    if error_code == "CAPTCHA_REQUIRED":
-                        result.status      = CheckStatus.APPROVED
-                        result.status_code = "CARD_DECLINED"
-                        return result
-                    if error_code == "INSUFFICIENT_FUNDS":
-                        result.status      = CheckStatus.APPROVED
-                        result.status_code = "INSUFFICIENT_FUNDS"
-                    elif error_code in ("CARD_DECLINED", "GENERIC_ERROR"):
-                        result.status      = CheckStatus.DECLINED
-                        result.status_code = "CARD_DECLINED"
-                        result.error       = Exception("CARD_DECLINED")
-                    elif error_code == "01003":
-                        result.status      = CheckStatus.DECLINED
-                        result.status_code = "CARD_DECLINED"
-                        result.error       = Exception("CARD_DECLINED")
-                        result.retryable   = True
-                    else:
-                        if "InventoryReservationFailure" in poll_body:
-                            result.status    = CheckStatus.ERROR
-                            result.retryable = True
-                        else:
-                            result.status = CheckStatus.DECLINED
-                            result.error  = Exception(error_code)
+                if outcome == "failure":
+                    em         = re.search(r'"code"\s*:\s*"([^"]+)"', poll_body)
+                    error_code = normalize_card_result(em.group(1)) if em else ""
+                    if error_code == "FAILED":
+                        error_code = "GENERIC_ERROR"
+                    if not error_code:
+                        error_code = "UNKNOWN_ERROR"
+                        raw_msg = extract_any_error(poll_body)
+                        if raw_msg:
+                            error_code = f"UNKNOWN_ERROR: {raw_msg[:80]}"
+                    result.status      = result_status_for(error_code)
+                    result.status_code = error_code
+                    result.error       = Exception(error_code)
+                    result.retryable   = (error_code in ("GENERIC_ERROR", "CHECKOUT_RETRYABLE")
+                                          or error_code == "01003"
+                                          or "InventoryReservationFailure" in poll_body)
                     return result
+
+                if outcome in ("pending", "retryable"):
+                    patient_rounds += 1
+                else:
+                    seen_rounds += 1
+
+                if patient_rounds > max_patient_rounds:
+                    break
 
                 delay = 500
                 m2 = poll_delay_re.search(poll_body)
@@ -1961,12 +1997,21 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                             delay = d
                     except ValueError:
                         pass
+                if outcome == "retryable":
+                    delay = max(delay, 400)
                 await asyncio.sleep(min(delay, 150) / 1000.0)
 
             except Exception as e:
                 result.status = CheckStatus.ERROR
-                result.error  = Exception(f"poll {poll_num} failed: {e}")
+                result.error  = Exception(f"poll {seen_rounds + 1} failed: {e}")
                 return result
+
+        if last_outcome in ("pending", "retryable", "unknown"):
+            result.status      = CheckStatus.APPROVED
+            result.status_code = "ORDER_SUBMITTED"
+            result.retryable   = True
+            result.error       = Exception("ORDER_SUBMITTED (receipt not confirmed)")
+            return result
 
         result.status = CheckStatus.ERROR
         result.error  = Exception("exceeded 30 poll attempts")
