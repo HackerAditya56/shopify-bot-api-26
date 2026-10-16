@@ -242,7 +242,7 @@ def check_fn(card):
     if proxy is None:
         return "ERROR", "No proxies loaded", "UNKNOWN", 0
     try:
-        amount = _amount_override or random.randint(5000, 10000)  # ₹50-100
+        amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
         q = urllib.parse.urlencode({
             "cc": card,
             "site": site,
@@ -260,7 +260,7 @@ def check_fn(card):
         msg = data.get("message") or data.get("reason") or "N/A"
         m = (msg or "").lower()
         actual_paise = int(data.get("amount_paise") or amount)
-        amount_inr = actual_paise / 100
+        amount_inr = actual_paise // 100
 
         # dead proxy (connect/timeout) -> pause 2-5 min, site is not at fault
         if "failed to connect" in m or "could not connect" in m or "timed out" in m or "curl:" in m:
@@ -404,7 +404,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹50-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))

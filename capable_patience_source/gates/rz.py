@@ -46,20 +46,20 @@ def _rz_api_check(cc, proxy, site, amount_paise):
             data = {}
         return {"status": str(data.get("status") or "error").lower(),
                 "response": data.get("message") or f"HTTP {e.code}",
-                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
+                "amount_paise": amount_paise, "amount_inr": amount_paise // 100}
     except urllib.error.URLError as e:
         return {"status": "error", "response": f"Connection error: {str(e.reason)[:60]}",
-                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
+                "amount_paise": amount_paise, "amount_inr": amount_paise // 100}
     except Exception as e:
         return {"status": "error", "response": f"API: {str(e)[:80]}",
-                "amount_paise": amount_paise, "amount_inr": amount_paise / 100}
+                "amount_paise": amount_paise, "amount_inr": amount_paise // 100}
     status = str(data.get("status") or "error").lower()
     if status == "dead":
         status = "declined"
     msg = data.get("message") or data.get("reason") or "N/A"
     actual_paise = int(data.get("amount_paise") or amount_paise)
     return {"status": status, "response": msg,
-            "amount_paise": actual_paise, "amount_inr": actual_paise / 100}
+            "amount_paise": actual_paise, "amount_inr": actual_paise // 100}
 from mass_gates._tg_helpers import safe_reply
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -298,7 +298,7 @@ async def rz_command(message: types.Message):
     if amt_match:
         amount_paise = min(int(amt_match.group(1)), 100) * 100  # cap ₹100
     else:
-        amount_paise = random.randint(5000, 10000)  # ₹50-100
+        amount_paise = random.randint(23, 100) * 100  # ₹23-100 whole rupees
 
     # Site: site=URL or random from rz_site.txt
     site_match = re.search(r'site\s*=\s*(https?://\S+)', raw_text, re.I)
@@ -411,7 +411,7 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
                 rz_rotation.pause_proxy_403(_proxy)
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
-    actual_inr = float(api_result.get("amount_inr") or (amount_paise / 100))
+    actual_inr = int(api_result.get("amount_inr") or (amount_paise // 100))
     amount_warn = f"\n⚠️ <b>𝗔𝗺𝗼𝘂𝗻𝘁 𝘁𝗼𝗼 𝗵𝗶𝗴𝗵 (₹{actual_inr:.0f} > ₹100)</b>" if actual_inr > 100 else ""
 
     # Determine Final Status Display (premium emojis — same IDs as /msh)
@@ -458,7 +458,7 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     final_caption = (
         f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
         f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
-        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{actual_inr:.2f}{amount_warn}\n"
+        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 ₹{actual_inr}{amount_warn}\n"
         f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{res_message}</b>\n"
         f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
         f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"
