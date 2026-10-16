@@ -434,8 +434,6 @@ _KB_PROXY = InlineKeyboardMarkup(inline_keyboard=[
     [colored_button(text="« Bᴀᴄᴋ", callback_data="back_main", style="primary", icon_custom_emoji_id=EMOJI_TOP)]
 ])
 
-_KB_BACK_PROXY = _back("menu_proxy")
-
 # GATES SECTION
 _KB_GATES = InlineKeyboardMarkup(inline_keyboard=[
     [
@@ -520,6 +518,7 @@ _KB_BACK_CHARGE = _back("menu_charge_section")
 _KB_BACK_3DS = _back("menu_3ds_section")
 _KB_BACK_TOOLS = _back("back_main")
 _KB_BACK_MASS_LOCAL = _back("menu_mass")
+_KB_BACK_PROXY = _back("menu_proxy")
 
 # ========== STATIC MENU LOOKUP ==========
 STATIC_MENU_MAP: dict = {
