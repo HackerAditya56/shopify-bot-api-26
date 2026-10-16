@@ -414,6 +414,15 @@ async def api_razorpay(
                            f"Last error: {last_error_msg}",
             },
         )
+@app.get('/stats')
+async def api_stats():
+    """Aggregated gate stats (waf_403, rzp_5xx, gateway_error, total_checkouts)."""
+    try:
+        return {"status": "ok", "stats": tg_bot.get_stats()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+
+
 @app.get('/health')
 async def health():
     # File descriptor usage monitoring

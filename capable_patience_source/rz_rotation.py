@@ -78,8 +78,13 @@ def next_site():
     return None
 
 
+_server_error_count = 0
+_server_error_lock = threading.Lock()
+
+
 def record_site_result(site, message):
     """`message` = API response message (lowercased). SERVER_ERROR cools the site."""
+    global _server_error_count
     key = _site_key(site)
     m = (message or "").lower()
     with _site_guard:
@@ -87,12 +92,43 @@ def record_site_result(site, message):
             _site_error_until[key] = time.time() + SITE_ERROR_COOLDOWN_SECONDS
             _site_uses.pop(key, None)
             _site_paused_until.pop(key, None)
+            with _server_error_lock:
+                _server_error_count += 1
             return
         uses = _site_uses.get(key, 0) + 1
         _site_uses[key] = uses
         if uses >= MAX_CHECKS_PER_SITE:
             _site_paused_until[key] = time.time() + SITE_PAUSE_SECONDS
             _site_uses[key] = 0
+
+
+def status() -> dict:
+    """Snapshot of the rotation engine for the /rzg monitor."""
+    global _proxies, _sites, _server_error_count
+    if not _proxies:
+        _proxies = load_proxies()
+    if not _sites:
+        _sites = load_sites()
+    now = time.time()
+    with _proxy_guard:
+        proxies_total = len(_proxies)
+        proxies_paused = sum(1 for p in _proxies if now < _proxy_paused_until.get(p, 0))
+    with _site_guard:
+        sites_total = len(_sites)
+        sites_error = sum(1 for s in _sites if now < _site_error_until.get(_site_key(s), 0))
+        sites_paused = sum(1 for s in _sites if now < _site_paused_until.get(_site_key(s), 0))
+    with _server_error_lock:
+        se_count = _server_error_count
+    return {
+        "proxies_total": proxies_total,
+        "proxies_paused": proxies_paused,
+        "proxies_usable": proxies_total - proxies_paused,
+        "sites_total": sites_total,
+        "sites_error_cooldown": sites_error,
+        "sites_paused": sites_paused,
+        "sites_usable": sites_total - sites_error - sites_paused,
+        "server_error_count": se_count,
+    }
 
 
 # ── Proxies ───────────────────────────────────────────────────────────────

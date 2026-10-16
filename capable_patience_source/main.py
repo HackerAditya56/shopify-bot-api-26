@@ -42,6 +42,7 @@ from gates.bl import bl_command
 from gates.at import at_command
 from gates.pw import pw_command
 from gates.rz import rz_command
+from gates.rzg import router as rzg_router
 from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
 from gates.py import py_command
@@ -150,6 +151,7 @@ dp.include_router(stripe_router)
 dp.include_router(mauth_router)
 dp.include_router(mstripe_router)
 dp.include_router(mrz_router)
+dp.include_router(rzg_router)
 dp.include_router(mpin_router)
 dp.include_router(sel_router)
 dp.include_router(stop_router)
