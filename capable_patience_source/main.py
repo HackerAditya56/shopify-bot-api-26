@@ -81,6 +81,7 @@ from mass_gates._batch_common import sel_router
 from mass_gates.stop import router as stop_router
 from proxy import router as proxy_router
 from user_admin import router as user_admin_router
+from file_flow import router as file_flow_router
 
 import payments as pay_sys
 
@@ -154,6 +155,7 @@ dp.include_router(sel_router)
 dp.include_router(stop_router)
 dp.include_router(proxy_router)
 dp.include_router(user_admin_router)
+dp.include_router(file_flow_router)
 dp.include_router(cmds_router)
 dp.include_router(fb_router)
 dp.include_router(ban_router)
