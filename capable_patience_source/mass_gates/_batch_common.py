@@ -89,7 +89,7 @@ def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKey
     ])
 
 
-async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, extra_stats_fn=None):
+async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, extra_stats_fn=None, max_workers=30):
     """Show the charged/approved selection window before starting a batch check."""
     sel_id = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
     BATCH_PENDING[sel_id] = {
@@ -103,6 +103,7 @@ async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, p
         "charged": True,
         "approved": False,
         "extra_stats_fn": extra_stats_fn,
+        "max_workers": max_workers,
     }
     msg = await safe_reply(message, 
         _selection_text(True, False, len(cards)),
@@ -143,6 +144,7 @@ async def handle_selection_callback(callback: types.CallbackQuery, callback_data
             pending["user_id"], pending["user_obj"], pending["prefix"], pending["plan_name"],
             send_charged=charged, send_approved=approved,
             extra_stats_fn=pending.get("extra_stats_fn"),
+            max_workers=pending.get("max_workers", 30),
         ))
         return
     charged = pending.get("charged", True)
@@ -382,7 +384,7 @@ async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gatewa
     await send_hit(bot, user_obj.id, caption, gif_url)
 
 
-async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None):
+async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None, max_workers=30):
     """
     Full mass checker matching the shopify (msh) mass-gate result flow:
     - semaphore(30) concurrency (never checks all cards at once)
@@ -435,7 +437,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
 
     BATCH_SESSIONS[session_id] = session
 
-    sem = asyncio.Semaphore(30)
+    sem = asyncio.Semaphore(max_workers)
     lock = asyncio.Lock()
 
     async def update_progress():

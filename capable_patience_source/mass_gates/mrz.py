@@ -412,7 +412,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines, max_workers=15)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))
