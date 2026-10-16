@@ -24,6 +24,7 @@ import urllib.request, urllib.parse, urllib.error, json, os, itertools
 
 # ── Razorpay API (VPS:9000) ─────────────────────────────────────────────
 RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
+import rz_rotation
 RZ_SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rz_site.txt")
 _site_ctr = itertools.count()
 
@@ -329,8 +330,7 @@ async def rz_command(message: types.Message):
     if site_match:
         site = site_match.group(1)
     else:
-        sites = _load_rz_sites()
-        site = random.choice(sites) if sites else ""
+        site = rz_rotation.next_site() or ""
 
     # 5. LUHN CHECK
     if not luhn_check(cc):
@@ -419,13 +419,18 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         # ═══════════════════════════════════════════════════════
         # NON-INDIA CARD - Proceed with actual gate check
         # ═══════════════════════════════════════════════════════
-        # Get a proxy from the Razorpay API's own pool (excluded from /proxy DB)
-        _proxies = await _get_rz_pool_proxies()
-        _proxy = random.choice(_proxies) if _proxies else ""
+        # Proxy from rz_pxy.txt via shared rotation (403-free: 1 in-flight, 5 uses -> pause)
+        _proxy, _plock = rz_rotation.acquire_proxy()
         if not _proxy:
-            api_result = {"status": "error", "response": "No proxies in the Razorpay pool."}
+            api_result = {"status": "error", "response": "No proxies in rz_pxy.txt."}
         else:
-            api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
+            try:
+                api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
+            finally:
+                rz_rotation.release_proxy(_proxy, _plock)
+                rz_rotation.record_proxy_use(_proxy)
+            if site:
+                rz_rotation.record_site_result(site, api_result.get("response", ""))
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
 

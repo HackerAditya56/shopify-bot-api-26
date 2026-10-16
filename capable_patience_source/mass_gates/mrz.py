@@ -21,6 +21,7 @@ router = Router()
 
 # ── Razorpay API (hosted on the VPS, port 9000) ──────────────────────────
 RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
+import rz_rotation
 SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rz_site.txt")
 MAX_VALID_CARDS = 5000
 REGION = "IN"
@@ -348,9 +349,9 @@ async def mrz_command(message: types.Message):
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
-    _proxies = await _get_rz_pool_proxies()
+    _proxies = rz_rotation.refresh_proxies()
     if not _proxies:
-        await safe_reply(message, "⚠️ <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝗶𝗻 𝘁𝗵𝗲 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗽𝗼𝗼𝗹!</b>", parse_mode="HTML")
+        await safe_reply(message, "⚠️ <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝗶𝗻 𝗿𝘇_𝗽𝘅𝘆.𝘁𝘅𝘁!</b>\n\n𝗔𝗱𝗱 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝘁𝗼 <code>rz_pxy.txt</code> (𝗼𝗻𝗲 𝗽𝗲𝗿 𝗹𝗶𝗻𝗲).", parse_mode="HTML")
         return
     _sites = load_sites()
     # skip sites currently in cooldown (1h after "site issue")

@@ -1,6 +1,6 @@
 """file_flow.py — auto-detect dropped files (proxy vs CC) and route them.
 
-Proxy file  -> selection: Global (excl Razorpay) / Razorpay only.
+Proxy file  -> selection: Global pool (razorpay reads rz_pxy.txt directly).
 CC file     -> cook (year format) -> mass gates -> gate runs its own
                charged-only / approved+charged selection window.
 Manual /msh /mrz etc. commands keep working unchanged.
@@ -125,8 +125,7 @@ async def on_file(message: types.Message):
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                _btn("𝗚𝗹𝗼𝗯𝗮𝗹 (𝗲𝘅𝗰𝗹 𝗥𝗭)", "ff_global", "success", ID_APPROVED),
-                _btn("𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗼𝗻𝗹𝘆", "ff_rz", "primary", ID_CHARGED),
+                _btn("𝗔𝗱𝗱 𝘁𝗼 𝗚𝗹𝗼𝗯𝗮𝗹 𝗽𝗼𝗼𝗹", "ff_global", "success", ID_APPROVED),
             ],
             [_btn("𝗖𝗮𝗻𝗰𝗲𝗹", "ff_cancel", "danger", ID_STOP)],
         ])
@@ -185,8 +184,6 @@ async def ff_cb(callback: types.CallbackQuery):
 
     if data == "ff_global":
         await _add_global(callback, st)
-    elif data == "ff_rz":
-        await _add_rz(callback, st)
     elif data == "ff_cook":
         await _show_gates(callback.message, st, edit=True)
     elif data.startswith("ff_gate_"):
@@ -217,43 +214,6 @@ async def _add_global(callback, st):
     fake = _FakeMsg(callback.bot, callback.from_user, callback.message.chat.id)
     asyncio.create_task(process_proxies_background(callback.bot, fake, valid, "𝗙𝗶𝗹𝗲 𝗱𝗿𝗼𝗽"))
 
-
-async def _add_rz(callback, st):
-    import aiohttp
-    raw = st.get("raw", "")
-    rz_proxies = []
-    for ln in raw.splitlines():
-        ln = ln.strip()
-        if not ln or ln.startswith("#"):
-            continue
-        p = parse_proxy_input(ln)
-        if p:
-            rz_proxies.append(f"{p['ip']}:{p['port']}:{p['user']}:{p['password']}")
-    if not rz_proxies:
-        await callback.message.edit_text(f'{_tg(ID_DECLINED, "❌")} 𝗡𝗼 𝘃𝗮𝗹𝗶𝗱 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝗶𝗻 𝘁𝗵𝗲 𝗳𝗶𝗹𝗲.', parse_mode="HTML")
-        _STATE.pop(callback.from_user.id, None)
-        return
-    await callback.message.edit_text(f'{_tg(ID_GATEWAY, "⚡")} 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 {len(rz_proxies)} 𝗮𝗴𝗮𝗶𝗻𝘀𝘁 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 + 𝗮𝗱𝗱𝗶𝗻𝗴 𝘁𝗼 𝗥𝗭 𝗽𝗼𝗼𝗹...', parse_mode="HTML")
-    _STATE.pop(callback.from_user.id, None)
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(f"{RZ_API}/check-proxy", json={"proxies": rz_proxies}, timeout=aiohttp.ClientTimeout(total=300)) as resp:
-                j = await resp.json()
-        live = j.get("live", 0)
-        blocked = j.get("blocked", 0)
-        dead = j.get("dead", 0)
-        text = (
-            f'{_tg(ID_APPROVED, "✅")} <b>𝗥𝗭 𝗣𝗼𝗼𝗹 𝗨𝗽𝗱𝗮𝘁𝗲𝗱</b>\n'
-            f"━━━━━━━━━━━━━━━━\n"
-            f'{_tg(ID_APPROVED, "✅")} 𝗟𝗶𝘃𝗲 ➠ <code>{live}</code>\n'
-            f'{_tg(ID_STOP, "⛔")} 𝗕𝗹𝗼𝗰𝗸𝗲𝗱 ➠ <code>{blocked}</code>\n'
-            f'{_tg(ID_DECLINED, "❌")} 𝗗𝗲𝗮𝗱 ➠ <code>{dead}</code>\n\n'
-            f"𝗟𝗶𝘃𝗲 𝗼𝗻𝗲𝘀 𝗮𝗿𝗲 𝗻𝗼𝘄 𝗶𝗻 𝘁𝗵𝗲 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗽𝗼𝗼𝗹 (/rzp)."
-        )
-        await callback.message.edit_text(text, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"[file_flow] rz add: {e}")
-        await callback.message.edit_text(f'{_tg(ID_DECLINED, "❌")} 𝗥𝗭 𝗔𝗣𝗜 𝗲𝗿𝗿𝗼𝗿: {str(e)[:80]}', parse_mode="HTML")
 
 
 async def _show_gates(msg, st, edit=False):

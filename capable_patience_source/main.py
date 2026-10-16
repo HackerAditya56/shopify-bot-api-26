@@ -391,10 +391,10 @@ PROXY_INFO_TEXT = (
     "➤ 𝐂𝐡𝐞𝐜𝐤 ➠ <code>/chkpxy</code> (removes dead ones)\n"
     "➤ 𝐔𝐬𝐞𝐝 𝐛𝐲 ➠ /sh /msh /cl /hc /sp + all charge gates\n\n"
     "━━━━━━━━━━━━━━━━━━━━━\n"
-    "<tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b> (𝐬𝐞𝐩𝐚𝐫𝐚𝐭𝐞 𝐩𝐨𝐨𝐥)\n"
-    "➤ 𝐀𝐮𝐭𝐨-𝐦𝐚𝐧𝐚𝐠𝐞𝐝 𝐛𝐲 𝐭𝐡𝐞 𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐀𝐏𝐈\n"
-    "➤ 𝐒𝐭𝐚𝐭𝐮𝐬 ➠ <code>/rzp</code>\n"
-    "➤ 𝐍𝐨𝐭 𝐜𝐨𝐧𝐧𝐞𝐜𝐭𝐞𝐝 𝐭𝐨 𝐲𝐨𝐮𝐫 /proxy 𝐩𝐨𝐨𝐥"
+    "<tg-emoji emoji-id=\"5085022089103016925\">⚡</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b> (𝐟𝐢𝐥𝐞-𝐛𝐚𝐬𝐞𝐝)\n"
+    "➤ <code>rz_pxy.txt</code> (𝐨𝐧𝐞 𝐩𝐞𝐫 𝐥𝐢𝐧𝐞)\n"
+    "➤ 𝐀𝐮𝐭𝐨-𝐫𝐨𝐭𝐚𝐭𝐞𝐝 + 𝐜𝐨𝐨𝐥𝐝𝐨𝐰𝐧\n"
+    "➤ 𝐒𝐞𝐩𝐚𝐫𝐚𝐭𝐞 𝐟𝐫𝐨𝐦 𝐲𝐨𝐮𝐫 /proxy 𝐩𝐨𝐨𝐥"
 )
 
 PROXY_ADD_TEXT = (
@@ -417,12 +417,12 @@ PROXY_CHK_TEXT = (
 )
 
 PROXY_RZ_TEXT = (
-    "<tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐎𝐎𝐋</b>\n"
+    "<tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji> <b>𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐏𝐑𝐎𝐗𝐈𝐄𝐒</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "➤ <code>/rzp</code> shows the Razorpay pool\n"
-    "➤ Live + cooldown status\n"
-    "➤ Managed separately from /proxy\n\n"
-    "𝐓𝐡𝐢𝐬 𝐩𝐨𝐨𝐥 𝐢𝐬 𝐮𝐬𝐞𝐝 𝐛𝐲 /rz 𝐚𝐧𝐝 /mrz."
+    "➤ <code>rz_pxy.txt</code> feeds /rz and /mrz\n"
+    "➤ Auto-rotated (5 checks/proxy, 403-safe)\n"
+    "➤ Edit the file to add/remove proxies\n\n"
+    "𝐎𝐧𝐞 𝐩𝐫𝐨𝐱𝐲 𝐩𝐞𝐫 𝐥𝐢𝐧𝐞."
 )
 
 _KB_PROXY = InlineKeyboardMarkup(inline_keyboard=[

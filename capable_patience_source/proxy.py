@@ -24,7 +24,7 @@ router = Router()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MAX_CONCURRENT_CHECKS = 200  # Parallel requests limit (/proxy + /rzpxy check 200 at a time)
+MAX_CONCURRENT_CHECKS = 200  # Parallel requests limit (/proxy checks 200 at a time)
 PROXY_TIMEOUT = 8  # Timeout per proxy check (seconds)
 IPIFY_API_URL = "https://api.ipify.org?format=json"  # Ipify API endpoint
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB max file size
@@ -609,7 +609,7 @@ async def check_db_proxies_background(bot, message: types.Message):
 # COMMAND 1: /proxy (Add Single, Bulk, or File)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.message(F.text.startswith(("/proxy", "/rzpxy")))
+@router.message(F.text.startswith("/proxy"))
 async def proxy_command(message: types.Message):
     # Extract proxies from all sources (text, reply, file)
     valid_proxies, total_lines, error_msg = await extract_proxies_from_input(message)
