@@ -919,16 +919,27 @@ class RazorpaySession:
             if min_amt <= 0:
                 min_amt = self._try_int(item.get('minimum_amount'))
 
+            # Detect maximum amount (site may reject "amount exceeds maximum")
+            max_amt = self._try_int(_safe_get(item, 'item', 'maximum_amount'))
+            if max_amt <= 0:
+                max_amt = self._try_int(item.get('maximum_amount'))
+            if max_amt <= 0:
+                max_amt = self._try_int(_safe_get(item, 'item', 'max_amount'))
+
             if fixed_amt > 0:
                 # Page has a fixed price — use it, ignore client amount
                 use_amount = fixed_amt
                 if 'page_item_amount' not in self.tokens:
                     self.tokens['page_item_amount'] = fixed_amt
-            elif min_amt > 0:
-                # Pay-what-you-want page — use client amount, but respect minimum
-                use_amount = max(self.amount_paise, min_amt)
+            elif min_amt > 0 or max_amt > 0:
+                # Pay-what-you-want page — clamp client amount into [min, max]
+                use_amount = self.amount_paise
+                if min_amt > 0:
+                    use_amount = max(use_amount, min_amt)
+                if max_amt > 0:
+                    use_amount = min(use_amount, max_amt)
                 if 'page_item_amount' not in self.tokens:
-                    self.tokens['page_item_amount'] = min_amt  # record min, not client amount
+                    self.tokens['page_item_amount'] = min_amt if min_amt > 0 else max_amt
             else:
                 # No page constraints — use client amount as-is
                 use_amount = self.amount_paise

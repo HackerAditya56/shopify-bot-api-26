@@ -261,8 +261,21 @@ def check_fn(card):
         m = (msg or "").lower()
         actual_paise = int(data.get("amount_paise") or amount)
         amount_inr = actual_paise / 100
-        # site fixed price above ₹100 -> unusable for checking, skip it
-        if "amount too small" in m or actual_paise > 10000:
+
+        # dead proxy (connect/timeout) -> pause 2-5 min, site is not at fault
+        if "failed to connect" in m or "could not connect" in m or "timed out" in m or "curl:" in m:
+            with _proxy_uses_guard:
+                _proxy_paused_until[proxy] = time.time() + random.randint(120, 300)
+                _proxy_uses[proxy] = 0
+            return "ERROR", "Proxy dead — connect failed", "UNKNOWN", amount_inr
+
+        # site rejects international cards -> India-only, skip site
+        if "international" in m and ("not support" in m or "not allowed" in m):
+            _bad_sites.add(_site_key(site))
+            return "ERROR", "International not support — site skipped", "UNKNOWN", amount_inr
+
+        # site amount constraints / fixed price above ₹100 -> skip site
+        if "amount too small" in m or "amount exceeds maximum" in m or actual_paise > 10000:
             _bad_sites.add(_site_key(site))
         if "server error" in m or "site issue" in m:
             with _site_guard:

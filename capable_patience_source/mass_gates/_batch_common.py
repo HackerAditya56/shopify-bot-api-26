@@ -221,7 +221,7 @@ def progress_bar(checked, total):
     return bar, f"{ratio * 100:.1f}%"
 
 
-def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, three_d, errors, elapsed_str, workers=0, extra_lines=None):
+def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, three_d, errors, elapsed_str, workers=0, extra_lines=None, last_entry=""):
     """Unified mass-check progress layout — identical across all mass gates (matches /msh)."""
     bar, percent = progress_bar(checked, total)
     extra = ""
@@ -241,6 +241,7 @@ def build_progress_text(session_id, gate_display, checked, total, charged, appro
         f"      <tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> <b>𝐖𝐨𝐫𝐤𝐞𝐫𝐬 ➠</b> <b>{workers}</b>\n"
         f"      <tg-emoji emoji-id=\"5258419835922030550\">🕔</tg-emoji> <b>𝐄𝐥𝐚𝐩𝐬𝐞𝐝 ➠</b> <b>{elapsed_str}</b>\n"
         f"{extra}"
+        f"{last_entry}"
         f"<b><tg-emoji emoji-id=\"5429495925284296642\">🚬</tg-emoji> 𝐃𝐞𝐯 ➠</b> {DEV_LINK}"
     )
 
@@ -422,6 +423,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "send_approved": send_approved,
         "active_workers": 0,
         "extra_stats_fn": extra_stats_fn,
+        "last_entry": "",
     }
 
     # Send the initial progress message (with result + stop buttons)
@@ -455,6 +457,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             session["checked"], total,
             session["charged"], session["approved"], session["declined"], session.get("three_d", 0), session["errors"],
             elapsed_str, workers=session.get("active_workers", 0), extra_lines=extra_lines,
+            last_entry=session.get("last_entry", ""),
         )
         if session.get("last_text") == text:
             return
@@ -510,6 +513,10 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         async with lock:
             session[kind] = session.get(kind, 0) + 1
             session["checked"] += 1
+            session["last_entry"] = (
+                f"📋 <b>𝐋𝐚𝐬𝐭 ➠</b> <code>{card}</code>\n"
+                f"      <b>➠</b> <code>{str(msg)[:70]}</code> · ₹{amount if amount is not None else 'N/A'}"
+            )
             if kind == "charged":
                 session["charged_cards"].append(entry)
             elif kind == "approved":
