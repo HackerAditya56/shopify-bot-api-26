@@ -23,8 +23,10 @@ MAX_CHECKS_PER_SITE = 5          # rotate site before the ~10 soft-block thresho
 SITE_PAUSE_SECONDS = 60          # short velocity pause
 SITE_ERROR_COOLDOWN_SECONDS = 300  # SERVER_ERROR -> 5 min site cooldown
 MAX_PROXY_USES = 5               # rotate proxy before its IP reputation threshold
-PROXY_PAUSE_MIN = 900            # 15-30 min random pause after 5 uses (403-safe)
-PROXY_PAUSE_MAX = 1800
+PROXY_PAUSE_MIN = 120            # 2-5 min normal pause after 5 uses
+PROXY_PAUSE_MAX = 300
+PROXY_403_PAUSE_MIN = 900     # 15-45 min pause when the proxy hits a WAF 403
+PROXY_403_PAUSE_MAX = 2700
 
 
 def _site_key(site):
@@ -196,6 +198,13 @@ def release_proxy(proxy, lock):
         lock.release()
     except Exception:
         pass
+
+
+def pause_proxy_403(proxy):
+    """WAF 403 -> pause this proxy 15-45 min (hard cooldown)."""
+    with _proxy_guard:
+        _proxy_paused_until[proxy] = time.time() + random.randint(PROXY_403_PAUSE_MIN, PROXY_403_PAUSE_MAX)
+        _proxy_uses[proxy] = 0
 
 
 def record_proxy_use(proxy):

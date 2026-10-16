@@ -168,11 +168,18 @@ def _record_proxy_use(proxy):
     with _proxy_uses_guard:
         uses = _proxy_uses.get(proxy, 0) + 1
         if uses >= MAX_PROXY_USES:
-            pause = random.randint(60, 180)  # 1-3 min
+            pause = random.randint(120, 300)  # 2-5 min
             _proxy_paused_until[proxy] = time.time() + pause
             _proxy_uses[proxy] = 0
         else:
             _proxy_uses[proxy] = uses
+
+
+def _pause_proxy_403(proxy):
+    """WAF 403 -> hard-cooldown this proxy 15-45 min."""
+    with _proxy_uses_guard:
+        _proxy_paused_until[proxy] = time.time() + random.randint(900, 2700)
+        _proxy_uses[proxy] = 0
 
 
 def _proxy_usable(proxy):
@@ -261,6 +268,8 @@ def check_fn(card):
             with _site_guard:
                 _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
 
+        if "403" in m or "forbidden" in m or "waf" in m:
+            _pause_proxy_403(proxy)
         if actual_paise > 10000:
             return "ERROR", f"Amount too high (₹{amount_inr:.0f}) — site skipped", "UNKNOWN", amount_inr
         if status == "charged":

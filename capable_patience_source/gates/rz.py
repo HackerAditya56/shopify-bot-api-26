@@ -406,6 +406,9 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
                 rz_rotation.record_proxy_use(_proxy)
             if site:
                 rz_rotation.record_site_result(site, api_result.get("response", ""))
+            _resp_low = str(api_result.get("response", "")).lower()
+            if "403" in _resp_low or "forbidden" in _resp_low or "waf" in _resp_low:
+                rz_rotation.pause_proxy_403(_proxy)
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
     actual_inr = float(api_result.get("amount_inr") or (amount_paise / 100))
