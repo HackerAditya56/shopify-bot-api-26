@@ -914,17 +914,15 @@ class RazorpaySession:
             if fixed_amt <= 0:
                 fixed_amt = pl_amount  # payment-link-level fallback
 
-            # Detect minimum amount (for "pay what you want" pages)
-            min_amt = self._try_int(_safe_get(item, 'item', 'minimum_amount'))
+            # Detect min/max amount. REAL fields (from live page dumps):
+            #   ppi.min_amount / ppi.max_amount  (payment_page_item level)
+            #   pl.min_amount_value               (payment-link level floor)
+            min_amt = self._try_int(item.get('min_amount'))
             if min_amt <= 0:
-                min_amt = self._try_int(item.get('minimum_amount'))
-
-            # Detect maximum amount (site may reject "amount exceeds maximum")
-            max_amt = self._try_int(_safe_get(item, 'item', 'maximum_amount'))
+                min_amt = self._try_int(pl.get('min_amount_value'))
+            max_amt = self._try_int(item.get('max_amount'))
             if max_amt <= 0:
-                max_amt = self._try_int(item.get('maximum_amount'))
-            if max_amt <= 0:
-                max_amt = self._try_int(_safe_get(item, 'item', 'max_amount'))
+                max_amt = self._try_int(pl.get('max_amount_value'))
 
             if fixed_amt > 0:
                 # Page has a fixed price — use it, ignore client amount
@@ -1763,7 +1761,8 @@ class RazorpaySession:
         if http_code == 400 and 'is mandatory payment page item' in desc:
             return {'status': 'error', 'message': 'Mandatory Item', 'reason': 'mandatory_item'}
         if http_code == 400 and 'authentication failed' in desc:
-            return {'status': 'error', 'message': 'Auth Required', 'reason': 'auth_required'}
+            return {'status': 'dead', 'message': '3DS required — authentication failed',
+                    'reason': '3ds_required'}
         if http_code == 400 and 'make live request when not activated' in desc:
             return {'status': 'error', 'message': 'Merchant Not Activated', 'reason': 'merchant_not_activated'}
         if http_code == 400 and 'email field is invalid' in desc:
