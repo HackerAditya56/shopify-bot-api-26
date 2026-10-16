@@ -290,12 +290,12 @@ async def extract_proxies_from_input(message: types.Message):
     if document:
         # Check file size
         if document.file_size > MAX_FILE_SIZE:
-            return None, 0, f"<b>❌ 𝐅𝐢𝐥𝐞 𝐭𝐨𝐨 𝐥𝐚𝐫𝐠𝐞. 𝐌𝐚𝐱 {MAX_FILE_SIZE // (1024*1024)}𝐌𝐁.</b>"
+            return None, 0, f'{_tg(ID_DECLINED, "❌")} <b>𝐅𝐢𝐥𝐞 𝐭𝐨𝐨 𝐥𝐚𝐫𝐠𝐞. 𝐌𝐚𝐱 {MAX_FILE_SIZE // (1024*1024)}𝐌𝐁.</b>'
         
         # Check file extension
         file_ext = document.file_name.split('.')[-1].lower() if document.file_name else ''
         if file_ext not in ['txt', 'text', 'csv', 'proxy', 'list']:
-            return None, 0, f"<b>⚠️ 𝐔𝐧𝐬𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐟𝐢𝐥𝐞 𝐭𝐲𝐩𝐞: {file_ext}\n𝐏𝐥𝐞𝐚𝐬𝐞 𝐮𝐬𝐞 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞𝐬 𝐨𝐧𝐥𝐲.</b>"
+            return None, 0, f'{_tg(ID_WARNING, "⚠️")} <b>𝐔𝐧𝐬𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐟𝐢𝐥𝐞 𝐭𝐲𝐩𝐞: {file_ext}\n𝐏𝐥𝐞𝐚𝐬𝐞 𝐮𝐬𝐞 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞𝐬 𝐨𝐧𝐥𝐲.</b>'
         
         try:
             file = await message.bot.get_file(document.file_id)
@@ -305,10 +305,10 @@ async def extract_proxies_from_input(message: types.Message):
             raw_text += content.decode('utf-8', errors='ignore')
         except Exception as e:
             logging.error(f"File read error: {e}")
-            return None, 0, f"<b>❌ 𝐄𝐫𝐫𝐨𝐫 𝐫𝐞𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞: {str(e)[:100]}</b>"
+            return None, 0, f'{_tg(ID_DECLINED, "❌")} <b>𝐄𝐫𝐫𝐨𝐫 𝐫𝐞𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞: {str(e)[:100]}</b>'
     
     if not raw_text.strip():
-        return None, 0, "<b>⚠️ 𝐍𝐨 𝐩𝐫𝐨𝐱𝐲 𝐝𝐚𝐭𝐚 𝐟𝐨𝐮𝐧𝐝!</b>"
+        return None, 0, f'{_tg(ID_WARNING, "⚠️")} <b>𝐍𝐨 𝐩𝐫𝐨𝐱𝐲 𝐝𝐚𝐭𝐚 𝐟𝐨𝐮𝐧𝐝!</b>'
     
     # Parse all lines
     lines = raw_text.strip().split('\n')
@@ -342,7 +342,7 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
     
     # Send initial status message
     status_msg = await safe_reply(message, 
-        f"⏳ <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐢𝐧𝐠...</b>\n\n"
+        f'{_tg(ID_GATEWAY, "⚡")} <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐢𝐧𝐠...</b>\n\n'
         f"<code>{total_count}</code> 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐭𝐨 𝐜𝐡𝐞𝐜𝐤\n"
         f"<b>𝐂𝐡𝐞𝐜𝐤𝐢𝐧𝐠</b> {min(MAX_CONCURRENT_CHECKS, total_count)} 𝐚𝐭 𝐚 𝐭𝐢𝐦𝐞...",
         parse_mode="HTML"
@@ -413,25 +413,25 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
             ip = info.get("ip") or proxy_data['ip']
             if added_count > 0:
                 caption = (
-                    f"<b>✅ 𝐒𝐮𝐜𝐜𝐞𝐬𝐬!</b>\n\n"
-                    f"<b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐋𝐢𝐯𝐞 ✅</b>\n"
-                    f"<b>𝐈𝐏 ➠</b> <code>{ip}</code>\n\n"
-                    f"<b>💾 𝐒𝐚𝐯𝐞𝐝 𝐭𝐨 𝐝𝐚𝐭𝐚𝐛𝐚𝐬𝐞</b>"
+                    f'{_tg(ID_APPROVED, "✅")} <b>𝐒𝐮𝐜𝐜𝐞𝐬𝐬!</b>\n\n'
+                    f'{_tg(ID_APPROVED, "✅")} <b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐋𝐢𝐯𝐞</b>\n'
+                    f'<b>𝐈𝐏 ➠</b> <code>{ip}</code>\n\n'
+                    f'{_tg(ID_CHARGED, "💎")} <b>𝐒𝐚𝐯𝐞𝐝 𝐭𝐨 𝐝𝐚𝐭𝐚𝐛𝐚𝐬𝐞</b>'
                 )
             else:
                 caption = (
-                    f"<b>⚠️ 𝐖𝐚𝐫𝐧𝐢𝐧𝐠!</b>\n\n"
-                    f"<b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐋𝐢𝐯𝐞 ✅</b>\n"
-                    f"<b>𝐈𝐏 ➠</b> <code>{ip}</code>\n\n"
-                    f"<b>🔁 𝐀𝐥𝐫𝐞𝐚𝐝𝐲 𝐞𝐱𝐢𝐬𝐭𝐬 𝐢𝐧 𝐃𝐁</b>"
+                    f'{_tg(ID_WARNING, "⚠️")} <b>𝐖𝐚𝐫𝐧𝐢𝐧𝐠!</b>\n\n'
+                    f'{_tg(ID_APPROVED, "✅")} <b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐋𝐢𝐯𝐞</b>\n'
+                    f'<b>𝐈𝐏 ➠</b> <code>{ip}</code>\n\n'
+                    f'{_tg(ID_STAR, "⭐")} <b>𝐀𝐥𝐫𝐞𝐚𝐝𝐲 𝐞𝐱𝐢𝐬𝐭𝐬 𝐢𝐧 𝐃𝐁</b>'
                 )
         else:
             error_msg = info.get("error", "𝐔𝐧𝐤𝐧𝐨𝐰𝐧")
             caption = (
-                f"<b>❌ 𝐅𝐚𝐢𝐥𝐞𝐝!</b>\n\n"
-                f"<b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐃𝐞𝐚𝐝 ❌</b>\n"
-                f"<b>𝐑𝐞𝐚𝐬𝐨𝐧 ➠</b> <code>{error_msg}</code>\n\n"
-                f"<b>🚫 𝐍𝐨𝐭 𝐚𝐝𝐝𝐞𝐝.</b>"
+                f'{_tg(ID_DECLINED, "❌")} <b>𝐅𝐚𝐢𝐥𝐞𝐝!</b>\n\n'
+                f'{_tg(ID_DECLINED, "❌")} <b>𝐒𝐭𝐚𝐭𝐮𝐬 ➠ 𝐃𝐞𝐚𝐝</b>\n'
+                f'<b>𝐑𝐞𝐚𝐬𝐨𝐧 ➠</b> <code>{error_msg}</code>\n\n'
+                f'{_tg(ID_DECLINED, "❌")} <b>𝐍𝐨𝐭 𝐚𝐝𝐝𝐞𝐝.</b>'
             )
     
     # Edit status message with final result
@@ -464,11 +464,11 @@ async def check_db_proxies_background(bot, message: types.Message):
         rows = await run_db_operation(fetch_proxies)
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await safe_reply(message, "<b>❌ 𝐃𝐁 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, f'{_tg(ID_DECLINED, "❌")} <b>𝐃𝐁 𝐄𝐫𝐫𝐨𝐫.</b>', parse_mode="HTML")
         return
 
     if not rows:
-        await safe_reply(message, "<b>📭 𝐍𝐨 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐬𝐚𝐯𝐞𝐝.</b>", parse_mode="HTML")
+        await safe_reply(message, f'{_tg(ID_WARNING, "⚠️")} <b>𝐍𝐨 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐬𝐚𝐯𝐞𝐝.</b>', parse_mode="HTML")
         return
 
     total_count = len(rows)
@@ -613,7 +613,7 @@ async def proxy_command(message: types.Message):
     if not valid_proxies:
         if total_lines > 0:
             await safe_reply(message, 
-                f"<b>❌ 𝐍𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐟𝐨𝐮𝐧𝐝!</b>\n\n"
+                f'{_tg(ID_DECLINED, "❌")} <b>𝐍𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐟𝐨𝐮𝐧𝐝!</b>\n\n'
                 f"𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐞𝐝 {total_lines} 𝐥𝐢𝐧𝐞𝐬, 𝐛𝐮𝐭 𝐧𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐝𝐞𝐭𝐞𝐜𝐭𝐞𝐝.\n\n"
                 f"<i>𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐟𝐨𝐫𝐦𝐚𝐭𝐬:\n"
                 f"• ip:port\n"
@@ -626,7 +626,7 @@ async def proxy_command(message: types.Message):
             )
         else:
             await safe_reply(message, 
-                "<b>⚠️ 𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐔𝐬𝐚𝐠𝐞!</b>\n\n"
+                f'{_tg(ID_WARNING, "⚠️")} <b>𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐔𝐬𝐚𝐠𝐞!</b>\n\n'
                 "𝐔𝐬𝐞: <code>/proxy &lt;proxy_data&gt;</code>\n"
                 "𝐎𝐫 𝐬𝐞𝐧𝐝 𝐚 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞 𝐰𝐢𝐭𝐡 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n"
                 "𝐎𝐫 𝐫𝐞𝐩𝐥𝐲 𝐭𝐨 𝐚 𝐦𝐞𝐬𝐬𝐚𝐠𝐞 𝐜𝐨𝐧𝐭𝐚𝐢𝐧𝐢𝐧𝐠 𝐩𝐫𝐨𝐱𝐢𝐞𝐬",
@@ -716,13 +716,13 @@ async def clearproxy_command(message: types.Message):
     try:
         count = await run_db_operation(clear_proxies)
         if count > 0:
-            msg = f"<b>✅ 𝐒𝐮𝐜𝐜𝐞𝐬𝐬!</b>\n\n<b>𝐃𝐞𝐥𝐞𝐭𝐞𝐝 {count} 𝐩𝐫𝐨𝐱𝐢𝐞𝐬.</b>"
+            msg = f'{_tg(ID_APPROVED, "✅")} <b>𝐒𝐮𝐜𝐜𝐞𝐬𝐬!</b>\n\n<b>𝐃𝐞𝐥𝐞𝐭𝐞𝐝 {count} 𝐩𝐫𝐨𝐱𝐢𝐞𝐬.</b>'
         else:
-            msg = "<b>📭 𝐃𝐚𝐭𝐚𝐛𝐚𝐬𝐞 𝐢𝐬 𝐚𝐥𝐫𝐞𝐚𝐝𝐲 𝐞𝐦𝐩𝐭𝐲.</b>"
+            msg = f'{_tg(ID_WARNING, "⚠️")} <b>𝐃𝐚𝐭𝐚𝐛𝐚𝐬𝐞 𝐢𝐬 𝐚𝐥𝐫𝐞𝐚𝐝𝐲 𝐞𝐦𝐩𝐭𝐲.</b>'
         await safe_reply(message, msg, parse_mode="HTML")
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await safe_reply(message, "<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, f'{_tg(ID_DECLINED, "❌")} <b>𝐄𝐫𝐫𝐨𝐫.</b>', parse_mode="HTML")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -746,18 +746,18 @@ async def myproxy_command(message: types.Message):
         count = await run_db_operation(count_proxies)
         if count > 0:
             msg = (
-                f"<b>📊 𝐘𝐨𝐮𝐫 𝐏𝐫𝐨𝐱𝐢𝐞𝐬</b>\n\n"
+                f'{_tg(ID_STAR, "⭐")} <b>𝐘𝐨𝐮𝐫 𝐏𝐫𝐨𝐱𝐢𝐞𝐬</b>\n\n'
                 f"<b>𝐓𝐨𝐭𝐚𝐥 𝐒𝐚𝐯𝐞𝐝:</b> <b>{count}</b> 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n\n"
                 f"𝐔𝐬𝐞 <code>/checkproxy</code> 𝐭𝐨 𝐭𝐞𝐬𝐭 𝐭𝐡𝐞𝐦\n"
                 f"𝐔𝐬𝐞 <code>/clearproxy</code> 𝐭𝐨 𝐫𝐞𝐦𝐨𝐯𝐞 𝐚𝐥𝐥"
             )
         else:
             msg = (
-                f"<b>📭 𝐍𝐨 𝐏𝐫𝐨𝐱𝐢𝐞𝐬</b>\n\n"
+                f'{_tg(ID_WARNING, "⚠️")} <b>𝐍𝐨 𝐏𝐫𝐨𝐱𝐢𝐞𝐬</b>\n\n'
                 f"𝐘𝐨𝐮 𝐡𝐚𝐯𝐞𝐧'𝐭 𝐬𝐚𝐯𝐞𝐝 𝐚𝐧𝐲 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐲𝐞𝐭.\n\n"
                 f"𝐔𝐬𝐞 <code>/proxy</code> 𝐭𝐨 𝐚𝐝𝐝 𝐬𝐨𝐦𝐞!"
             )
         await safe_reply(message, msg, parse_mode="HTML")
     except Exception as e:
         logging.error(f"DB Error: {e}")
-        await safe_reply(message, "<b>❌ 𝐄𝐫𝐫𝐨𝐫.</b>", parse_mode="HTML")
+        await safe_reply(message, f'{_tg(ID_DECLINED, "❌")} <b>𝐄𝐫𝐫𝐨𝐫.</b>', parse_mode="HTML")
