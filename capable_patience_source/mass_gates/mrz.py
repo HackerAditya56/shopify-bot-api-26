@@ -222,13 +222,23 @@ def _acquire_free_proxy():
 
 
 def _rz_extra_lines():
-    """Live proxy/site pool stats shown inside the /mrz progress UI."""
-    st = rz_rotation.status()
+    """Live proxy/site pool stats from THIS gate's own rotation state."""
+    now = time.time()
+    with _proxy_uses_guard:
+        proxies_total = len(_proxies)
+        proxies_cd = sum(1 for p in _proxies if now < _proxy_paused_until.get(p, 0))
+    with _site_guard:
+        sites_total = len(_sites)
+        sites_cd = 0
+        for st in _sites:
+            k = _site_key(st)
+            if k in _bad_sites or now < _site_dead_until.get(k, 0) or now < _site_paused_until.get(k, 0):
+                sites_cd += 1
     return [
-        f"{_tg(ID_WALLET, '👛')} 𝐏𝐫𝐨𝐱𝐢𝐞𝐬 ➠ <b>{st['proxies_total']}</b> "
-        f"({_tg(ID_APPROVED, '✅')} {st['proxies_usable']} · {_tg(ID_DECLINED, '❌')} {st['proxies_paused']})",
-        f"{_tg(ID_LOCK, '🔐')} 𝐒𝐢𝐭𝐞𝐬 ➠ <b>{st['sites_total']}</b> "
-        f"({_tg(ID_APPROVED, '✅')} {st['sites_usable']} · {_tg(ID_DECLINED, '❌')} {st['sites_error_cooldown'] + st['sites_paused']})",
+        f"{_tg(ID_WALLET, '👛')} 𝐏𝐫𝐨𝐱𝐢𝐞𝐬 ➠ <b>{proxies_total}</b> "
+        f"({_tg(ID_APPROVED, '✅')} {proxies_total - proxies_cd} · {_tg(ID_DECLINED, '❌')} {proxies_cd})",
+        f"{_tg(ID_LOCK, '🔐')} 𝐒𝐢𝐭𝐞𝐬 ➠ <b>{sites_total}</b> "
+        f"({_tg(ID_APPROVED, '✅')} {sites_total - sites_cd} · {_tg(ID_DECLINED, '❌')} {sites_cd})",
     ]
 
 
