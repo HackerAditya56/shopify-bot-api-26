@@ -924,6 +924,12 @@ class RazorpaySession:
             if max_amt <= 0:
                 max_amt = self._try_int(pl.get('max_amount_value'))
 
+            # quantity constraint: ppi.min_purchase / max_purchase (REAL fields)
+            min_qty = self._try_int(item.get('min_purchase'))
+            if min_qty <= 0:
+                min_qty = 1
+            quantity = min_qty
+
             if fixed_amt > 0:
                 # Page has a fixed price — use it, ignore client amount
                 use_amount = fixed_amt
@@ -943,7 +949,7 @@ class RazorpaySession:
                 use_amount = self.amount_paise
 
             if self._ppi_is_mandatory(item):
-                line_items.append({'payment_page_item_id': ppi_id, 'amount': use_amount})
+                line_items.append({'payment_page_item_id': ppi_id, 'amount': use_amount, 'quantity': quantity})
 
         if not line_items:
             if first_ppi:
