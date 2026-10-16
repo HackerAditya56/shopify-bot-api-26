@@ -1,6 +1,7 @@
 """user_admin.py — /user admin panel (owner only).
-Interactive button window: list users -> user detail with access (green/red),
-plan, revoke, block/unblock. Premium emoji IDs + colored buttons everywhere.
+Edits the same message (no new messages). Users sorted: access -> no-access -> blocked.
+8462705169 (dev) is master and can manage everyone including other owners.
+Premium emoji IDs + colored buttons, no hardcoded unicode emojis.
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -32,7 +33,8 @@ def _btn(text, data, style="primary", emoji=None):
         kw["icon_custom_emoji_id"] = emoji
     return InlineKeyboardButton(**kw)
 
-def _is_owner(user_id: int) -> bool:
+def _is_master(user_id: int) -> bool:
+    """The dev (8462705169) — can manage everyone, cannot be edited."""
     return user_id in OWNER_IDS
 
 def _all_users_sync():
@@ -46,6 +48,17 @@ def _all_users_sync():
     rows = cur.fetchall()
     conn.close()
     return rows
+
+def _banned_set_sync() -> set:
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT user_id FROM banned_users")
+        rows = cur.fetchall()
+        conn.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
 
 def _user_sync(user_id: int):
     conn = get_db_connection()
@@ -100,13 +113,30 @@ def _revoke_sync(user_id: int):
     conn.commit()
     conn.close()
 
+def _demote_owner_sync(user_id: int):
+    """Clear is_owner so a ban actually takes effect."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET is_owner = 0 WHERE user_id = %s", (user_id,))
+    conn.commit()
+    conn.close()
+
+def _access_of(row):
+    (uid, first_name, username, is_premium, expiry, credits,
+     cc_checked, cc_charged, joined_at, is_owner) = row
+    return bool(is_premium) and bool(expiry) and expiry > datetime.now()
+
 def _user_detail_text(row, plan) -> str:
     (uid, first_name, username, is_premium, expiry, credits,
      cc_checked, cc_charged, joined_at, is_owner) = row
     name = (first_name or username or str(uid))
     has_access = bool(is_premium) and bool(expiry) and expiry > datetime.now()
     banned = _is_banned_sync(uid)
-    if is_owner:
+    master = _is_master(uid)
+    if master:
+        access_line = f'{_tg(ID_CHARGED, "💎")} 𝗔𝗰𝗰𝗲𝘀𝘀 ➠ <b>𝗗𝗘𝗩</b>'
+        days_line = "∞"
+    elif is_owner:
         access_line = f'{_tg(ID_CHARGED, "💎")} 𝗔𝗰𝗰𝗲𝘀𝘀 ➠ <b>𝗢𝗪𝗡𝗘𝗥</b>'
         days_line = "∞"
     elif has_access:
@@ -120,7 +150,7 @@ def _user_detail_text(row, plan) -> str:
     joined_str = joined_at.strftime("%Y-%m-%d") if joined_at else "N/A"
     uname = username or "N/A"
     banned_line = f'{_tg(ID_STOP, "⛔")} 𝗕𝗹𝗼𝗰𝗸𝗲𝗱 ➠ <b>𝗬𝗘𝗦</b>' if banned else f'{_tg(ID_APPROVED, "✅")} 𝗕𝗹𝗼𝗰𝗸𝗲𝗱 ➠ <b>𝗡𝗢</b>'
-    plan_str = plan or ("𝗢𝗪𝗡𝗘𝗥" if is_owner else "𝗙𝗥𝗘𝗘")
+    plan_str = plan or ("𝗗𝗘𝗩" if master else ("𝗢𝗪𝗡𝗘𝗥" if is_owner else "𝗙𝗥𝗘𝗘"))
     return (
         f'{_tg(ID_STAR, "⭐")} <b>𝗨𝗦𝗘𝗥 𝗗𝗘𝗧𝗔𝗜𝗟</b>\n'
         f"━━━━━━━━━━━━━━━━\n"
@@ -141,54 +171,86 @@ def _user_detail_text(row, plan) -> str:
 
 @router.message(F.text.startswith("/user"))
 async def user_command(message: types.Message):
-    if not _is_owner(message.from_user.id):
+    if not _is_master(message.from_user.id):
         await safe_reply(message, f'{_tg(ID_DECLINED, "❌")} 𝗡𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.', parse_mode="HTML")
         return
-    await _show_user_page(message, 0)
+    await _render_page(message, 0, edit=False)
 
-async def _show_user_page(message: types.Message, page: int):
+async def _render_page(message: types.Message, page: int, edit: bool = True):
     rows = await asyncio.to_thread(_all_users_sync)
+    banned = await asyncio.to_thread(_banned_set_sync)
+    now = datetime.now()
+
+    def sort_key(row):
+        (uid, fname, uname, is_premium, expiry, credits,
+         cck, cch, joined, is_owner) = row
+        has_access = bool(is_premium) and bool(expiry) and expiry > now
+        if _is_master(uid):
+            cat = 0
+        elif is_owner:
+            cat = 1
+        elif has_access:
+            cat = 2
+        elif uid not in banned:
+            cat = 3
+        else:
+            cat = 4
+        return (cat, uid)
+
+    rows = sorted(rows, key=sort_key)
     total = len(rows)
     pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(0, min(page, pages - 1))
     chunk = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+
     if not chunk:
         await safe_reply(message, f'{_tg(ID_WARNING, "⚠️")} 𝗡𝗼 𝘂𝘀𝗲𝗿𝘀 𝗳𝗼𝘂𝗻𝗱.', parse_mode="HTML")
         return
+
     lines = [f'{_tg(ID_CHARGED, "💎")} <b>𝗨𝗦𝗘𝗥𝗦</b>  ({total})', "━━━━━━━━━━━━━━━━"]
     kb_rows = []
     for (uid, first_name, username, is_premium, expiry, credits,
          cc_checked, cc_charged, joined_at, is_owner) in chunk:
-        has_access = bool(is_premium) and bool(expiry) and expiry > datetime.now()
-        if is_owner:
+        has_access = bool(is_premium) and bool(expiry) and expiry > now
+        is_banned = uid in banned
+        if _is_master(uid):
+            style, status_icon = "primary", ID_CHARGED
+        elif is_owner:
             style, status_icon = "primary", ID_CHARGED
         elif has_access:
             style, status_icon = "success", ID_APPROVED
+        elif is_banned:
+            style, status_icon = "danger", ID_STOP
         else:
             style, status_icon = "danger", ID_DECLINED
         name = (first_name or username or str(uid))[:18]
         kb_rows.append([_btn(f"{name} · {uid}", f"ud_{uid}", style, status_icon)])
+
     nav = []
     if page > 0:
-        nav.append(_btn("◀ 𝗕𝗮𝗰𝗸", f"up_{page - 1}", "primary", ID_TOP))
+        nav.append(_btn("𝗕𝗮𝗰𝗸", f"up_{page - 1}", "primary", ID_TOP))
     if page < pages - 1:
-        nav.append(_btn("𝗡𝗲𝘅𝘁 ▶", f"up_{page + 1}", "primary", ID_TOP))
+        nav.append(_btn("𝗡𝗲𝘅𝘁", f"up_{page + 1}", "primary", ID_TOP))
     if nav:
         kb_rows.append(nav)
+
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
     text = "\n".join(lines) + f"\n━━━━━━━━━━━━━━━━\n𝗣𝗮𝗴𝗲 ➠ <code>{page + 1}/{pages}</code>"
-    try:
+    if edit:
+        try:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    else:
         await message.answer(text, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        await safe_reply(message, text, parse_mode="HTML", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("up_"))
 async def user_page_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
+    if not _is_master(callback.from_user.id):
         await callback.answer("𝗡𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.", show_alert=True)
         return
     page = int(callback.data.split("_", 1)[1])
-    await _show_user_page(callback.message, page)
+    await _render_page(callback.message, page, edit=True)
     await callback.answer()
 
 def _detail_kb(uid, row):
@@ -196,9 +258,11 @@ def _detail_kb(uid, row):
      cc_checked, cc_charged, joined_at, is_owner) = row
     has_access = bool(is_premium) and bool(expiry) and expiry > datetime.now()
     banned = _is_banned_sync(uid)
+    master = _is_master(uid)
     rows = []
-    if not is_owner:
-        # access badge: green if has access, red if not
+    if master:
+        rows.append([_btn("𝗗𝗘𝗩", "noop", "primary", ID_CHARGED)])
+    else:
         if has_access:
             rows.append([_btn("𝗛𝗔𝗦 𝗔𝗖𝗖𝗘𝗦𝗦", "noop", "success", ID_APPROVED)])
         else:
@@ -208,19 +272,17 @@ def _detail_kb(uid, row):
             _btn("𝗚𝗿𝗮𝗻𝘁 𝟯𝟬𝗱", f"g_{uid}_30", "success", ID_APPROVED),
             _btn("𝗚𝗿𝗮𝗻𝘁 𝟵𝟬𝗱", f"g_{uid}_90", "success", ID_APPROVED),
         ])
-        rows.append([
-            _btn("𝗥𝗲𝘃𝗼𝗸𝗲", f"rv_{uid}", "danger", ID_DECLINED),
-        ])
+        rows.append([_btn("𝗥𝗲𝘃𝗼𝗸𝗲", f"rv_{uid}", "danger", ID_DECLINED)])
         if banned:
             rows.append([_btn("𝗨𝗻𝗯𝗹𝗼𝗰𝗸", f"unblk_{uid}", "success", ID_APPROVED)])
         else:
             rows.append([_btn("𝗕𝗹𝗼𝗰𝗸", f"blk_{uid}", "danger", ID_STOP)])
-    rows.append([_btn("◀ 𝗨𝘀𝗲𝗿𝘀", "up_0", "primary", ID_TOP)])
+    rows.append([_btn("𝗨𝘀𝗲𝗿𝘀", "up_0", "primary", ID_TOP)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 @router.callback_query(F.data.startswith("ud_"))
 async def user_detail_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
+    if not _is_master(callback.from_user.id):
         await callback.answer("𝗡𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.", show_alert=True)
         return
     uid = int(callback.data.split("_", 1)[1])
@@ -238,8 +300,8 @@ async def user_detail_cb(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("g_"))
 async def grant_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
-        await callback.answer("𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗼𝘄𝗻𝗲𝗿 𝗰𝗮𝗻 𝗴𝗿𝗮𝗻𝘁 𝗮𝗰𝗰𝗲𝘀𝘀.", show_alert=True)
+    if not _is_master(callback.from_user.id):
+        await callback.answer("𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗱𝗲𝘃 𝗰𝗮𝗻 𝗴𝗿𝗮𝗻𝘁.", show_alert=True)
         return
     _, uid, days = callback.data.split("_")
     uid = int(uid)
@@ -256,10 +318,13 @@ async def grant_cb(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("rv_"))
 async def revoke_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
-        await callback.answer("𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗼𝘄𝗻𝗲𝗿 𝗰𝗮𝗻 𝗿𝗲𝘃𝗼𝗸𝗲.", show_alert=True)
+    if not _is_master(callback.from_user.id):
+        await callback.answer("𝗢𝗻𝗹𝘆 𝘁𝗵𝗲 𝗱𝗲𝘃 𝗰𝗮𝗻 𝗿𝗲𝘃𝗼𝗸𝗲.", show_alert=True)
         return
     uid = int(callback.data.split("_", 1)[1])
+    if _is_master(uid):
+        await callback.answer("𝗖𝗮𝗻𝗻𝗼𝘁 𝗿𝗲𝘃𝗼𝗸𝗲 𝘁𝗵𝗲 𝗱𝗲𝘃.", show_alert=True)
+        return
     await asyncio.to_thread(_revoke_sync, uid)
     row, plan = await asyncio.to_thread(_user_sync, uid)
     text = _user_detail_text(row, plan)
@@ -273,13 +338,14 @@ async def revoke_cb(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("blk_"))
 async def block_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
+    if not _is_master(callback.from_user.id):
         await callback.answer("𝗡𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.", show_alert=True)
         return
     uid = int(callback.data.split("_", 1)[1])
-    if uid in OWNER_IDS:
-        await callback.answer("𝗖𝗮𝗻𝗻𝗼𝘁 𝗯𝗹𝗼𝗰𝗸 𝘁𝗵𝗲 𝗼𝘄𝗻𝗲𝗿.", show_alert=True)
+    if _is_master(uid):
+        await callback.answer("𝗖𝗮𝗻𝗻𝗼𝘁 𝗯𝗹𝗼𝗰𝗸 𝘁𝗵𝗲 𝗱𝗲𝘃.", show_alert=True)
         return
+    await asyncio.to_thread(_demote_owner_sync, uid)
     await asyncio.to_thread(_ban_user_sync, uid)
     row, plan = await asyncio.to_thread(_user_sync, uid)
     text = _user_detail_text(row, plan)
@@ -293,7 +359,7 @@ async def block_cb(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("unblk_"))
 async def unblock_cb(callback: types.CallbackQuery):
-    if not _is_owner(callback.from_user.id):
+    if not _is_master(callback.from_user.id):
         await callback.answer("𝗡𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱.", show_alert=True)
         return
     uid = int(callback.data.split("_", 1)[1])

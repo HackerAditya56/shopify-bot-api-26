@@ -24,7 +24,7 @@ router = Router()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MAX_CONCURRENT_CHECKS = 5  # Parallel requests limit
+MAX_CONCURRENT_CHECKS = 200  # Parallel requests limit (/proxy + /rzpxy check 200 at a time)
 PROXY_TIMEOUT = 8  # Timeout per proxy check (seconds)
 IPIFY_API_URL = "https://api.ipify.org?format=json"  # Ipify API endpoint
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB max file size
