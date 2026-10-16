@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 import random
@@ -88,7 +89,7 @@ def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKey
     ])
 
 
-async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name):
+async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, extra_stats_fn=None):
     """Show the charged/approved selection window before starting a batch check."""
     sel_id = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
     BATCH_PENDING[sel_id] = {
@@ -101,6 +102,7 @@ async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, p
         "plan_name": plan_name,
         "charged": True,
         "approved": False,
+        "extra_stats_fn": extra_stats_fn,
     }
     msg = await safe_reply(message, 
         _selection_text(True, False, len(cards)),
@@ -140,6 +142,7 @@ async def handle_selection_callback(callback: types.CallbackQuery, callback_data
             callback.message, pending["cards"], pending["check_fn"], pending["gateway"],
             pending["user_id"], pending["user_obj"], pending["prefix"], pending["plan_name"],
             send_charged=charged, send_approved=approved,
+            extra_stats_fn=pending.get("extra_stats_fn"),
         ))
         return
     charged = pending.get("charged", True)
@@ -218,9 +221,12 @@ def progress_bar(checked, total):
     return bar, f"{ratio * 100:.1f}%"
 
 
-def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, three_d, errors, elapsed_str):
+def build_progress_text(session_id, gate_display, checked, total, charged, approved, declined, three_d, errors, elapsed_str, workers=0, extra_lines=None):
     """Unified mass-check progress layout — identical across all mass gates (matches /msh)."""
     bar, percent = progress_bar(checked, total)
+    extra = ""
+    if extra_lines:
+        extra = "\n".join(extra_lines) + "\n"
     return (
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐭𝐚𝐭𝐮𝐬   ➠</b>   <b>𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴...</b> <tg-emoji emoji-id=\"6253754970349243649\">✨</tg-emoji>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>✧</a> <b>𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐈𝐃 ➠</b> <code>{session_id}</code>\n"
@@ -232,8 +238,9 @@ def build_progress_text(session_id, gate_display, checked, total, charged, appro
         f"      <tg-emoji emoji-id=\"5258419835922030550\">🔐</tg-emoji> <b>𝟑𝐃 ➠</b> <b>{three_d} </b>\n"
         f"<a href='https://t.me/Enchanted_linux_0x'>π</a> <b>𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠</b> {gate_display}\n"
         f"      <tg-emoji emoji-id=\"6255910249362885846\">⚠️</tg-emoji> <b>𝐄𝐫𝐫𝐨𝐫 ➠</b> <b>{errors} </b>\n"
-        f"      <tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> <b>𝐑𝐞𝐜𝐡𝐞𝐜𝐤 ➠</b> <b>0 recovered, 0 remaining</b>\n"
+        f"      <tg-emoji emoji-id=\"6136275172283391020\">⭐</tg-emoji> <b>𝐖𝐨𝐫𝐤𝐞𝐫𝐬 ➠</b> <b>{workers}</b>\n"
         f"      <tg-emoji emoji-id=\"5258419835922030550\">🕔</tg-emoji> <b>𝐄𝐥𝐚𝐩𝐬𝐞𝐝 ➠</b> <b>{elapsed_str}</b>\n"
+        f"{extra}"
         f"<b><tg-emoji emoji-id=\"5429495925284296642\">🚬</tg-emoji> 𝐃𝐞𝐯 ➠</b> {DEV_LINK}"
     )
 
@@ -374,7 +381,7 @@ async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gatewa
     await send_hit(bot, user_obj.id, caption, gif_url)
 
 
-async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False):
+async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None):
     """
     Full mass checker matching the shopify (msh) mass-gate result flow:
     - semaphore(30) concurrency (never checks all cards at once)
@@ -413,6 +420,8 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "tasks": [],
         "send_charged": send_charged,
         "send_approved": send_approved,
+        "active_workers": 0,
+        "extra_stats_fn": extra_stats_fn,
     }
 
     # Send the initial progress message (with result + stop buttons)
@@ -431,11 +440,21 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         elapsed = int(time.time() - session["start_time"])
         minutes, seconds = elapsed // 60, elapsed % 60
         elapsed_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+        extra_lines = None
+        if session.get("extra_stats_fn"):
+            try:
+                r = session["extra_stats_fn"]()
+                if inspect.isawaitable(r):
+                    extra_lines = await r
+                else:
+                    extra_lines = r
+            except Exception:
+                extra_lines = None
         text = build_progress_text(
             session_id, gateway,
             session["checked"], total,
             session["charged"], session["approved"], session["declined"], session.get("three_d", 0), session["errors"],
-            elapsed_str,
+            elapsed_str, workers=session.get("active_workers", 0), extra_lines=extra_lines,
         )
         if session.get("last_text") == text:
             return
@@ -450,10 +469,13 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         async with sem:
             if session["status"] == "𝗦𝘁𝗼𝗽𝗽𝗲𝗱":
                 return
+            session["active_workers"] = session.get("active_workers", 0) + 1
             try:
                 res = await asyncio.to_thread(check_fn, card)
             except Exception as e:
                 res = ("ERROR", str(e)[:80], "UNKNOWN")
+            finally:
+                session["active_workers"] = max(0, session.get("active_workers", 0) - 1)
             if isinstance(res, (tuple, list)) and len(res) >= 4:
                 status, msg, brand, amount = res[0], res[1], res[2], res[3]
             elif isinstance(res, (tuple, list)) and len(res) >= 3:

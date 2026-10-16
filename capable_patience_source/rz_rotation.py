@@ -23,8 +23,8 @@ MAX_CHECKS_PER_SITE = 5          # rotate site before the ~10 soft-block thresho
 SITE_PAUSE_SECONDS = 60          # short velocity pause
 SITE_ERROR_COOLDOWN_SECONDS = 300  # SERVER_ERROR -> 5 min site cooldown
 MAX_PROXY_USES = 5               # rotate proxy before its IP reputation threshold
-PROXY_PAUSE_MIN = 60             # 1-3 min random pause after 5 uses
-PROXY_PAUSE_MAX = 180
+PROXY_PAUSE_MIN = 900            # 15-30 min random pause after 5 uses (403-safe)
+PROXY_PAUSE_MAX = 1800
 
 
 def _site_key(site):

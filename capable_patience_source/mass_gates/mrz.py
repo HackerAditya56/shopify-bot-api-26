@@ -22,6 +22,7 @@ router = Router()
 # ── Razorpay API (hosted on the VPS, port 9000) ──────────────────────────
 RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
 import rz_rotation
+from proxy import _tg, ID_WALLET, ID_LOCK, ID_APPROVED, ID_DECLINED
 SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rz_site.txt")
 MAX_VALID_CARDS = 5000
 REGION = "IN"
@@ -213,6 +214,17 @@ def _acquire_free_proxy():
     return candidate, lock
 
 
+def _rz_extra_lines():
+    """Live proxy/site pool stats shown inside the /mrz progress UI."""
+    st = rz_rotation.status()
+    return [
+        f"{_tg(ID_WALLET, '👛')} 𝐏𝐫𝐨𝐱𝐢𝐞𝐬 ➠ <b>{st['proxies_total']}</b> "
+        f"({_tg(ID_APPROVED, '✅')} {st['proxies_usable']} · {_tg(ID_DECLINED, '❌')} {st['proxies_paused']})",
+        f"{_tg(ID_LOCK, '🔐')} 𝐒𝐢𝐭𝐞𝐬 ➠ <b>{st['sites_total']}</b> "
+        f"({_tg(ID_APPROVED, '✅')} {st['sites_usable']} · {_tg(ID_DECLINED, '❌')} {st['sites_error_cooldown'] + st['sites_paused']})",
+    ]
+
+
 def check_fn(card):
     """Sync single-card check against the Razorpay API (VPS:9000).
     Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
@@ -370,7 +382,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹50-100)", user_id, user, "mrz", plan_name)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹50-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))
