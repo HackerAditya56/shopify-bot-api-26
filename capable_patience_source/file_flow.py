@@ -212,7 +212,10 @@ async def _add_global(callback, st):
         return
     await callback.message.edit_text(f'{_tg(ID_GATEWAY, "⚡")} 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 {len(valid)} 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝗮𝗻𝗱 𝗮𝗱𝗱𝗶𝗻𝗴 𝘁𝗼 𝗚𝗹𝗼𝗯𝗮𝗹 𝗽𝗼𝗼𝗹...', parse_mode="HTML")
     _STATE.pop(callback.from_user.id, None)
-    asyncio.create_task(process_proxies_background(callback.bot, callback.message, valid, "𝗙𝗶𝗹𝗲 𝗱𝗿𝗼𝗽"))
+    # Pass a fake message with the REAL user (callback.message.from_user is the bot,
+    # since the bot sent that message) so proxies save under the correct user_id.
+    fake = _FakeMsg(callback.bot, callback.from_user, callback.message.chat.id)
+    asyncio.create_task(process_proxies_background(callback.bot, fake, valid, "𝗙𝗶𝗹𝗲 𝗱𝗿𝗼𝗽"))
 
 
 async def _add_rz(callback, st):

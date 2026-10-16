@@ -186,12 +186,18 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
     
     client_timeout = aiohttp.ClientTimeout(total=timeout, connect=timeout/2)
     
-    # Create session if not provided
-    close_session = False
-    if session is None:
-        session = aiohttp.ClientSession(timeout=client_timeout, headers=headers)
-        close_session = True
-    
+    # Use caller-provided session if given, else open (and fully close) our own.
+    if session is not None:
+        return await _check_with_session(session, proxy_url)
+
+    try:
+        async with aiohttp.ClientSession(timeout=client_timeout, headers=headers) as own_session:
+            return await _check_with_session(own_session, proxy_url)
+    except Exception:
+        return False, {"error": "session error"}
+
+
+async def _check_with_session(session, proxy_url):
     try:
         async with session.get(IPIFY_API_URL, proxy=proxy_url, ssl=False) as resp:
             if resp.status == 200:
@@ -210,41 +216,43 @@ async def check_proxy_live(proxy_url, session=None, timeout=PROXY_TIMEOUT):
                 return False, {"error": "Rate limited"}
             else:
                 return False, {"error": f"HTTP {resp.status}"}
-                
     except asyncio.TimeoutError:
         return False, {"error": "Timeout"}
     except aiohttp.ClientProxyConnectionError:
         return False, {"error": "Connection failed"}
     except aiohttp.ClientConnectorError as e:
-        return False, {"error": f"DNS/Connection error"}
+        return False, {"error": "DNS/Connection error"}
     except aiohttp.ClientError as e:
         return False, {"error": f"Client error: {str(e)[:50]}"}
     except Exception as e:
         return False, {"error": str(e)[:80]}
-    finally:
-        if close_session:
-            await session.close()
 
 
 async def check_proxies_parallel(proxies_list, max_concurrent=MAX_CONCURRENT_CHECKS):
     """
     Check multiple proxies in parallel with semaphore limiting.
+    One shared aiohttp session for the whole batch — avoids creating/closing
+    hundreds of per-check sessions (the source of 'Unclosed connection' warnings).
     """
     if not proxies_list:
         return []
         
     semaphore = asyncio.Semaphore(max_concurrent)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+    }
+    timeout = aiohttp.ClientTimeout(total=PROXY_TIMEOUT, connect=PROXY_TIMEOUT/2)
     
     async def check_with_semaphore(proxy_data):
         async with semaphore:
-            is_live, info = await check_proxy_live(proxy_data['url_format'])
+            is_live, info = await check_proxy_live(proxy_data['url_format'], session=session)
             return (proxy_data, is_live, info)
     
-    # Create tasks for all proxies
-    tasks = [check_with_semaphore(p) for p in proxies_list]
-    
-    # Execute all tasks concurrently and gather results
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Shared session: opened and closed exactly once via async with.
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        tasks = [check_with_semaphore(p) for p in proxies_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
     
     # Process results - handle any exceptions
     processed_results = []

@@ -1684,7 +1684,7 @@ async def msh_command(message: types.Message):
     if not user_proxies:
         await safe_reply(message, 
             "⚠️ <b>𝗡𝗼 𝗣𝗿𝗼𝘅𝗶𝗲𝘀!</b>\n\n"
-            "Proxies auto-load from <code>proxy.txt</code>. Ensure it has proxies.",
+            "Add proxies first with <b>/proxy</b> — they auto-load from your pool.",
             parse_mode="HTML"
         )
         return
