@@ -472,6 +472,18 @@ async def pool_status():
     }
 
 
+@app.get('/pool-list')
+async def pool_list():
+    """Razorpay's own live proxy pool (full_url entries) — for the bot gates.
+    Separate from the bot's per-user /proxy DB pool."""
+    live = proxy_manager.get_all_live_proxies()
+    return {
+        "status": "ok",
+        "live": len(live),
+        "proxies": [e.get("full_url") for e in live],
+    }
+
+
 @app.post('/check-proxy')
 async def check_proxy(req: ProxyCheckRequest):
     """Bulk-check proxies against Razorpay. Returns live/blocked/dead status.

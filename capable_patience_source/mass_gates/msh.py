@@ -220,8 +220,9 @@ class ProxyManager:
         'proxy error', 'bad gateway'
     ]
 
-    def __init__(self, proxies_list: List[str], session_id: str):
+    def __init__(self, proxies_list: List[str], session_id: str, user_id: Optional[int] = None):
         self.session_id = session_id
+        self.user_id = user_id
         self.raw_proxies = list(set(proxies_list))
 
         self.all_proxies = [self._normalize_proxy(p) for p in self.raw_proxies]
@@ -354,6 +355,18 @@ class ProxyManager:
             fail_data = self.failed_proxies[proxy]
             fail_data['fail_count'] += 1
             fail_data['last_fail'] = current_time
+
+            # On the first real proxy error, test the proxy + remove it from
+            # the user's /proxy DB pool if it is actually dead (item: /sh /msh
+            # proxy_error -> check proxy -> prune if dead).
+            if fail_data['fail_count'] == 1:
+                try:
+                    from proxy_pool import prune_proxy_if_dead
+                    loop = asyncio.get_running_loop()
+                    if self.user_id is not None:
+                        loop.create_task(prune_proxy_if_dead(self.user_id, proxy))
+                except Exception:
+                    pass
 
             fail_count = fail_data['fail_count']
             cooldown_multipliers = [30, 60, 120, 300, 600, 900, 1800]
@@ -676,25 +689,9 @@ async def get_user_plan_name(user_id):
         return "TRIAL"
 
 async def get_user_proxies(user_id):
-    proxies = []
-    try:
-        def _sync_fetch():
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT proxy FROM proxies WHERE user_id = %s", (user_id,))
-            rows = cursor.fetchall()
-            conn.close()
-            return [row[0] for row in rows]
-        proxies = await asyncio.to_thread(_sync_fetch)
-    except Exception as e:
-        logging.error(f"Error fetching proxies for user {user_id}: {e}")
-    if not proxies:
-        try:
-            with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
-                proxies = [line.strip() for line in _pf if line.strip()]
-        except Exception as e:
-            logging.error(f"Error loading fallback proxies from file: {e}")
-    return proxies
+    """Per-user proxies from the DB (/proxy pool). No proxy.txt fallback."""
+    from proxy_pool import get_user_proxies as _db_get
+    return await _db_get(user_id)
 
 def luhn_check(card_number: str) -> bool:
     card_number = str(card_number).strip()
@@ -1822,7 +1819,7 @@ async def process_mass_check_background(message: types.Message, bot: Bot, valid_
     session_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     plan_name = await get_user_plan_name(user_id)
 
-    proxy_manager = ProxyManager(user_proxies, session_id)
+    proxy_manager = ProxyManager(user_proxies, session_id, user_id)
     proxy_stats = proxy_manager.get_stats()
 
     logging.info(f"🔄 [MSH] Session {session_id} initialized with ProxyManager: {proxy_stats['total_proxies']} proxies (normalized)")

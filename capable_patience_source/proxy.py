@@ -10,7 +10,7 @@ import io
 # AIogram Imports
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from aiogram import types, F, Router
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LOCAL IMPORTS
@@ -28,6 +28,34 @@ MAX_CONCURRENT_CHECKS = 5  # Parallel requests limit
 PROXY_TIMEOUT = 8  # Timeout per proxy check (seconds)
 IPIFY_API_URL = "https://api.ipify.org?format=json"  # Ipify API endpoint
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB max file size
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Premium custom emoji IDs (no hardcoded unicode emojis)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ID_APPROVED = "6044254523009012231"   # ✅
+ID_DECLINED = "5893081007153746175"   # ❌
+ID_CHARGED = "5359719332542718652"    # 💎
+ID_WARNING = "6255910249362885846"    # ⚠️
+ID_STAR = "6136275172283391020"       # ⭐
+ID_GATEWAY = "5085022089103016925"    # ⚡
+ID_FIRE = "5195224408683204554"       # 🔥
+ID_SPARKLE = "5438098323871383999"    # ✨
+ID_LOCK = "5258419835922030550"       # 🔐
+ID_BAT = "6136246765369694911"        # 🦇
+ID_TOP = "5463071033256848094"        # 🔝
+ID_WALLET = "5424976816530014958"     # 👛
+
+
+def _tg(emoji_id: str, fallback: str) -> str:
+    return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+
+
+def _btn(text, data, style="primary", emoji=None):
+    from aiogram.types import InlineKeyboardButton
+    kw = {"text": text, "callback_data": data, "style": style}
+    if emoji:
+        kw["icon_custom_emoji_id"] = emoji
+    return InlineKeyboardButton(**kw)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PARSING HELPERS
@@ -366,13 +394,13 @@ async def process_proxies_background(bot, message: types.Message, valid_proxies:
     
     if is_bulk:
         caption = (
-            f"<b>✅ 𝐂𝐨𝐦𝐩𝐥𝐞𝐭𝐞!</b>\n\n"
-            f"<b>𝐒𝐨𝐮𝐫𝐜𝐞:</b> {source_type}\n"
-            f"<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total_count}</code>\n"
-            f"<b>𝐋𝐢𝐯𝐞 ➠</b> <b>{live_count}</b> ✅\n"
-            f"<b>𝐀𝐝𝐝𝐞𝐝 ➠</b> <b>{added_count}</b> 💾\n"
-            f"<b>𝐂𝐥𝐨𝐧𝐞𝐬 ➠</b> <b>{clone_count}</b> 🔁\n"
-            f"<b>𝐃𝐞𝐚𝐝 ➠</b> <b>{dead_count}</b> ❌"
+            f'{_tg(ID_APPROVED, "✅")} <b>𝐂𝐨𝐦𝐩𝐥𝐞𝐭𝐞!</b>\n\n'
+            f'<b>𝐒𝐨𝐮𝐫𝐜𝐞:</b> {source_type}\n'
+            f'<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total_count}</code>\n'
+            f'{_tg(ID_APPROVED, "✅")} <b>𝐋𝐢𝐯𝐞 ➠</b> <b>{live_count}</b>\n'
+            f'{_tg(ID_CHARGED, "💎")} <b>𝐀𝐝𝐝𝐞𝐝 ➠</b> <b>{added_count}</b>\n'
+            f'{_tg(ID_STAR, "⭐")} <b>𝐂𝐥𝐨𝐧𝐞𝐬 ➠</b> <b>{clone_count}</b>\n'
+            f'{_tg(ID_DECLINED, "❌")} <b>𝐃𝐞𝐚𝐝 ➠</b> <b>{dead_count}</b>'
         )
     else:
         # Single proxy result
@@ -447,9 +475,9 @@ async def check_db_proxies_background(bot, message: types.Message):
     
     # Send initial status message
     status_msg = await safe_reply(message, 
-        f"⏳ <b>𝐂𝐡𝐞𝐜𝐤𝐢𝐧𝐠...</b>\n\n"
-        f"<code>{total_count}</code> 𝐬𝐚𝐯𝐞𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n"
-        f"<i>𝐓𝐞𝐬𝐭𝐢𝐧𝐠 {min(MAX_CONCURRENT_CHECKS, total_count)} 𝐚𝐭 𝐚 𝐭𝐢𝐦𝐞...</i>",
+        f'{_tg(ID_GATEWAY, "⚡")} <b>𝐂𝐡𝐞𝐜𝐤𝐢𝐧𝐠 𝐲𝐨𝐮𝐫 /𝐩𝐫𝐨𝐱𝐲 𝐩𝐨𝐨𝐥...</b>\n\n'
+        f'<code>{total_count}</code> 𝐬𝐚𝐯𝐞𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬\n'
+        f'<i>𝐓𝐞𝐬𝐭𝐢𝐧𝐠 {min(MAX_CONCURRENT_CHECKS, total_count)} 𝐚𝐭 𝐚 𝐭𝐢𝐦𝐞...</i>',
         parse_mode="HTML"
     )
     
@@ -504,14 +532,19 @@ async def check_db_proxies_background(bot, message: types.Message):
 
     # Build caption
     caption = (
-        f"<b>✅ 𝐂𝐡𝐞𝐜𝐤 𝐂𝐨𝐦𝐩𝐥𝐞𝐭𝐞!</b>\n\n"
-        f"<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total_count}</code>\n"
-        f"<b>𝐋𝐢𝐯𝐞 ➠</b> <b>{len(live_proxies)}</b> ✅\n"
-        f"<b>𝐑𝐞𝐦𝐨𝐯𝐞𝐝 ➠</b> <b>{len(dead_ids)}</b> 🗑️"
+        f'{_tg(ID_APPROVED, "✅")} <b>𝐂𝐡𝐞𝐜𝐤 𝐂𝐨𝐦𝐩𝐥𝐞𝐭𝐞!</b>\n\n'
+        f'<b>𝐓𝐨𝐭𝐚𝐥 ➠</b> <code>{total_count}</code>\n'
+        f'{_tg(ID_APPROVED, "✅")} <b>𝐋𝐢𝐯𝐞 ➠</b> <b>{len(live_proxies)}</b>\n'
+        f'{_tg(ID_DECLINED, "❌")} <b>𝐑𝐞𝐦𝐨𝐯𝐞𝐝 ➠</b> <b>{len(dead_ids)}</b>'
     )
 
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        _btn("𝗥𝗲-𝗰𝗵𝗲𝗰𝗸", "chkpxy_again", "primary", ID_GATEWAY),
+        _btn("𝗔𝗱𝗱 𝗣𝗿𝗼𝘅𝗶𝗲𝘀", "chkpxy_add", "success", ID_APPROVED),
+    ]])
+
     if not live_proxies:
-        caption += "\n\n<b>⚠️ 𝐍𝐨 𝐥𝐢𝐯𝐞 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐫𝐞𝐦𝐚𝐢𝐧𝐢𝐧𝐠.</b>"
+        caption += f'\n\n{_tg(ID_WARNING, "⚠️")} <b>𝐍𝐨 𝐥𝐢𝐯𝐞 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐫𝐞𝐦𝐚𝐢𝐧𝐢𝐧𝐠.</b>\n\n𝐔𝐬𝐞 /proxy 𝐭𝐨 𝐚𝐝𝐝 𝐦𝐨𝐫𝐞.' 
         
         # Update status message
         try:
@@ -519,10 +552,11 @@ async def check_db_proxies_background(bot, message: types.Message):
                 chat_id=status_msg.chat.id,
                 message_id=status_msg.message_id,
                 text=caption,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=kb,
             )
         except Exception:
-            await safe_reply(message, caption, parse_mode="HTML")
+            await safe_reply(message, caption, parse_mode="HTML", reply_markup=kb)
         return
 
     # Build .txt file content with http format
@@ -555,7 +589,8 @@ async def check_db_proxies_background(bot, message: types.Message):
             document=txt_file,
             caption=caption,
             parse_mode="HTML",
-            reply_to_message_id=message.message_id
+            reply_to_message_id=message.message_id,
+            reply_markup=kb,
         )
     except Exception as e:
         logging.error(f"File send error: {e}")
@@ -618,6 +653,41 @@ async def proxy_command(message: types.Message):
 async def checkproxy_command(message: types.Message):
     # Start background task - will reply when done with .txt file
     asyncio.create_task(check_db_proxies_background(message.bot, message))
+
+
+class _FakeMsg:
+    """Minimal message-like object for callback-triggered re-checks."""
+    def __init__(self, callback: types.CallbackQuery):
+        m = callback.message
+        self.from_user = callback.from_user
+        self.chat = m.chat
+        self.message_id = m.message_id
+        self.document = None
+        self.reply_to_message = None
+        self.text = "/chkpxy"
+        self.caption = None
+        self.reply = m.answer
+        self.answer = m.answer
+        self.reply_document = m.answer_document
+        self.bot = callback.bot
+
+
+@router.callback_query(F.data == "chkpxy_again")
+async def chkpxy_again_cb(callback: types.CallbackQuery):
+    await callback.answer("𝐑𝐞-𝐜𝐡𝐞𝐜𝐤𝐢𝐧𝐠...")
+    asyncio.create_task(check_db_proxies_background(callback.bot, _FakeMsg(callback)))
+
+
+@router.callback_query(F.data == "chkpxy_add")
+async def chkpxy_add_cb(callback: types.CallbackQuery):
+    await callback.answer("𝐀𝐝𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬")
+    await callback.message.answer(
+        f'{_tg(ID_APPROVED, "✅")} <b>𝐀𝐝𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬</b>\n\n'
+        f'<code>/proxy ip:port</code>\n'
+        f'<code>/proxy user:pass@ip:port</code>\n'
+        f'𝐨𝐫 𝐬𝐞𝐧𝐝 𝐚 .𝐭𝐱𝐭 𝐟𝐢𝐥𝐞.',
+        parse_mode="HTML",
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

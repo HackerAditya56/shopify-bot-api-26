@@ -23,6 +23,7 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 from mass_gates._tg_helpers import safe_reply
+from proxy_pool import get_user_proxies
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,12 +66,7 @@ API_KEY = "ladle"
 SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 MAX_SITE_ROTATIONS = 20
 
-PROXY_LIST = []
-try:
-    with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
-        PROXY_LIST = [line.strip() for line in _pf if line.strip()]
-except Exception:
-    pass
+# Proxies are per-user (DB, /proxy pool) — loaded at command time.
 
 
 # Responses that mean "try a different site" — not a real card result
@@ -297,8 +293,9 @@ async def sp_command(message: types.Message):
         parse_mode="HTML"
     )
 
+    user_proxies = await get_user_proxies(user_id)
     asyncio.create_task(
-        process_sp_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, sites)
+        process_sp_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, sites, user_proxies)
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -314,6 +311,7 @@ async def process_sp_check(
     cc: str,
     plan_name: str,
     sites: list,
+    proxies=None,
 ):
     api_result = {"Response": "UNKNOWN_ERROR"}
     last_site = None
@@ -324,7 +322,7 @@ async def process_sp_check(
         current_site = random.choice(candidates)
         last_site = current_site
 
-        proxy = random.choice(PROXY_LIST)
+        proxy = random.choice(proxies or [])
 
         try:
             timeout = aiohttp.ClientTimeout(total=45)

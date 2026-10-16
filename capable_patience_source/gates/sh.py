@@ -25,6 +25,7 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 from mass_gates._tg_helpers import safe_reply
+from proxy_pool import get_user_proxies
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -40,12 +41,7 @@ API_KEY = "ladle"
 
 SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
 
-PROXY_LIST = []
-try:
-    with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
-        PROXY_LIST = [line.strip() for line in _pf if line.strip()]
-except Exception:
-    pass
+# Proxies are now per-user (DB, added via /proxy). Loaded at command time.
 
 
 MAX_MASS_CARDS = 50
@@ -229,7 +225,8 @@ def categorize_result(resp_text: str, symbol: str) -> str:
     else:
         return "declined"
 
-async def check_card_logic(sites: List[str], cc: str) -> Dict:
+async def check_card_logic(sites: List[str], cc: str, proxies: Optional[List[str]] = None, user_id: Optional[int] = None) -> Dict:
+    from proxy_pool import prune_proxy_if_dead
     bin_num = cc.split('|')[0][:6]
 
     try:
@@ -253,8 +250,18 @@ async def check_card_logic(sites: List[str], cc: str) -> Dict:
         current_site = random.choice(candidates)
         last_site = current_site
 
-        # Pick a random proxy each rotation
-        proxy = random.choice(PROXY_LIST)
+        # Pick a random proxy each rotation (per-user DB pool)
+        _pool = proxies if proxies else []
+        if not _pool:
+            return {
+                "card": cc,
+                "resp": "No proxies loaded. Use /proxy.",
+                "price": "N/A",
+                "bin": bin_info,
+                "brand": brand,
+                "symbol": declined_sym,
+            }
+        proxy = random.choice(_pool)
 
         for retry_idx in range(MAX_RETRIES + 1):
             try:
@@ -277,6 +284,15 @@ async def check_card_logic(sites: List[str], cc: str) -> Dict:
 
                         raw_resp = data.get("Response", "N/A")
                         raw_price = data.get("Price", "N/A")
+                        proxy_state = str(data.get("Proxy", "Live")).strip()
+
+                        # proxy_error from the API -> test + prune the proxy
+                        if proxy_state.lower() == "dead":
+                            try:
+                                await prune_proxy_if_dead(user_id, proxy)
+                            except Exception:
+                                pass
+                            break
 
                         display_resp = (
                             str(raw_resp)
@@ -361,6 +377,15 @@ async def sh_command(message: types.Message):
         )
         return
 
+    # access control: no premium -> no access (owner always has access)
+    is_premium, _ = await asyncio.to_thread(get_premium_status, user_id)
+    if not is_premium:
+        await safe_reply(message,
+            f'<tg-emoji emoji-id="{CUSTOM_CHARGED_EMOJI_ID}">💎</tg-emoji> 𝗣𝗹𝗲𝗮𝘀𝗲 𝘂𝗽𝗴𝗿𝗮𝗱𝗲 𝘆𝗼𝘂𝗿 𝗽𝗹𝗮𝗻 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗳𝗲𝗮𝘁𝘂𝗿𝗲.\n\n👉 𝗨𝘀𝗲 /plan 𝘁𝗼 𝘂𝗽𝗴𝗿𝗮𝗱𝗲.',
+            parse_mode="HTML"
+        )
+        return
+
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
     if current_credits is None or current_credits < 1:
         await safe_reply(message, 
@@ -441,7 +466,8 @@ async def sh_command(message: types.Message):
         parse_mode="HTML"
     )
 
-    res = await check_card_logic(sites, card)
+    user_proxies = await get_user_proxies(user_id)
+    res = await check_card_logic(sites, card, user_proxies, user_id)
 
     text = (
         f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{res.get('card', card)}</code>\n"
@@ -518,9 +544,11 @@ async def run_sh_check(
 
     sem = asyncio.Semaphore(PARALLEL_LIMIT)
 
+    user_proxies = await get_user_proxies(user_id)
+
     async def worker(cc: str):
         async with sem:
-            return await check_card_logic(sites, cc)
+            return await check_card_logic(sites, cc, user_proxies, user_id)
 
     tasks = [asyncio.create_task(worker(cc)) for cc in cards]
 

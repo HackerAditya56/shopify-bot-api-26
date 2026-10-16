@@ -23,6 +23,7 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 from mass_gates._tg_helpers import safe_reply
+from proxy_pool import get_user_proxies
 
 _SHOPIFY_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,12 +66,7 @@ API_KEY = "ladle"
 DEFAULT_SITE = "https://nicotests-com.myshopify.com"
 MAX_RETRIES = 20
 
-PROXY_LIST = []
-try:
-    with open(os.path.join(_SHOPIFY_DIR, "proxy.txt"), "r", encoding="utf-8", errors="ignore") as _pf:
-        PROXY_LIST = [line.strip() for line in _pf if line.strip()]
-except Exception:
-    pass
+# Proxies are per-user (DB, /proxy pool) — loaded at command time.
 
 
 # Responses that mean "try a different proxy" — not a real card result
@@ -288,8 +284,9 @@ async def cl_command(message: types.Message):
         parse_mode="HTML"
     )
 
+    user_proxies = await get_user_proxies(user_id)
     asyncio.create_task(
-        process_cl_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name)
+        process_cl_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, user_proxies)
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -304,13 +301,14 @@ async def process_cl_check(
     formatted_cc: str,
     cc: str,
     plan_name: str,
+    proxies=None,
 ):
     api_result = {"Response": "UNKNOWN_ERROR"}
     last_proxy = None
 
     for _ in range(MAX_RETRIES):
         # Pick a proxy different from last if possible
-        candidates = [p for p in PROXY_LIST if p != last_proxy] or PROXY_LIST
+        candidates = [p for p in (proxies or []) if p != last_proxy] or (proxies or [])
         current_proxy = random.choice(candidates)
         last_proxy = current_proxy
 

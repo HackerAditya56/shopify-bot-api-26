@@ -16,7 +16,6 @@ from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from mass_gates._batch_common import run_batch_check, handle_result_callback, handle_stop_callback, show_selection
 from mass_gates._tg_helpers import safe_reply
-from mass_gates.msh import get_user_proxies
 
 router = Router()
 
@@ -41,6 +40,20 @@ def load_sites():
             return [l.strip() for l in f if l.strip().startswith("http")]
     except Exception:
         return []
+
+
+async def _get_rz_pool_proxies():
+    """Razorpay's own live proxy pool from :9000 (NOT the /proxy DB)."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(f"{RZ_API}/pool-list", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("proxies", [])
+    except Exception as e:
+        logging.error(f"[mrz] pool-list error: {e}")
+    return []
 
 
 def _site_key(site):
@@ -335,9 +348,9 @@ async def mrz_command(message: types.Message):
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
-    _proxies = await get_user_proxies(user_id)
+    _proxies = await _get_rz_pool_proxies()
     if not _proxies:
-        await safe_reply(message, "⚠️ <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀!</b>\nLoad with /proxy.", parse_mode="HTML")
+        await safe_reply(message, "⚠️ <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝗶𝗻 𝘁𝗵𝗲 𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗽𝗼𝗼𝗹!</b>", parse_mode="HTML")
         return
     _sites = load_sites()
     # skip sites currently in cooldown (1h after "site issue")

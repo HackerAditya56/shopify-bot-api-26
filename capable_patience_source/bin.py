@@ -94,9 +94,21 @@ def _normalize_proxy(p: str):
 
 
 def _load_proxies() -> list:
+    """BIN API proxies come from the shared /proxy DB pool (no proxy.txt)."""
     try:
-        with open(_PROXY_FILE, encoding="utf-8", errors="ignore") as f:
-            return [x for x in (_normalize_proxy(ln) for ln in f if ln.strip() and not ln.strip().startswith("#")) if x]
+        from database import get_db_connection
+        from proxy import parse_proxy_input
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT proxy FROM proxies LIMIT 500")
+        rows = cursor.fetchall()
+        conn.close()
+        out = []
+        for (p,) in rows:
+            parsed = parse_proxy_input(p)
+            if parsed:
+                out.append(parsed["url_format"])
+        return out
     except Exception:
         return []
 
