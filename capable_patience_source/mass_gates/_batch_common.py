@@ -641,6 +641,13 @@ async def handle_stop_callback(callback: types.CallbackQuery):
         return
 
     session["status"] = "𝗦𝘁𝗼𝗽𝗽𝗲𝗱"
+    # interrupt the rz gate's sync workers (they sleep in threads on cooldown)
+    if session.get("prefix") == "mrz":
+        try:
+            import mass_gates.mrz as _mrz
+            _mrz.stop_all()
+        except Exception:
+            pass
     cancelled = 0
     for t in session.get("tasks", []):
         if not t.done():

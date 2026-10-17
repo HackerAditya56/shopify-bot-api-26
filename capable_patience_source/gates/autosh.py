@@ -27,7 +27,7 @@ async def fetchProducts(domain, session=None, proxy_url=None):
             ttl_dns_cache=300,
             use_dns_cache=True,
             family=socket.AF_INET,
-            force_close=False,
+            force_close=True,
         )
         
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
@@ -253,7 +253,7 @@ async def process_card(cc, mes, ano, cvv, site=None, proxy=None):
         email = Utils.generate_email(firstName, lastName)
         
         if not variant_id:
-            connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(), limit=100, limit_per_host=30, ttl_dns_cache=300, use_dns_cache=True, family=socket.AF_INET, force_close=False)
+            connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(), limit=100, limit_per_host=30, ttl_dns_cache=300, use_dns_cache=True, family=socket.AF_INET, force_close=True)
             timeout = aiohttp.ClientTimeout(total=30, connect=10)
             async with aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers) as session:
                 info = await fetchProducts(site_url, session, proxy_url)
@@ -272,7 +272,7 @@ async def process_card(cc, mes, ano, cvv, site=None, proxy=None):
             requires_shipping = True
             product_price = "0.00"
         
-        connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(), limit=100, limit_per_host=30, ttl_dns_cache=300, use_dns_cache=True, family=socket.AF_INET, force_close=False)
+        connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(), limit=100, limit_per_host=30, ttl_dns_cache=300, use_dns_cache=True, family=socket.AF_INET, force_close=True)
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         async with aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers) as session:
             return await process_with_session(session, ourl, variant_id, requires_shipping, product_price, 
