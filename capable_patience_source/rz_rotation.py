@@ -19,8 +19,8 @@ _BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 RZ_PROXY_FILE = os.path.join(_BOT_DIR, "rz_pxy.txt")
 RZ_SITES_FILE = os.path.join(_BOT_DIR, "rz_site.txt")
 
-MAX_CHECKS_PER_SITE = 5          # rotate site before the ~10 soft-block threshold
-SITE_PAUSE_SECONDS = 60          # short velocity pause
+MAX_CHECKS_PER_SITE = 2          # 2 checkouts per site, then pause (human-like: 2 CCs then wait)
+SITE_PAUSE_SECONDS = 30          # 30s cooldown before the site re-enters the pool
 SITE_ERROR_COOLDOWN_SECONDS = 300  # SERVER_ERROR -> 5 min site cooldown
 MAX_PROXY_USES = 5               # rotate proxy before its IP reputation threshold
 PROXY_PAUSE_MIN = 120            # 2-5 min normal pause after 5 uses

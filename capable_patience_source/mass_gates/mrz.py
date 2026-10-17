@@ -139,8 +139,8 @@ _bad_sites = set()  # sites that returned "Amount too small" (min > ₹100)
 
 # A: per-site velocity cap — sites exhaust at ~10 checks ("server error"), so
 # cap each site at 5 checks per window and rotate. Tighter than the IP cap.
-MAX_CHECKS_PER_SITE = 5
-SITE_PAUSE_SECONDS = 60  # 1 min
+MAX_CHECKS_PER_SITE = 2
+SITE_PAUSE_SECONDS = 30  # 30s cooldown (2 CCs then wait)
 # B: a site that returns "server error" goes to cooldown for 5 min (time-based).
 SITE_DEAD_COOLDOWN_SECONDS = 300  # 5 min
 _site_uses = {}
@@ -493,7 +493,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines, max_workers=15)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines, max_workers=5)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))
