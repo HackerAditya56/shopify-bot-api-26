@@ -59,6 +59,12 @@ def classify(result):
     actual_paise = int(result.get("amount_paise") or 0)
     if actual_paise > 10000:
         return "SKIP", f"amount too high (₹{actual_paise // 100})"
+    # dead page: no Razorpay payment data on it
+    if "could not find var data" in msg or "var data" in msg:
+        return "SKIP", "dead site (no payment page)"
+    # 401 auth failed -> site gone / requires auth
+    if reason == "auth_required" or "authentication failed" in msg:
+        return "SKIP", "dead site (401 auth)"
     if "international" in msg and ("not support" in msg or "not allowed" in msg):
         return "SKIP", "international not supported"
     if reason in SKIP_REASONS:

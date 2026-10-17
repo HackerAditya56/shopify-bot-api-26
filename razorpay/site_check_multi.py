@@ -79,6 +79,16 @@ def main():
 
     def process(site_list, tag):
         for site in site_list:
+            # skip sites that already got a real response (GOOD) in a prior run
+            jf = os.path.join(a.out, f"{_site_key(site)}.json")
+            if os.path.exists(jf):
+                try:
+                    prev = json.load(open(jf))
+                    if prev.get("verdict") == "GOOD":
+                        print(f"[{tag}] SKIP     already-good                       {site}", flush=True)
+                        continue
+                except Exception:
+                    pass
             proxy = pick_proxy()
             log = []
             t0 = time.time()
