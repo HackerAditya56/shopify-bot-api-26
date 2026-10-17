@@ -990,6 +990,31 @@ def extract_identification_signature(checkout_html: str) -> str:
     match = re.search(r'checkoutCardsinkCallerIdentificationSignature":"([^"]+)"', unescaped)
     return match.group(1) if match else ""
 
+PCI_ENDPOINTS = [
+    "https://deposit.shopifycs.com/sessions",
+    "https://elb.deposit.shopifycs.com/sessions",
+    "https://deposit.us.shopifycs.com/sessions",
+    "https://checkout.pci.shopifyinc.com/sessions",
+]
+
+
+def extract_vault_domain(checkout_html: str) -> str:
+    """Real vault scope for PCI (hostedFieldsUrl.domain) — falls back to ''."""
+    m = re.search(r'hostedFieldsUrl[^}]+"domain"\s*:\s*"([^"]+)"',
+                  (checkout_html or "").replace("&quot;", '"'))
+    return m.group(1) if m else ""
+
+
+def extract_vault_url(checkout_html: str) -> str:
+    """Full vault /sessions URL embedded in the checkout page."""
+    m = re.search(r'(https://[a-z0-9._-]*(?:shopifycs|shopifyinc)\.[a-z.]+/sessions)',
+                  (checkout_html or "").replace("&quot;", '"'))
+    return m.group(1) if m else ""
+
+
+_VAULT_CACHE: dict = {}
+
+
 def extract_pci_session_id(pci_body: str) -> str:
     match = re.search(r'"id"\s*:\s*"([^"]+)"', pci_body)
     return match.group(1) if match else ""
@@ -1874,7 +1899,10 @@ def generate_page_id() -> str:
 
 def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                      card_month: int, card_year: int, cvv: str,
-                     shop_domain: str, proxy_url: str = "", impersonate: str = "chrome150") -> Tuple[int, str]:
+                     shop_domain: str, proxy_url: str = "", impersonate: str = "chrome150",
+                     vault_url: str = "", vault_domain: str = "") -> Tuple[int, str]:
+    scope = ((vault_domain or "").strip()
+             or (shop_domain or "").replace("https://", "").replace("http://", "").split("/")[0])
 
     payload = json.dumps({
         "credit_card": {
@@ -1887,36 +1915,76 @@ def send_pci_session(ident_sig: str, card_number: str, card_name: str,
             "issue_number":       "",
             "name":               card_name,
         },
-        "payment_session_scope": shop_domain,
+        "payment_session_scope": scope,
     })
 
-    headers = {
-        "accept":               "application/json",
-        "accept-language":      "en-US,en;q=0.9",
-        "content-type":         "application/json",
-        "origin":               "https://checkout.pci.shopifyinc.com",
-        "priority":             "u=1, i",
-        "referer":              "https://checkout.pci.shopifyinc.com/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
-        "sec-fetch-dest":       "empty",
-        "sec-fetch-mode":       "cors",
-        "sec-fetch-site":       "same-origin",
-        "sec-fetch-storage-access": "active",
-        "shopify-identification-signature": ident_sig,
-        "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
-    }
+    candidates = []
+    if vault_url and vault_url not in candidates:
+        candidates.append(vault_url)
+    cached = _VAULT_CACHE.get(scope)
+    if cached and cached not in candidates:
+        candidates.insert(0, cached)
+    for ep in PCI_ENDPOINTS:
+        if ep not in candidates:
+            candidates.append(ep)
 
+    last_status, last_body = 0, ""
     with Session(impersonate=impersonate) as session:
         if proxy_url:
             session.proxies = {"http": proxy_url, "https": proxy_url}
-        status, body = 0, ""
-        for attempt in range(3):
-            resp = session.post("https://checkout.pci.shopifyinc.com/sessions",
-                                data=payload, headers=headers, timeout=12)
-            status, body = resp.status_code, resp.text
-            if 200 <= status < 300:
-                break
-            time.sleep(1.0 * (attempt + 1) + random.uniform(0, 0.3))
-    return status, body
+        for ep in candidates:
+            origin = ep.rsplit("/sessions", 1)[0]
+            headers = {
+                "accept":               "application/json",
+                "accept-language":      "en-US,en;q=0.9",
+                "content-type":         "application/json",
+                "origin":               origin,
+                "priority":             "u=1, i",
+                "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                "sec-fetch-dest":       "empty",
+                "sec-fetch-mode":       "cors",
+                "sec-fetch-site":       "same-origin",
+                "sec-fetch-storage-access": "active",
+                "shopify-identification-signature": ident_sig,
+                "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+            }
+            for attempt in range(2):
+                resp = session.post(ep, data=payload, headers=headers, timeout=12)
+                last_status, last_body = resp.status_code, resp.text
+                if 200 <= last_status < 300:
+                    _VAULT_CACHE[scope] = ep
+                    return last_status, last_body
+                if last_status in (403, 406, 429, 500, 502, 503):
+                    break
+                time.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
+        # no-proxy fallback
+        if not (200 <= last_status < 300) and proxy_url:
+            session.proxies = {}
+            for ep in candidates[:1]:
+                origin = ep.rsplit("/sessions", 1)[0]
+                headers = {
+                    "accept":               "application/json",
+                    "accept-language":      "en-US,en;q=0.9",
+                    "content-type":         "application/json",
+                    "origin":               origin,
+                    "priority":             "u=1, i",
+                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                    "sec-fetch-dest":       "empty",
+                    "sec-fetch-mode":       "cors",
+                    "sec-fetch-site":       "same-origin",
+                    "sec-fetch-storage-access": "active",
+                    "shopify-identification-signature": ident_sig,
+                    "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+                }
+                for attempt in range(2):
+                    resp = session.post(ep, data=payload, headers=headers, timeout=12)
+                    last_status, last_body = resp.status_code, resp.text
+                    if 200 <= last_status < 300:
+                        _VAULT_CACHE[scope] = ep
+                        return last_status, last_body
+                    time.sleep(0.6 * (attempt + 1))
+    return last_status, last_body
+
 
 # ──────────────────────── Proposal helpers ───────────────────────────
 
@@ -2736,9 +2804,12 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
             if not ident_sig:
                 raise Exception("could not extract identification signature")
             
+            _vault_url = extract_vault_url(checkout_html)
+            _vault_domain = extract_vault_domain(checkout_html)
             pci_status, pci_body = send_pci_session(ident_sig, card_number, f"{addr.first_name} {addr.last_name}",
                                                      card_month, card_year, card_cvv, site_name, proxy_url,
-                                                     impersonate=client.impersonate)
+                                                     impersonate=client.impersonate,
+                                                     vault_url=_vault_url, vault_domain=_vault_domain)
 
             pci_session_id = extract_pci_session_id(pci_body)
             if not pci_session_id:

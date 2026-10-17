@@ -61,6 +61,10 @@ extract_running_total = _auto.extract_running_total
 extract_tax_amount = _auto.extract_tax_amount
 extract_identification_signature = _auto.extract_identification_signature
 extract_pci_session_id = _auto.extract_pci_session_id
+PCI_ENDPOINTS = _auto.PCI_ENDPOINTS
+extract_vault_domain = _auto.extract_vault_domain
+extract_vault_url = _auto.extract_vault_url
+_VAULT_CACHE = _auto._VAULT_CACHE
 extract_receipt_id = _auto.extract_receipt_id
 extract_poll_for_receipt_id = _auto.extract_poll_for_receipt_id
 extract_js_refs = _auto.extract_js_refs
@@ -909,7 +913,12 @@ async def discover_persisted_ids(client: AsyncTLSClient, checkout_html: str,
 async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                            card_month: int, card_year: int, cvv: str,
                            shop_domain: str, proxy_url: str = "", impersonate: str = "chrome150",
-                           logger=None):
+                           logger=None, vault_url: str = "", vault_domain: str = ""):
+    # PCI vault scope — prefer the real hostedFieldsUrl domain extracted from the
+    # checkout HTML, fall back to the shop hostname (matches main(6).py).
+    scope = ((vault_domain or "").strip()
+             or (shop_domain or "").replace("https://", "").replace("http://", "").split("/")[0])
+
     payload = json.dumps({
         "credit_card": {
             "number":             card_number,
@@ -921,54 +930,104 @@ async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
             "issue_number":       "",
             "name":               card_name,
         },
-        "payment_session_scope": shop_domain,
+        "payment_session_scope": scope,
     })
-    headers = {
-        "accept":               "application/json",
-        "accept-language":      "en-US,en;q=0.9",
-        "content-type":         "application/json",
-        "origin":               "https://checkout.pci.shopifyinc.com",
-        "priority":             "u=1, i",
-        "referer":              "https://checkout.pci.shopifyinc.com/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
-        "sec-fetch-dest":       "empty",
-        "sec-fetch-mode":       "cors",
-        "sec-fetch-site":       "same-origin",
-        "sec-fetch-storage-access": "active",
-        "shopify-identification-signature": ident_sig,
-    }
+
+    # Endpoint candidates: page-embedded vault URL + cached + known PCI endpoints.
+    candidates = []
+    if vault_url and vault_url not in candidates:
+        candidates.append(vault_url)
+    cached = _VAULT_CACHE.get(scope)
+    if cached and cached not in candidates:
+        candidates.insert(0, cached)
+    for ep in PCI_ENDPOINTS:
+        if ep not in candidates:
+            candidates.append(ep)
+
+    last_status, last_body = 0, ""
     async with AsyncSession(impersonate=impersonate) as session:
         if proxy_url:
             session.proxies = {"http": proxy_url, "https": proxy_url}
-        status, body = 0, ""
-        for attempt in range(3):
-            t0 = _time.monotonic()
-            resp = await session.post("https://checkout.pci.shopifyinc.com/sessions",
-                                      data=payload, headers=headers, timeout=12)
-            status, body = resp.status_code, resp.text
-            if logger is not None:
-                pci_cookies = {}
-                try:
-                    jar = session.cookies
-                    pci_cookies = {k: str(jar.get(k)) for k in jar}
-                except Exception:
-                    pass
-                logger.record("POST", "https://checkout.pci.shopifyinc.com/sessions",
-                              headers, payload, resp, (_time.monotonic() - t0) * 1000,
-                              pci_cookies)
-            if 200 <= status < 300:
-                break
-            await asyncio.sleep(1.0 * (attempt + 1) + random.uniform(0, 0.3))
-        # proxy path failed -> retry direct (no-proxy) as a last resort
-        if not (200 <= status < 300) and proxy_url:
-            session.proxies = {}
+
+        for ep in candidates:
+            origin = ep.rsplit("/sessions", 1)[0]
+            hdrs = {
+                "accept":               "application/json",
+                "accept-language":      "en-US,en;q=0.9",
+                "content-type":         "application/json",
+                "origin":               origin,
+                "priority":             "u=1, i",
+                "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                "sec-fetch-dest":       "empty",
+                "sec-fetch-mode":       "cors",
+                "sec-fetch-site":       "same-origin",
+                "sec-fetch-storage-access": "active",
+                "shopify-identification-signature": ident_sig,
+            }
             for attempt in range(2):
-                resp = await session.post("https://checkout.pci.shopifyinc.com/sessions",
-                                          data=payload, headers=headers, timeout=12)
-                status, body = resp.status_code, resp.text
-                if 200 <= status < 300:
+                t0 = _time.monotonic()
+                resp = await session.post(ep, data=payload, headers=hdrs, timeout=12)
+                last_status, last_body = resp.status_code, resp.text
+                if logger is not None:
+                    pci_cookies = {}
+                    try:
+                        jar = session.cookies
+                        pci_cookies = {k: str(jar.get(k)) for k in jar}
+                    except Exception:
+                        pass
+                    logger.record("POST", ep, hdrs, payload, resp,
+                                  (_time.monotonic() - t0) * 1000, pci_cookies)
+                if 200 <= last_status < 300:
+                    _VAULT_CACHE[scope] = ep
+                    return last_status, last_body
+                # WAF / gateway / empty -> try the next endpoint
+                if last_status in (403, 406, 429, 500, 502, 503):
                     break
-                await asyncio.sleep(1.0 * (attempt + 1) + random.uniform(0, 0.3))
-    return status, body
+                await asyncio.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
+
+        # proxy path failed -> retry the first endpoint direct (no-proxy)
+        if not (200 <= last_status < 300) and proxy_url:
+            session.proxies = {}
+            for ep in candidates[:1]:
+                origin = ep.rsplit("/sessions", 1)[0]
+                hdrs = {
+                    "accept":               "application/json",
+                    "accept-language":      "en-US,en;q=0.9",
+                    "content-type":         "application/json",
+                    "origin":               origin,
+                    "priority":             "u=1, i",
+                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                    "sec-fetch-dest":       "empty",
+                    "sec-fetch-mode":       "cors",
+                    "sec-fetch-site":       "same-origin",
+                    "sec-fetch-storage-access": "active",
+                    "shopify-identification-signature": ident_sig,
+                }
+                for attempt in range(2):
+                    resp = await session.post(ep, data=payload, headers=hdrs, timeout=12)
+                    last_status, last_body = resp.status_code, resp.text
+                    if 200 <= last_status < 300:
+                        _VAULT_CACHE[scope] = ep
+                        return last_status, last_body
+                    await asyncio.sleep(0.6 * (attempt + 1))
+    return last_status, last_body
+
+
+async def _post_persisted_retry(client, url, gql_payload, headers):
+    """POST a persisted GraphQL query, retrying transient 429/403/5xx.
+
+    Mirrors main(6).py's _send_proposal ladder: clean -> 429/403/500 (retry)
+    -> real response. Recovers the transient soft-blocks that would otherwise
+    surface as a site error."""
+    last_status, last_body = 0, ""
+    for attempt in range(3):
+        resp = await client.post(url, data=gql_payload, headers=headers)
+        last_status, last_body = resp.status_code, resp.text
+        if last_status in (429, 403) or last_status >= 500:
+            await asyncio.sleep(random.uniform(0.8, 1.4) * (attempt + 1))
+            continue
+        return last_status, last_body
+    return last_status, last_body
 
 
 # ── Step 4: Proposal 1 ────────────────────────────────────────────────
@@ -1061,13 +1120,11 @@ async def send_proposal(client: AsyncTLSClient, shop_url: str, checkout_url: str
   "id": "{proposal_id}"
 }}'''
     gql_payload = patch_payload(gql_payload, currency, country)
-    resp = await client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
-        data=gql_payload,
-        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
-                                  session_token, build_id, source_token),
-    )
-    return resp.status_code, resp.text
+    return await _post_persisted_retry(
+        client, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        gql_payload,
+        _proposal_headers(shop_url, checkout_url, checkout_token,
+                          session_token, build_id, source_token))
 
 
 # ── Step 5: Proposal 2 (email) ────────────────────────────────────────
@@ -1163,13 +1220,11 @@ async def send_proposal2(client: AsyncTLSClient, shop_url: str, checkout_url: st
   "id": "{proposal_id}"
 }}'''
     gql_payload = patch_payload(gql_payload, currency, country)
-    resp = await client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
-        data=gql_payload,
-        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
-                                  session_token, build_id, source_token),
-    )
-    return resp.status_code, resp.text
+    return await _post_persisted_retry(
+        client, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        gql_payload,
+        _proposal_headers(shop_url, checkout_url, checkout_token,
+                          session_token, build_id, source_token))
 
 
 # ── Step 6/7/8: Proposal 3 (address) ─────────────────────────────────
@@ -1283,13 +1338,11 @@ async def send_proposal3(client: AsyncTLSClient, shop_url: str, checkout_url: st
   "id": "{proposal_id}"
 }}'''
     gql_payload = patch_payload(gql_payload, currency, country)
-    resp = await client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
-        data=gql_payload,
-        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
-                                  session_token, build_id, source_token),
-    )
-    return resp.status_code, resp.text
+    return await _post_persisted_retry(
+        client, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal",
+        gql_payload,
+        _proposal_headers(shop_url, checkout_url, checkout_token,
+                          session_token, build_id, source_token))
 
 
 # ── Step 10a: poll for receipt ────────────────────────────────────────
@@ -1521,13 +1574,11 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
   "id": "{submit_id}"
 }}'''
     gql_payload = patch_payload(gql_payload, currency, country)
-    resp = await client.post(
-        f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
-        data=gql_payload,
-        headers=_proposal_headers(shop_url, checkout_url, checkout_token,
-                                  session_token, build_id, source_token),
-    )
-    return resp.status_code, resp.text
+    return await _post_persisted_retry(
+        client, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
+        gql_payload,
+        _proposal_headers(shop_url, checkout_url, checkout_token,
+                          session_token, build_id, source_token))
 
 
 # ── Main async checkout orchestrator ─────────────────────────────────
@@ -1773,11 +1824,14 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
             ident_sig = extract_identification_signature(checkout_html)
             if not ident_sig:
                 raise Exception("could not extract identification signature")
+            _vault_url = extract_vault_url(checkout_html)
+            _vault_domain = extract_vault_domain(checkout_html)
             pci_status, pci_body = await send_pci_session(
                 ident_sig, card_number,
                 f"{addr.first_name} {addr.last_name}",
                 card_month, card_year, card_cvv, site_name, proxy_url,
-                impersonate=client.impersonate, logger=logger)
+                impersonate=client.impersonate, logger=logger,
+                vault_url=_vault_url, vault_domain=_vault_domain)
 
             pci_session_id = extract_pci_session_id(pci_body)
             if not pci_session_id:
