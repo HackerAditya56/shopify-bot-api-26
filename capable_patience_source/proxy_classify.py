@@ -1,18 +1,32 @@
 """
 proxy_classify.py — classify proxies: residential vs datacenter, rotating vs static.
 
-Exit IP via ipify, classification via ip-api.com/batch (100 IPs per request,
-no per-IP rate-limit churn), rotating detection via two exit-IP samples.
+Exit IP via ipify.
+Classification via ipwho.is (genuinely free, no documented rate limit, HTTPS).
+Datacenter signal: connection.domain present (hosting providers advertise a PTR/domain)
+or org/isp matching a hosting keyword. Residential: consumer ISP, empty domain.
+Rotating detection via two exit-IP samples.
 """
 import asyncio
 import aiohttp
 
 IPIFY = "http://api.ipify.org?format=json"
-# ip-api.com batch: free, 100 IPs/request, 15 req/min — the highest-throughput free option
-IPAPI_BATCH = "http://ip-api.com/batch?fields=status,query,proxy,hosting,mobile,isp,as"
+IPWHOIS = "https://ipwho.is/{ip}"
+
+_UA = {"User-Agent": "Mozilla/5.0 (proxy-classifier)"}
+
+# hosting / datacenter keywords in org|isp|domain
+_HOSTING_KW = (
+    "amazon", "aws", "google", "gcp", "azure", "microsoft", "digitalocean",
+    "linode", "vultr", "ovh", "hetzner", "contabo", "hostinger", "godaddy",
+    "cloudflare", "fastly", "akamai", "equinix", "leaseweb", "colocrossing",
+    "psychz", "interserver", "24shells", "dana", "orion", "b2 net",
+    "thunderbox", "host", "server", "datacenter", "dc ", "vps", "colo",
+    "dedicated", "corporaci", "internet services", "network limited",
+    "data center", "cloud", "digital", "fiber", "telemedia", "telecom",
+)
 
 _RESIDENTIAL_HINTS = ("rotating", "residential", "isp", "premium", "real")
-_DATACENTER_HINTS = ("datacenter", "dc", "server", "vps", "hosting")
 
 
 def _to_url(p):
@@ -24,9 +38,6 @@ def _host_hint(p):
     for hint in _RESIDENTIAL_HINTS:
         if hint in h:
             return "residential"
-    for hint in _DATACENTER_HINTS:
-        if hint in h:
-            return "datacenter"
     return None
 
 
@@ -41,6 +52,35 @@ async def _exit_ip(session, proxy):
     except Exception:
         pass
     return None
+
+
+async def _lookup_ipwhois(session, sem, ip):
+    async with sem:
+        try:
+            async with session.get(IPWHOIS.format(ip=ip), headers=_UA,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status == 200:
+                    return ip, await r.json()
+        except Exception:
+            pass
+    return ip, None
+
+
+def _classify(data):
+    """residential | datacenter | unknown from an ipwho.is payload."""
+    if not data or not data.get("success", False):
+        return "unknown", None, None
+    conn = data.get("connection") or {}
+    org = (conn.get("org") or "").lower()
+    isp = (conn.get("isp") or "").lower()
+    domain = (conn.get("domain") or "").lower()
+    text = f"{org} {isp} {domain}"
+    if domain or any(k in text for k in _HOSTING_KW):
+        kind = "datacenter"
+    else:
+        kind = "residential"
+    label = conn.get("org") or conn.get("isp") or f"AS{conn.get('asn', '')}"
+    return kind, label, data.get("country_code")
 
 
 async def classify_proxies(proxies, concurrency=50):
@@ -59,27 +99,12 @@ async def classify_proxies(proxies, concurrency=50):
             async with sem:
                 return p, await _exit_ip(session, p)
         pairs = await asyncio.gather(*[_ip_one(p) for p in proxies])
-
         live = [(p, ip) for p, ip in pairs if ip]
 
-        # 2) batch classify via ip-api.com (100 per request)
-        type_map = {}
-        ips = list({ip for _, ip in live})
-        for i in range(0, len(ips), 100):
-            chunk = ips[i:i + 100]
-            try:
-                async with session.post(IPAPI_BATCH, json=chunk,
-                                        timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    data = await r.json()
-                for item in data:
-                    q = item.get("query")
-                    if not q:
-                        continue
-                    hosting = item.get("hosting") or item.get("proxy")
-                    t = "datacenter" if hosting else "residential"
-                    type_map[q] = (t, item.get("isp"), item.get("as"))
-            except Exception:
-                pass
+        # 2) classify each exit IP via ipwho.is (concurrent, no rate-limit churn)
+        uniq_ips = list({ip for _, ip in live})
+        lookups = await asyncio.gather(*[_lookup_ipwhois(session, sem, ip) for ip in uniq_ips])
+        info_map = {ip: data for ip, data in lookups}
 
         # 3) rotating detection: second exit-IP sample
         async def _rot_one(p, first_ip):
@@ -90,18 +115,20 @@ async def classify_proxies(proxies, concurrency=50):
         rot_map = dict(rots)
 
         for p, ip in live:
-            t, isp, asn = type_map.get(ip, ("unknown", None, None))
-            host_hint = _host_hint(p)
-            if t == "unknown" and host_hint:
-                t = host_hint
-            out[p] = {"ip": ip, "type": t, "rotating": rot_map.get(p, False),
-                      "isp": isp, "as": asn}
+            data = info_map.get(ip)
+            kind, label, country = _classify(data)
+            if kind == "unknown":
+                hint = _host_hint(p)
+                if hint:
+                    kind = hint
+            out[p] = {"ip": ip, "type": kind, "rotating": rot_map.get(p, False),
+                      "isp": label, "as": country}
 
     return out
 
 
 def is_residential(info):
-    return info.get("type") in ("residential",) and info.get("ip")
+    return info.get("type") == "residential" and info.get("ip")
 
 
 def summarize(info):
@@ -110,4 +137,4 @@ def summarize(info):
         return "DEAD"
     t = info["type"].upper()
     r = "ROTATING" if info["rotating"] else "static"
-    return f"{t} · {r} · {info.get('isp') or info.get('as') or info['ip']}"
+    return f"{t} · {r} · {info.get('isp') or info['ip']}"
