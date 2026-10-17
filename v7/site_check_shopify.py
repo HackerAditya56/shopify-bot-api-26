@@ -10,8 +10,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
-from auto_async_v2 import run_checkout_for_card_async, normalize_proxy
-from auto import CheckStatus
+from auto_async_v2 import run_checkout_for_card_async, normalize_proxy, CheckStatus  # CheckStatus: same class the runner uses (avoid importlib double-copy)
 
 _REAL_RESULTS = (
     "CARD_DECLINED", "ORDER_PAID", "INSUFFICIENT_FUNDS", "3DS_REQUIRED",
@@ -30,18 +29,29 @@ def load(path):
             if l.strip() and not l.strip().startswith("#")]
 
 
-async def run_one(i, site, cc, proxy, sem):
+async def run_one(i, site, cc, proxies, sem):
+    """Run one checkout; retry a DIFFERENT proxy on transport/catalog-proxy failures."""
     async with sem:
         t0 = time.time()
-        try:
-            res = await run_checkout_for_card_async(site, cc, proxy)
-        except Exception as e:
-            return (site, "EXCEPTION", "", "0.00", str(e)[:120], False, round(time.time()-t0, 1))
-        code = (res.status_code or "").strip().upper() or "UNKNOWN"
-        err = str(res.error)[:140].replace("\n", " ") if res.error else ""
-        status_name = res.status.name if res.status is not None else "ERROR"
-        real = res.status != CheckStatus.ERROR or code in _REAL_RESULTS
-        return (site, status_name, code, res.amount or "0.00", err, real, round(time.time()-t0, 1))
+        for attempt in range(3):
+            proxy = normalize_proxy(proxies[(i + attempt) % len(proxies)])
+            try:
+                res = await run_checkout_for_card_async(site, cc, proxy)
+            except Exception as e:
+                emsg = str(e)[:120]
+                if attempt < 2 and any(k in emsg.lower() for k in ("curl", "timeout", "connection", "resolve")):
+                    continue
+                return (site, "EXCEPTION", "", "0.00", emsg, False, round(time.time()-t0, 1))
+            code = (res.status_code or "").strip().upper() or "UNKNOWN"
+            err = str(res.error)[:140].replace("\n", " ") if res.error else ""
+            real = res.status != CheckStatus.ERROR or code in _REAL_RESULTS
+            # proxy-level failures look like site errors; retry a fresh proxy once
+            if (not real and attempt < 2
+                    and any(k in err.lower() for k in ("catalog blocked", "connection", "timed out", "timeout", "curl:", "resolve"))):
+                continue
+            status_name = res.status.name if res.status is not None else "ERROR"
+            return (site, status_name, code, res.amount or "0.00", err, real, round(time.time()-t0, 1))
+        return (site, "EXCEPTION", "", "0.00", "proxy retries exhausted", False, round(time.time()-t0, 1))
 
 
 async def main():
@@ -50,6 +60,7 @@ async def main():
     ap.add_argument("--proxies", required=True)
     ap.add_argument("--cc-file", default=str(BASE.parent / "archive" / "test" / "all_cards.txt"))
     ap.add_argument("--concurrency", type=int, default=500)
+    ap.add_argument("--timeout", type=float, default=150.0)
     ap.add_argument("--out", default="/tmp/shopify_sitecheck")
     a = ap.parse_args()
 
@@ -59,37 +70,40 @@ async def main():
     os.makedirs(a.out, exist_ok=True)
 
     sem = asyncio.Semaphore(max(1, a.concurrency))
+    good_f = open(os.path.join(a.out, "good_sites.txt"), "w", buffering=1)
+    removed_f = open(os.path.join(a.out, "removed_sites.txt"), "w", buffering=1)
     print(f"== Shopify site check: {len(sites)} sites, {len(proxies)} proxies, {len(cards)} cards, {a.concurrency} concurrent ==", flush=True)
 
     jobs = []
     for i, site in enumerate(sites):
         cc = cards[i % len(cards)]
-        proxy = normalize_proxy(proxies[i % len(proxies)])
-        jobs.append(run_one(i, site, cc, proxy, sem))
+        jobs.append(asyncio.wait_for(run_one(i, site, cc, proxies, sem), timeout=a.timeout))
 
-    results = await asyncio.gather(*jobs)
-
-    good, removed = [], []
-    logf = open(os.path.join(a.out, "results.log"), "w", buffering=1)
-    for site, status, code, amount, err, real, dur in results:
+    good = 0
+    removed = 0
+    done = 0
+    for coro in asyncio.as_completed(jobs):
+        try:
+            site, status, code, amount, err, real, dur = await coro
+        except (asyncio.TimeoutError, Exception):
+            done += 1
+            continue
+        done += 1
         line = f"{status:<10} {code:<28} {amount:>8} {dur:>6}s  {site}"
-        logf.write(line + ("  | " + err if err and not real else "") + "\n")
-        print(line, flush=True)
         if real:
-            good.append(site)
+            good += 1
+            good_f.write(site + "\n")
+            print(f"KEEP  {line}", flush=True)
         else:
-            removed.append((site, status, code, err))
+            removed += 1
+            removed_f.write(f"{site}  [{status}] {code} {err}\n")
+            print(f"DROP  {line}  [{err[:60]}]", flush=True)
 
-    with open(os.path.join(a.out, "good_sites.txt"), "w") as f:
-        f.write("\n".join(good) + ("\n" if good else ""))
-    with open(os.path.join(a.out, "removed_sites.txt"), "w") as f:
-        for site, status, code, err in removed:
-            f.write(f"{site}  [{status}] {code} {err}\n")
+    good_f.close()
+    removed_f.close()
     with open(os.path.join(a.out, "summary.json"), "w") as f:
-        json.dump({"total": len(sites), "good": len(good), "removed": len(removed),
-                   "good_sites": good}, f, indent=2)
-    logf.close()
-    print(f"== DONE == good={len(good)} removed={len(removed)} -> {a.out}", flush=True)
+        json.dump({"total": len(sites), "good": good, "removed": removed}, f, indent=2)
+    print(f"== DONE == good={good} removed={removed} -> {a.out}", flush=True)
 
 
 if __name__ == "__main__":
