@@ -46,12 +46,36 @@ _site_error_until = {}
 _site_guard = threading.Lock()
 
 
+_SITE_PRICES = {}
+
+
 def load_sites():
+    global _SITE_PRICES
     try:
         with open(RZ_SITES_FILE, encoding="utf-8") as f:
-            return [l.strip() for l in f if l.strip().startswith("http")]
+            sites = []
+            for l in f:
+                l = l.strip()
+                if not l.startswith("http"):
+                    continue
+                if "|" in l:
+                    url, price = l.split("|", 1)
+                    url = url.strip()
+                    try:
+                        _SITE_PRICES[_site_key(url)] = int(price) * 100
+                    except Exception:
+                        pass
+                    sites.append(url)
+                else:
+                    sites.append(l)
+            return sites
     except Exception:
         return []
+
+
+def get_site_price(site):
+    """Fixed price (paise) for a site marked `url|price` in rz_site.txt, else None."""
+    return _SITE_PRICES.get(_site_key(site))
 
 
 def refresh_sites(exclude_keys=()):

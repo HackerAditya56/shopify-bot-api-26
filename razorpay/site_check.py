@@ -56,6 +56,9 @@ def classify(result):
     msg = str(result.get("message") or "").lower()
 
     # hard SKIPs first (site unusable) — must beat the "dead = declined" fallback
+    actual_paise = int(result.get("amount_paise") or 0)
+    if actual_paise > 10000:
+        return "SKIP", f"amount too high (₹{actual_paise // 100})"
     if "international" in msg and ("not support" in msg or "not allowed" in msg):
         return "SKIP", "international not supported"
     if reason in SKIP_REASONS:
@@ -71,7 +74,7 @@ def classify(result):
     if "3ds" in msg or "3d secure" in msg or "3-d secure" in msg or "3ds" in reason:
         return "GOOD", "3DS"
     if reason in ("declined", "rzp_risk_decline") or status == "dead":
-        return "GOOD", f"declined ({reason or "dead"})"
+        return "GOOD", "declined (" + (reason or "dead") + ")"
     if status == "error":
         return "SKIP", f"error: {reason or msg[:60]}"
     return "SKIP", f"unclassified: {status}/{reason}"

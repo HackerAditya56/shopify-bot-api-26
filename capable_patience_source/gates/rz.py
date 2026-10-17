@@ -295,10 +295,6 @@ async def rz_command(message: types.Message):
 
     # Amount: amount=X (rupees) or random ₹50–₹100
     amt_match = re.search(r'amount\s*=\s*(\d+)', raw_text, re.I)
-    if amt_match:
-        amount_paise = min(int(amt_match.group(1)), 100) * 100  # cap ₹100
-    else:
-        amount_paise = random.randint(23, 100) * 100  # ₹23-100 whole rupees
 
     # Site: site=URL or random from rz_site.txt
     site_match = re.search(r'site\s*=\s*(https?://\S+)', raw_text, re.I)
@@ -306,6 +302,12 @@ async def rz_command(message: types.Message):
         site = site_match.group(1)
     else:
         site = rz_rotation.next_site() or ""
+
+    # Amount: amount=X override, else site fixed price, else ₹23-100
+    if amt_match:
+        amount_paise = min(int(amt_match.group(1)), 100) * 100  # cap ₹100
+    else:
+        amount_paise = rz_rotation.get_site_price(site) or random.randint(23, 100) * 100
 
     # 5. LUHN CHECK
     if not luhn_check(cc):
