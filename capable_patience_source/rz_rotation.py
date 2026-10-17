@@ -22,6 +22,10 @@ RZ_SITES_FILE = os.path.join(_BOT_DIR, "rz_site.txt")
 MAX_CHECKS_PER_SITE = 2          # 2 checkouts per site, then pause (human-like: 2 CCs then wait)
 SITE_PAUSE_SECONDS = 30          # 30s cooldown before the site re-enters the pool
 SITE_ERROR_COOLDOWN_SECONDS = 300  # SERVER_ERROR -> 5 min site cooldown
+SITE_NOSTOCK_COOLDOWN_SECONDS = 86400  # "no stock left" -> 24h site cooldown
+
+# rotating residential proxies (fresh IP per request) never get IP-paused
+_ROTATING_HINTS = ("proxyempire", "iproyal", "brightdata", "brd.superproxy", "marsproxies")
 MAX_PROXY_USES = 5               # rotate proxy before its IP reputation threshold
 PROXY_PAUSE_MIN = 120            # 2-5 min normal pause after 5 uses
 PROXY_PAUSE_MAX = 300
@@ -108,13 +112,24 @@ _server_error_count = 0
 _server_error_lock = threading.Lock()
 
 
+def _is_rotating(proxy):
+    h = (proxy or "").lower()
+    return any(k in h for k in _ROTATING_HINTS)
+
+
 def record_site_result(site, message):
     """`message` = API response message (lowercased). SERVER_ERROR cools the site."""
     global _server_error_count
     key = _site_key(site)
     m = (message or "").lower()
     with _site_guard:
-        if "server error" in m or "site issue" in m:
+        if "no stock" in m or "out of stock" in m:
+            # merchant ran out of stock -> park the site for 24h
+            _site_error_until[key] = time.time() + SITE_NOSTOCK_COOLDOWN_SECONDS
+            _site_uses.pop(key, None)
+            _site_paused_until.pop(key, None)
+            return
+        if "server error" in m or "site issue" in m or "something went wrong" in m:
             _site_error_until[key] = time.time() + SITE_ERROR_COOLDOWN_SECONDS
             _site_uses.pop(key, None)
             _site_paused_until.pop(key, None)
@@ -225,13 +240,18 @@ def release_proxy(proxy, lock):
 
 
 def pause_proxy_403(proxy):
-    """WAF 403 -> pause this proxy 15-45 min (hard cooldown)."""
+    """WAF 403 -> pause this proxy 15-45 min (hard cooldown).
+    Rotating proxies (fresh IP each request) are never paused."""
+    if _is_rotating(proxy):
+        return
     with _proxy_guard:
         _proxy_paused_until[proxy] = time.time() + random.randint(PROXY_403_PAUSE_MIN, PROXY_403_PAUSE_MAX)
         _proxy_uses[proxy] = 0
 
 
 def record_proxy_use(proxy):
+    if _is_rotating(proxy):
+        return
     with _proxy_guard:
         uses = _proxy_uses.get(proxy, 0) + 1
         if uses >= MAX_PROXY_USES:

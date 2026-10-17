@@ -187,6 +187,14 @@ _proxy_locks = {}
 _proxy_locks_guard = threading.Lock()
 
 # per-proxy lifetime cap: 5 checks -> random 1-3 min pause (human-like cadence)
+_ROTATING_HINTS = ("proxyempire", "iproyal", "brightdata", "brd.superproxy", "marsproxies")
+
+
+def _is_rotating(proxy):
+    h = (proxy or "").lower()
+    return any(k in h for k in _ROTATING_HINTS)
+
+
 MAX_PROXY_USES = 5
 _proxy_uses = {}
 _proxy_paused_until = {}
@@ -194,6 +202,8 @@ _proxy_uses_guard = threading.Lock()
 
 
 def _record_proxy_use(proxy):
+    if _is_rotating(proxy):
+        return
     with _proxy_uses_guard:
         uses = _proxy_uses.get(proxy, 0) + 1
         if uses >= MAX_PROXY_USES:
@@ -205,7 +215,9 @@ def _record_proxy_use(proxy):
 
 
 def _pause_proxy_403(proxy):
-    """WAF 403 -> hard-cooldown this proxy 15-45 min."""
+    """WAF 403 -> hard-cooldown this proxy 15-45 min (skip rotating proxies)."""
+    if _is_rotating(proxy):
+        return
     with _proxy_uses_guard:
         _proxy_paused_until[proxy] = time.time() + random.randint(900, 2700)
         _proxy_uses[proxy] = 0
@@ -348,15 +360,22 @@ def check_fn(card):
                     _proxy_uses[proxy] = 0
                 continue
 
-            # site amount/quantity constraint / international-only -> mark site bad, retry
+            # site out of stock -> park the site for 24h
+            if "no stock" in m or "out of stock" in m:
+                with _site_guard:
+                    _site_dead_until[_site_key(site)] = time.time() + 86400
+                continue
+
+            # site amount/quantity/currency constraint / international-only -> mark bad, retry
             if ("amount too small" in m or "amount exceeds maximum" in m or actual_paise > 10000
                     or "quantity" in m or "min purchase" in m
+                    or "currency is invalid" in m
                     or ("international" in m and ("not support" in m or "not allowed" in m))):
                 _bad_sites.add(_site_key(site))
                 continue
 
-            # site soft-block (server error) -> cooldown site, retry
-            if "server error" in m or "site issue" in m:
+            # site soft-block (server error / transient) -> cooldown site, retry
+            if "server error" in m or "site issue" in m or "something went wrong" in m:
                 server_error_sites.add(_site_key(site))
                 with _site_guard:
                     _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
