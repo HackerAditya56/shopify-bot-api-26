@@ -1773,8 +1773,17 @@ async def legacy_checkout_async(client: AsyncTLSClient, shop_url: str, variant_i
             return {"status": "approved", "code": "3DS_REQUIRED", "gate": gw}
         if "insufficient fund" in low:
             return {"status": "approved", "code": "INSUFFICIENT_FUNDS", "gate": gw}
-        if "incorrect cvv" in low or "invalid cvv" in low or "security code" in low:
-            return {"status": "declined", "code": "CVV_INVALID", "gate": gw}
+        if any(k in low for k in ("incorrect_cvc", "invalid_cvc", "incorrect_cvv", "invalid_cvv",
+                                  "incorrect_security_code", "invalid_security_code",
+                                  "incorrect cvv", "invalid cvv", "incorrect cvc", "invalid cvc",
+                                  "incorrect security code", "invalid security code",
+                                  "security code is incorrect", "security code is invalid",
+                                  "security code doesn't match", "security code does not match")):
+            return {"status": "declined", "code": "INCORRECT_CVC", "gate": gw}
+        if any(k in low for k in ("incorrect_zip", "invalid_zip", "incorrect_postal", "invalid_postal",
+                                  "incorrectzip", "invalidzip", "incorrectpostal", "invalidpostal",
+                                  "incorrect zip", "invalid zip", "incorrect postal", "invalid postal")):
+            return {"status": "declined", "code": "INCORRECT_ZIP", "gate": gw}
         if "expired" in low:
             return {"status": "declined", "code": "CARD_EXPIRED", "gate": gw}
         notice = re.search(r'<p class="notice__text">([^<]+)</p>', final_html)
