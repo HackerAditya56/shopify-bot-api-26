@@ -1859,10 +1859,7 @@ async def human_warmup_async(client, shop_url: str, variant_id: str,
     tracker.set_shop(_extract_shop_id_v2(landing.text))
     await tracker.storefront_landing()
 
-    # 2) human reading delay before adding to cart (2-4s)
-    await asyncio.sleep(random.uniform(2.0, 4.0))
-
-    # 3) browse the product page
+    # 2) browse the product page
     if product_handle:
         try:
             await client.get(f"{shop_url}/products/{product_handle}.js", timeout=15)
@@ -1882,10 +1879,7 @@ async def human_warmup_async(client, shop_url: str, variant_id: str,
     # 5) cart state
     await client.get(f"{shop_url}/cart.js", timeout=15)
 
-    # 6) human reading delay before checkout (3-5s)
-    await asyncio.sleep(random.uniform(3.0, 5.0))
-
-    # 7) site abandonment telemetry (human leaves the storefront)
+    # 6) site abandonment telemetry (human leaves the storefront)
     await tracker.site_abandonment("index", landing_start,
                                    int(_time.time() * 1000) - landing_start)
 
