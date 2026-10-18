@@ -1762,7 +1762,8 @@ async def legacy_checkout_async(client: AsyncTLSClient, shop_url: str, variant_i
         final_html = (g.text if g is not None else (r7.text or ""))
         final_url = (g.url if g is not None else "")
         gw = gateway or "shopify_payments"
-        if "/thank" in str(final_url) or "/orders/" in str(final_url):
+        # charged ONLY on a real ProcessedReceipt/SuccessfulReceipt (never a URL heuristic)
+        if re.search(r'"(?:ProcessedReceipt|SuccessfulReceipt)"', final_html or ""):
             return {"status": "charged", "code": "ORDER_PAID", "gate": gw}
         low = final_html.lower()
         if "3d_secure" in low or "3d secure" in low:
@@ -1901,7 +1902,7 @@ async def human_warmup_async(client, shop_url: str, variant_id: str,
 
 async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                                       proxy_url: str = "", min_price: float = 0.50,
-                                      country_override: str = "") -> CheckResult:
+                                      country_override: str = "", max_price: float | None = None) -> CheckResult:
     currency  = "USD"
     country   = country_override or "US"
     site_name = shop_url.replace("https://", "").replace("http://", "")
@@ -1930,7 +1931,7 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
         # Step 0 - Find cheapest product (0.01$ to 20$): all pages in parallel
         try:
             title, product_id, product_handle, variant_id, price = await find_cheapest_product(
-                client, shop_url, min_price=min_price, logger=logger
+                client, shop_url, min_price=min_price, max_price=max_price, logger=logger
             )
             _ = title
             tracker.set_item(variant_id, product_id, price)
