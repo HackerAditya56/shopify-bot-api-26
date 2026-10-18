@@ -1917,7 +1917,7 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
 
     email       = generate_random_email()
 
-    raw_client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
+    raw_client = AsyncTLSClient(timeout=8, proxy_url=proxy_url)
     logger = RunLogger(card_entry, shop_url, proxy_url, raw_client)
     await _pace(shop_url)
     client = LoggedClient(raw_client, logger)
@@ -2256,7 +2256,7 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
         patient_rounds = 0
         last_outcome = "unknown"
 
-        while seen_rounds < 30:
+        while seen_rounds < 15:
             try:
                 _, poll_body = await send_poll_for_receipt(
                     client, shop_url, checkout_url, checkout_token, session_token,
