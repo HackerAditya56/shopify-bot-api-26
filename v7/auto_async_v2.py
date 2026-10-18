@@ -997,6 +997,31 @@ async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                     break
                 await asyncio.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
 
+        # no-proxy fallback — retry the primary vault endpoint direct (VPS IP)
+        if not (200 <= last_status < 300) and proxy_url:
+            session.proxies = {}
+            for ep in candidates[:1]:
+                origin = ep.rsplit("/sessions", 1)[0]
+                hdrs = {
+                    "accept":               "application/json",
+                    "accept-language":      "en-US,en;q=0.9",
+                    "content-type":         "application/json",
+                    "origin":               origin,
+                    "priority":             "u=1, i",
+                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                    "sec-fetch-dest":       "empty",
+                    "sec-fetch-mode":       "cors",
+                    "sec-fetch-site":       "same-origin",
+                    "sec-fetch-storage-access": "active",
+                    "shopify-identification-signature": ident_sig,
+                }
+                for attempt in range(2):
+                    resp = await session.post(ep, data=payload, headers=hdrs, timeout=12)
+                    last_status, last_body = resp.status_code, resp.text
+                    if 200 <= last_status < 300:
+                        _VAULT_CACHE[scope] = ep
+                        return last_status, last_body
+                    await asyncio.sleep(0.6 * (attempt + 1))
     return last_status, last_body
 
 

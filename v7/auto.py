@@ -1967,10 +1967,36 @@ def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                 if last_status in (403, 406, 429, 500, 502, 503):
                     break
                 time.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
-            return last_status, last_body
+
+        # no-proxy fallback — retry the primary vault endpoint direct (VPS IP)
+        if not (200 <= last_status < 300) and proxy_url:
+            session.proxies = {}
+            for ep in candidates[:1]:
+                origin = ep.rsplit("/sessions", 1)[0]
+                headers = {
+                    "accept":               "application/json",
+                    "accept-language":      "en-US,en;q=0.9",
+                    "content-type":         "application/json",
+                    "origin":               origin,
+                    "priority":             "u=1, i",
+                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+                    "sec-fetch-dest":       "empty",
+                    "sec-fetch-mode":       "cors",
+                    "sec-fetch-site":       "same-origin",
+                    "sec-fetch-storage-access": "active",
+                    "shopify-identification-signature": ident_sig,
+                    "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+                }
+                for attempt in range(2):
+                    resp = session.post(ep, data=payload, headers=headers, timeout=12)
+                    last_status, last_body = resp.status_code, resp.text
+                    if 200 <= last_status < 300:
+                        _VAULT_CACHE[scope] = ep
+                        return last_status, last_body
+                    time.sleep(0.6 * (attempt + 1))
+    return last_status, last_body
 
 
-# ──────────────────────── Proposal helpers ───────────────────────────
 
 def _proposal_headers(shop_url: str, checkout_url: str, checkout_token: str,
                       session_token: str, build_id: str, source_token: str) -> Dict:
