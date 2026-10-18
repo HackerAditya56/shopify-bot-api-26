@@ -1554,7 +1554,7 @@ CARD_RESULT_MAP = {
 DECLINED_RESULTS = frozenset({
     "CARD_DECLINED", "INSUFFICIENT_FUNDS", "FRAUD_SUSPECTED",
     "STOLEN_CARD", "LOST_CARD", "EXPIRE_CARD", "INCORRECT_CVC",
-    "INCORRECT_ZIP", "DO_NOT_HONOR", "CARD_NETWORK_NOT_ENABLED",
+    "DO_NOT_HONOR", "CARD_NETWORK_NOT_ENABLED",
 })
 
 
@@ -1689,7 +1689,7 @@ def result_status_for(code: str) -> CheckStatus:
     u = (code or "").strip().upper()
     if u == "ORDER_PAID":
         return CheckStatus.CHARGED
-    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS",):
+    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS", "INCORRECT_ZIP"):
         return CheckStatus.APPROVED
     if u in DECLINED_RESULTS:
         return CheckStatus.DECLINED

@@ -1783,7 +1783,7 @@ async def legacy_checkout_async(client: AsyncTLSClient, shop_url: str, variant_i
         if any(k in low for k in ("incorrect_zip", "invalid_zip", "incorrect_postal", "invalid_postal",
                                   "incorrectzip", "invalidzip", "incorrectpostal", "invalidpostal",
                                   "incorrect zip", "invalid zip", "incorrect postal", "invalid postal")):
-            return {"status": "declined", "code": "INCORRECT_ZIP", "gate": gw}
+            return {"status": "approved", "code": "INCORRECT_ZIP", "gate": gw}
         if "expired" in low:
             return {"status": "declined", "code": "CARD_EXPIRED", "gate": gw}
         notice = re.search(r'<p class="notice__text">([^<]+)</p>', final_html)
