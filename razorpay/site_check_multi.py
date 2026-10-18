@@ -16,6 +16,7 @@ def main():
     ap.add_argument("--per-proxy", type=int, default=15, help="checks before pausing a proxy 60s")
     ap.add_argument("--delay", type=float, default=2.0)
     ap.add_argument("--recheck-delay", type=float, default=120.0)
+    ap.add_argument("--concurrency", type=int, default=3, help="parallel checkouts (rotating proxy handles >1)")
     a = ap.parse_args()
 
     with open(a.sites) as f:
@@ -78,41 +79,48 @@ def main():
                     proxy_uses[p] = u
 
     def process(site_list, tag):
-        for site in site_list:
+        import concurrent.futures
+
+        def work(site):
             # skip sites that already got a real response (GOOD) in a prior run
             jf = os.path.join(a.out, f"{_site_key(site)}.json")
             if os.path.exists(jf):
                 try:
                     prev = json.load(open(jf))
                     if prev.get("verdict") == "GOOD":
-                        print(f"[{tag}] SKIP     already-good                       {site}", flush=True)
-                        continue
+                        return site, "SKIP", "already-good", None, None, None, 0, []
                 except Exception:
                     pass
             proxy = pick_proxy()
+            cc = next_card()
             log = []
             t0 = time.time()
-            cc = next_card()
             try:
                 result = run_checkout(site, cc, proxy, log)
             except Exception as e:
                 result = {"status": "error", "message": str(e)[:300], "reason": "exception"}
             verdict, why = classify(result)
-            blocked = result.get("status") == "error" and ("403" in str(result.get("message","")).lower() or "forbidden" in str(result.get("message","")).lower())
+            blocked = result.get("status") == "error" and ("403" in str(result.get("message", "")).lower() or "forbidden" in str(result.get("message", "")).lower())
             mark_proxy(proxy, blocked=blocked)
-            entry = {"site": site, "verdict": verdict, "why": why, "proxy": proxy, "cc": cc,
-                     "result": result, "request_count": len(log),
-                     "duration_s": round(time.time()-t0, 2), "responses": log}
-            with open(os.path.join(a.out, f"{_site_key(site)}.json"), "w") as f:
-                json.dump(entry, f, indent=2)
-            print(f"[{tag}] {verdict:8s} {why:35s} via {proxy.split('@')[-1][:22]:22s} {site}", flush=True)
-            if verdict == "GOOD":
-                good.append(site)
-            elif verdict == "RECHECK":
-                recheck.append(site)
-            else:
-                skipped.append(site)
-            time.sleep(a.delay)
+            return site, verdict, why, result, proxy, cc, round(time.time() - t0, 2), log
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=a.concurrency) as ex:
+            for site, verdict, why, result, proxy, cc, dur, log in ex.map(work, site_list):
+                entry = {"site": site, "verdict": verdict, "why": why, "proxy": proxy, "cc": cc,
+                         "result": result, "request_count": len(log) if log else 0,
+                         "duration_s": dur, "responses": log or []}
+                with open(os.path.join(a.out, f"{_site_key(site)}.json"), "w") as f:
+                    json.dump(entry, f, indent=2)
+                ptag = (proxy or "").split('@')[-1][:22]
+                print(f"[{tag}] {verdict:8s} {why:35s} via {ptag:22s} {site}", flush=True)
+                if verdict == "GOOD":
+                    good.append(site)
+                elif verdict == "RECHECK":
+                    recheck.append(site)
+                else:
+                    skipped.append(site)
+                if a.delay:
+                    time.sleep(a.delay)
 
     print(f"== PASS 1: {len(sites)} sites, {len(proxies)} proxies ==", flush=True)
     process(sites, "pass1")
