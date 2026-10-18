@@ -998,6 +998,16 @@ PCI_ENDPOINTS = [
 ]
 
 
+def extract_payment_method_id(body: str) -> str:
+    """Shopify Payments method identifier from a proposal body — sent in submit."""
+    m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([^"]+)"\s*,\s*"name"\s*:\s*"shopify_payments"',
+                  body or "")
+    if m:
+        return m.group(1)
+    m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([a-f0-9]{32})"', body or "")
+    return m.group(1) if m else ""
+
+
 def extract_vault_domain(checkout_html: str) -> str:
     """Real vault scope for PCI (hostedFieldsUrl.domain) — falls back to ''."""
     m = re.search(r'hostedFieldsUrl[^}]+"domain"\s*:\s*"([^"]+)"',
