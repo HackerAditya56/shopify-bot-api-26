@@ -1520,7 +1520,6 @@ CARD_RESULT_MAP = {
     "EXPIRED_CARD":       "EXPIRE_CARD",
     "BASE CREDIT CARD IS EXPIRED": "EXPIRE_CARD",
     "CREDIT CARD BRAND IS NOT SUPPORTED": "CARD_NETWORK_NOT_ENABLED",
-    "NO AVAILABLE DELIVERY STRATEGY FOUND": "DELIVERY_UNAVAILABLE",
     "INCORRECT_CVC":      "INCORRECT_CVC",
     "INCORRECT_ZIP":      "INCORRECT_CVC",
     "DO_NOT_HONOR":       "DO_NOT_HONOR",
@@ -1537,7 +1536,7 @@ CARD_RESULT_MAP = {
 DECLINED_RESULTS = frozenset({
     "CARD_DECLINED", "INSUFFICIENT_FUNDS", "FRAUD_SUSPECTED",
     "STOLEN_CARD", "LOST_CARD", "EXPIRE_CARD", "INCORRECT_CVC",
-    "DO_NOT_HONOR", "CARD_NETWORK_NOT_ENABLED", "DELIVERY_UNAVAILABLE",
+    "DO_NOT_HONOR", "CARD_NETWORK_NOT_ENABLED",
 })
 
 
@@ -1653,6 +1652,11 @@ def normalize_card_result(error_code: str) -> str:
     if ("TERMS ID MISMATCH" in flat or "PAYMENT FLEXIBILITY" in flat
             or "CHECKOUTRETRYABLE" in flat):
         return "CHECKOUT_RETRYABLE"
+    code = code.rstrip(".")
+    if "CREDIT CARD BRAND IS NOT SUPPORTED" in code:
+        return "CARD_NETWORK_NOT_ENABLED"
+    if "BASE CREDIT CARD IS EXPIRED" in code:
+        return "EXPIRE_CARD"
     if code in CARD_RESULT_MAP:
         return CARD_RESULT_MAP[code]
     # tolerate "CODE: message" / "CODE - message" / "CODE message" shapes
