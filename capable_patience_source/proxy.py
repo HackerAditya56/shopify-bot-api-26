@@ -576,6 +576,15 @@ async def check_db_proxies_background(bot, message: types.Message):
         else:
             file_content += p_str + "\n"
 
+    # Write only the LIVE proxies back to the Shopify proxy.txt (remove dead)
+    try:
+        import shopify_config
+        with open(shopify_config.PROXY_FILE, "w", encoding="utf-8") as _pf:
+            _pf.write(file_content)
+        caption += f'\n\n{_tg(ID_GATEWAY, "⚡")} <b>𝐩𝐫𝐨𝐱𝐲.𝐭𝐱𝐭 𝐮𝐩𝐝𝐚𝐭𝐞𝐝 ➠ {len(live_proxies)} 𝐥𝐢𝐯𝐞</b>'
+    except Exception as _e:
+        logging.error(f"proxy.txt write error: {_e}")
+
     # Create file
     txt_file = BufferedInputFile(
         file=file_content.encode('utf-8'),
