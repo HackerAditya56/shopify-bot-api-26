@@ -1126,6 +1126,24 @@ def extract_gateway_name(*bodies: str) -> str:
                     return name
     return "Shopify Payments"
 
+
+_TEST_GATEWAY_SIGNALS = (
+    "bogus", "test", "sandbox", "demo", "dev store", "development", "dummy",
+)
+
+
+def is_test_gateway(gateway: str) -> bool:
+    """True when the shop's reported gateway is a test/development gateway.
+
+    Test-mode stores (Bogus Gateway / sandbox) approve any card — valid or
+    fake — so their ProcessedReceipt is a fake charge, not a real ORDER_PAID.
+    """
+    g = (gateway or "").strip().lower()
+    if not g or g in ("shopify_payments", "shopify payments"):
+        return False
+    return any(sig in g for sig in _TEST_GATEWAY_SIGNALS)
+
+
 def extract_delivery_from_proposal(proposal_json: str) -> Tuple[str, str]:
     """
     Robust delivery extraction used by the reference checker: read the

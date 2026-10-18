@@ -100,6 +100,7 @@ extract_pending_poll_delay = _auto.extract_pending_poll_delay
 CURRENCY_TO_COUNTRY = _auto.CURRENCY_TO_COUNTRY
 _RE_CURRENCY_CART = _auto._RE_CURRENCY_CART
 extract_gateway_name = _auto.extract_gateway_name
+is_test_gateway = _auto.is_test_gateway
 extract_delivery_from_proposal = _auto.extract_delivery_from_proposal
 resolve_delivery = _auto.resolve_delivery
 extract_payment_flexibility_terms_id = _auto.extract_payment_flexibility_terms_id
@@ -1764,6 +1765,8 @@ async def legacy_checkout_async(client: AsyncTLSClient, shop_url: str, variant_i
         gw = gateway or "shopify_payments"
         # charged ONLY on a real ProcessedReceipt/SuccessfulReceipt (never a URL heuristic)
         if re.search(r'"(?:ProcessedReceipt|SuccessfulReceipt)"', final_html or ""):
+            if is_test_gateway(gw):
+                return {"status": "declined", "code": "TEST_SITE", "gate": gw}
             return {"status": "charged", "code": "ORDER_PAID", "gate": gw}
         low = final_html.lower()
         if "3d_secure" in low or "3d secure" in low:
@@ -2274,6 +2277,12 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 result.status_code = extract_receipt_status_code(poll_body, receipt_type)
 
                 if outcome == "success":
+                    if is_test_gateway(result.gateway):
+                        result.status      = CheckStatus.DECLINED
+                        result.status_code = "TEST_SITE"
+                        result.error       = Exception("test-mode store (bogus gateway) — fake charge")
+                        result.retryable   = False
+                        return result
                     result.status      = CheckStatus.CHARGED
                     result.status_code = "ORDER_PAID"
                     result.receipt_url = checkout_url + "/thank_you"
