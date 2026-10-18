@@ -423,16 +423,30 @@ def _log_new_ip(ip: str):
             pass
 
 
-@app.middleware("http")
-async def _log_client_ip(request: Request, call_next):
-    """Record the requester IP to ip.txt (new IPs only, /sh endpoint only)."""
-    if request.url.path.rstrip("/") == "/sh":
-        ip = request.client.host if request.client else "unknown"
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            ip = xff.split(",")[0].strip()
-        _log_new_ip(ip)
-    return await call_next(request)
+class ClientIPLogMiddleware:
+    """Record the requester IP to ip.txt (new IPs only, /sh endpoint only).
+
+    Pure ASGI middleware (scope-based) instead of starlette's BaseHTTPMiddleware
+    so the request body stream is never wrapped — avoids `EndOfStream` ->
+    `RuntimeError: No response returned.` crashes when a client disconnects
+    mid-request before the /sh body is fully read.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and (scope.get("path") or "").rstrip("/") == "/sh":
+            ip = scope.get("client")
+            ip = ip[0] if ip else "unknown"
+            for name, value in scope.get("headers", []):
+                if name == b"x-forwarded-for":
+                    ip = value.decode("latin-1").split(",")[0].strip()
+                    break
+            _log_new_ip(ip)
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ClientIPLogMiddleware)
 
 
 @app.get("/")
