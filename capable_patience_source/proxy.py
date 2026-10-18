@@ -489,38 +489,38 @@ async def check_db_proxies_background(bot, message: types.Message):
         parse_mode="HTML"
     )
     
-    # Prepare proxy list for parallel checking
+    # Prepare proxy list for parallel checking.
+    # proxy_id_map is a LIST aligned 1:1 with proxies_to_check (results order),
+    # so each result maps back to the correct DB row even when some inputs are
+    # skipped as invalid format. (Previously it was a dict keyed by the rows
+    # index, which shifted as soon as one proxy failed parsing and left dead
+    # rows in the DB -> /myproxy kept showing the old count.)
     proxies_to_check = []
-    proxy_id_map = {}
-    
-    for idx, (proxy_id, proxy_str) in enumerate(rows):
+    proxy_id_map = []
+    dead_ids = []
+
+    for proxy_id, proxy_str in rows:
         parsed = parse_proxy_input(proxy_str)
         if parsed:
             proxies_to_check.append(parsed)
-            proxy_id_map[idx] = proxy_id
+            proxy_id_map.append(proxy_id)
         else:
-            # Invalid format, mark for deletion
-            proxy_id_map[idx] = proxy_id
-    
+            # Invalid format -> remove immediately
+            dead_ids.append(proxy_id)
+
     # ✅ PARALLEL CHECKING - Much faster!
     results_list = await check_proxies_parallel(proxies_to_check)
-    
-    dead_ids = []
+
     live_proxies = []
-    
+
     # Process results
     for idx, (proxy_data, is_live, info) in enumerate(results_list):
-        db_id = proxy_id_map.get(idx)
+        db_id = proxy_id_map[idx]
         if is_live:
             live_proxies.append(proxy_data['db_format'])
         else:
             if db_id:
                 dead_ids.append(db_id)
-    
-    # Also delete any invalid format proxies
-    for idx in range(len(rows)):
-        if idx not in proxy_id_map and idx < len(rows):
-            dead_ids.append(rows[idx][0])
     
     # Delete dead proxies from DB
     if dead_ids:
