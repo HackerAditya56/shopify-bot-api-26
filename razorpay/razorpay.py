@@ -616,8 +616,14 @@ class RazorpaySession:
         self.last_http_code = resp.status_code
         if getattr(self, '_response_log', None) is not None:
             try:
+                req_payload = json_data if json_data is not None else data
+                try:
+                    req_snapshot = (req_payload[:2000] if isinstance(req_payload, (str, bytes)) else json.dumps(req_payload)[:2000])
+                except Exception:
+                    req_snapshot = str(req_payload)[:2000]
                 self._response_log.append({
                     'method': method, 'url': url, 'status': resp.status_code,
+                    'req': req_snapshot,
                     'headers': dict(resp.headers),
                     'body': (resp.text or '')[:4000],
                     'timing_ms': round((time.time() - t0) * 1000, 1),
@@ -668,8 +674,14 @@ class RazorpaySession:
         self.last_http_code = resp.status_code
         if getattr(self, '_response_log', None) is not None:
             try:
+                req_payload = json_data if json_data is not None else data
+                try:
+                    req_snapshot = (req_payload[:2000] if isinstance(req_payload, (str, bytes)) else json.dumps(req_payload)[:2000])
+                except Exception:
+                    req_snapshot = str(req_payload)[:2000]
                 self._response_log.append({
                     'method': method, 'url': url, 'status': resp.status_code,
+                    'req': req_snapshot,
                     'headers': dict(resp.headers),
                     'body': (resp.text or '')[:4000],
                     'timing_ms': round((time.time() - t0) * 1000, 1),
@@ -1489,8 +1501,14 @@ class RazorpaySession:
             self.forced_outcome = self._outcome_from_api_error(resp.status_code, resp.text)
             return
         data = json.loads(resp.text)
-        for k in ('card_type', 'card_network', 'card_country', 'bin_currency', 'issuer_name'):
-            self.tokens[k] = str(data.get(k, ''))
+        # IIN response uses type/network/country (NOT card_type/card_network/card_country).
+        # The old keys were always empty -> cb_flows sent card.country="" / card.network=""
+        # -> BAD_REQUEST_ERROR, which poisoned the payment-create step into SERVER_ERROR.
+        self.tokens['card_type'] = str(data.get('type', ''))
+        self.tokens['card_network'] = str(data.get('network', ''))
+        self.tokens['card_country'] = str(data.get('country', ''))
+        self.tokens['bin_currency'] = str(data.get('bin_currency', ''))
+        self.tokens['issuer_name'] = str(data.get('issuer_name', ''))
         # Mirror PHP: extract dcc_blacklisted (affects cb_flows body in step 8)
         dcb = data.get('dcc_blacklisted')
         self.tokens['dcc_blacklisted'] = 'true' if dcb else 'false'
@@ -2415,8 +2433,14 @@ class RazorpaySession:
             self.forced_outcome = self._outcome_from_api_error(resp.status_code, resp.text)
             return
         data = json.loads(resp.text)
-        for k in ('card_type', 'card_network', 'card_country', 'bin_currency', 'issuer_name'):
-            self.tokens[k] = str(data.get(k, ''))
+        # IIN response uses type/network/country (NOT card_type/card_network/card_country).
+        # The old keys were always empty -> cb_flows sent card.country="" / card.network=""
+        # -> BAD_REQUEST_ERROR, which poisoned the payment-create step into SERVER_ERROR.
+        self.tokens['card_type'] = str(data.get('type', ''))
+        self.tokens['card_network'] = str(data.get('network', ''))
+        self.tokens['card_country'] = str(data.get('country', ''))
+        self.tokens['bin_currency'] = str(data.get('bin_currency', ''))
+        self.tokens['issuer_name'] = str(data.get('issuer_name', ''))
         dcb = data.get('dcc_blacklisted')
         self.tokens['dcc_blacklisted'] = 'true' if dcb else 'false'
 
