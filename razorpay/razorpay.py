@@ -1148,6 +1148,11 @@ class RazorpaySession:
         if not full_name:
             full_name = f"{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}"
             self.tokens['full_name'] = full_name
+        for k in ('name', 'your_name'):
+            if not str(self.tokens.get(k, '')).strip():
+                self.tokens[k] = full_name
+        if not str(self.tokens.get('payment_description', '')).strip():
+            self.tokens['payment_description'] = str(self.tokens.get('description', '')).strip() or 'Payment' 
 
     # ── Headers builders ───────────────────────────────────────────────────
     def _document_headers(self) -> dict:
@@ -1370,7 +1375,7 @@ class RazorpaySession:
         http_code = 500
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'full_name': self.tokens.get('full_name', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
+            payload = {'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = self._request('POST', url, self._payment_page_api_headers(auth),
                                     json_data=payload, raw=True)
@@ -1389,7 +1394,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = self._request('POST', url, self._payment_page_api_headers(auth),
-                                         json_data={'full_name': self.tokens.get('full_name', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
+                                         json_data={'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                     'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
@@ -1676,6 +1681,9 @@ class RazorpaySession:
             ('card[number]', self.card['number']),
             ('card[cvv]', self.card['cvv']),
             ('full_name', self.tokens.get('full_name', '')),
+            ('name', self.tokens.get('name', '')),
+            ('your_name', self.tokens.get('your_name', '')),
+            ('payment_description', self.tokens.get('payment_description', '')),
             ('card[name]', customer_name),
             ('card[expiry_month]', self.card['expiry_month']),
             ('card[expiry_year]', self.card['expiry_year']),
@@ -2326,7 +2334,7 @@ class RazorpaySession:
 
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'full_name': self.tokens.get('full_name', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
+            payload = {'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = await self._request_async('POST', url, self._payment_page_api_headers(auth),
                                                  json_data=payload, raw=True)
@@ -2343,7 +2351,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = await self._request_async('POST', url, self._payment_page_api_headers(auth),
-                                                       json_data={'full_name': self.tokens.get('full_name', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
+                                                       json_data={'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                                   'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
