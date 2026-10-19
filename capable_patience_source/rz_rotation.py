@@ -21,7 +21,7 @@ RZ_SITES_FILE = os.path.join(_BOT_DIR, "rz_site.txt")
 
 MAX_CHECKS_PER_SITE = 2          # 2 checkouts per site, then pause (human-like: 2 CCs then wait)
 SITE_PAUSE_SECONDS = 30          # 30s cooldown before the site re-enters the pool
-SITE_ERROR_COOLDOWN_SECONDS = 300  # SERVER_ERROR -> 5 min site cooldown
+SITE_ERROR_COOLDOWN_SECONDS = 120  # SERVER_ERROR / site-change -> 2 min site cooldown
 SITE_NOSTOCK_COOLDOWN_SECONDS = 86400  # "no stock left" -> 24h site cooldown
 
 # rotating residential proxies (fresh IP per request) never get IP-paused
@@ -129,7 +129,9 @@ def record_site_result(site, message):
             _site_uses.pop(key, None)
             _site_paused_until.pop(key, None)
             return
-        if "server error" in m or "site issue" in m or "something went wrong" in m:
+        if ("server error" in m or "site issue" in m or "something went wrong" in m
+                or "site change" in m or "should not be sent" in m or "extra field" in m
+                or "order failed" in m or "merchant blocked" in m or "site unavailable" in m):
             _site_error_until[key] = time.time() + SITE_ERROR_COOLDOWN_SECONDS
             _site_uses.pop(key, None)
             _site_paused_until.pop(key, None)

