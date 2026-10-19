@@ -262,15 +262,19 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
                 price_idx += 1
                 last_res = res
                 continue
-        if "DELIVERY_NO_DELIVERY_STRATEGY" in (status_code + " " + err_text).upper():
+        if ("DELIVERY_NO_DELIVERY_STRATEGY" in (status_code + " " + err_text).upper()
+                or "NO AVAILABLE DELIVERY STRATEGY" in (status_code + " " + err_text).upper()):
             if country_idx + 1 < len(COUNTRY_LADDER):
                 country_idx += 1
                 last_res = res
                 continue
 
-        # session token invalid/expired (proposal failed with INVALID_SESSION_TOKEN)
-        # -> retry the SAME site with a fresh checkout before falling back
-        if "could not extract queueToken" in err_text or "INVALID_SESSION_TOKEN" in (status_code + " " + err_text).upper():
+        # transient checkout failures -> retry the SAME site with a fresh checkout
+        # (session expiry, HTML challenge, missing checkout tokens)
+        if ("could not extract queueToken" in err_text
+                or "INVALID_SESSION_TOKEN" in (status_code + " " + err_text).upper()
+                or "missing stableid" in err_text.lower()
+                or "<!doctype html>" in err_text.lower()):
             last_res = res
             continue
 
