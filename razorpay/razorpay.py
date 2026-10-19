@@ -1375,7 +1375,7 @@ class RazorpaySession:
         http_code = 500
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
+            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = self._request('POST', url, self._payment_page_api_headers(auth),
                                     json_data=payload, raw=True)
@@ -1394,7 +1394,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = self._request('POST', url, self._payment_page_api_headers(auth),
-                                         json_data={'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
+                                         json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                     'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
@@ -2335,7 +2335,7 @@ class RazorpaySession:
 
         for auth in [auth] + fallback_auths:
             url = self._payment_page_order_url(pl_id, auth)
-            payload = {'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
+            payload = {'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')}, 'line_items': line_items}
             try:
                 resp = await self._request_async('POST', url, self._payment_page_api_headers(auth),
                                                  json_data=payload, raw=True)
@@ -2352,7 +2352,7 @@ class RazorpaySession:
                     mandatory_ppi = ppi_required.group(1)
                     new_items = [{'payment_page_item_id': mandatory_ppi, 'amount': self.amount_paise}]
                     resp2 = await self._request_async('POST', url, self._payment_page_api_headers(auth),
-                                                       json_data={'full_name': self.tokens.get('full_name', ''), 'name': self.tokens.get('name', ''), 'your_name': self.tokens.get('your_name', ''), 'payment_description': self.tokens.get('payment_description', ''), 'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
+                                                       json_data={'notes': {'email': self.tokens.get('email', ''), 'phone': self.tokens.get('contact', ''), 'phone_imei_no': self.tokens.get('phone_imei_no', ''), 'description': self.tokens.get('description', '')},
                                                                   'line_items': new_items}, raw=True)
                     body = resp2.text
                     http_code = resp2.status_code
