@@ -886,7 +886,7 @@ def generate_result_file(session: dict, result_type: str, user_obj, plan_name: s
 
             if "CHARGED" in response or "ORDER_PAID" in response:
                 status = "𝐂𝐡𝐚𝐫𝐠𝐞𝐝 💎"
-            elif "APPROVED" in response or "INVALID_CVC" in response or "INSUFFICIENT_FUNDS" in response:
+            elif "APPROVED" in response or "INVALID_CVC" in response or "INSUFFICIENT_FUNDS" in response or "INCORRECT_ZIP" in response:
                 status = "𝐀𝐩𝐩𝐫𝐨𝐯𝐞𝐝 ✅"
             elif any(err in response for err in ["timeout", "connection error", "max retries", "json decode", "invalid api", "Unknown Error"]):
                 status = "𝐄𝐫𝐫𝐨𝐫 ⚠️"
@@ -1288,7 +1288,7 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
                 response_msg = message
                 break
 
-            elif "INSUFFICIENT_FUNDS" in message_upper or "INCORRECT_CVC" in message_upper:
+            elif "INSUFFICIENT_FUNDS" in message_upper or "INCORRECT_CVC" in message_upper or "INCORRECT_ZIP" in message_upper:
                 result_status = "APPROVED"
                 response_msg = message
                 break

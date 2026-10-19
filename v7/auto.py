@@ -1630,7 +1630,7 @@ def result_status_for(code: str) -> CheckStatus:
     u = (code or "").strip().upper()
     if u == "ORDER_PAID":
         return CheckStatus.CHARGED
-    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS",):
+    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS", "INCORRECT_ZIP"):
         return CheckStatus.APPROVED
     if u in DECLINED_RESULTS:
         return CheckStatus.DECLINED
