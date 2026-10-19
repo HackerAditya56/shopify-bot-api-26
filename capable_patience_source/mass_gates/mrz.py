@@ -142,7 +142,7 @@ _bad_sites = set()  # sites that returned "Amount too small" (min > ₹100)
 MAX_CHECKS_PER_SITE = 2
 SITE_PAUSE_SECONDS = 30  # 30s cooldown (2 CCs then wait)
 # B: a site that returns "server error" goes to cooldown for 5 min (time-based).
-SITE_DEAD_COOLDOWN_SECONDS = 300  # 5 min
+SITE_DEAD_COOLDOWN_SECONDS = 120  # 2 min (measured ~60-90s recovery)
 _site_uses = {}
 _site_paused_until = {}
 _site_dead_until = {}
@@ -381,7 +381,7 @@ def check_fn(card):
                     _site_dead_until[_site_key(site)] = time.time() + SITE_DEAD_COOLDOWN_SECONDS
                 # 2+ different sites server-error for the SAME card => the card
                 # itself is flagged, not the sites. Stop cooling sites, mark dead.
-                if len(server_error_sites) >= 2:
+                if len(server_error_sites) >= 6:
                     return "DECLINED", "Card flagged — server error across sites", "UNKNOWN", amount_inr
                 continue
 

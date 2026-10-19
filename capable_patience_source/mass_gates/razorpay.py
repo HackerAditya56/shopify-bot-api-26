@@ -98,7 +98,9 @@ def _get_executor():
 def _sanitize_telegram(text):
     if not isinstance(text, str):
         return str(text)
-    return text.replace('<', '').replace('>', '')
+    # strip HTML + collapse Razorpay's unfilled printf placeholders ("%s" / "%d")
+    import re as _re
+    return _re.sub(r"%[sd]", "Card", text.replace("<", "").replace(">", ""))
 
 
 # ==================== PG_ROUTER RESPONSE DETECTION ====================
