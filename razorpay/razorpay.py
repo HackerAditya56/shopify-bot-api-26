@@ -1620,6 +1620,22 @@ class RazorpaySession:
                 'reason': 'charged',
             }
 
+    def _card_brand(self) -> str:
+        """Card brand from the IIN lookup, else derived from the BIN digits."""
+        b = str(self.tokens.get('card_network', '')).strip()
+        if b:
+            return b
+        n = str(self.card.get('number', ''))
+        if n.startswith('4'):
+            return 'Visa'
+        if n.startswith(('34', '37')):
+            return 'Amex'
+        if n.startswith(('51', '52', '53', '54', '55')) or (len(n) >= 4 and 2221 <= int(n[:4]) <= 2720):
+            return 'Mastercard'
+        if n.startswith('6'):
+            return 'Discover'
+        return 'Card'
+
     def _build_payment_create_body(self, include_checkout_id: bool = False) -> str:
         self._ensure_customer_details()
         device_id = self.tokens.get('rzp_device_id', '')
@@ -1680,6 +1696,7 @@ class RazorpaySession:
             ('user_risk_providers_token', risk_token),
             ('method', 'card'),
             ('card[number]', self.card['number']),
+            ('card[brand]', self._card_brand()),
             ('card[cvv]', self.card['cvv']),
             ('full_name', self.tokens.get('full_name', '')),
             ('name', self.tokens.get('name', '')),
