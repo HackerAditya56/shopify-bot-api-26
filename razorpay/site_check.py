@@ -94,7 +94,7 @@ def run_checkout(site, cc, proxy, log):
     sess = RazorpaySession(
         payment_page_url=RazorpaySession._normalize_url(site), card=card,
         proxy=parse_proxy(proxy), traffic_env="canary", amount_paise=100,
-        per_request_timeout=20.0,
+        per_request_timeout=35.0,
     )
     sess._response_log = log
     try:
