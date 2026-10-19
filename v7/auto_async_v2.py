@@ -1052,11 +1052,15 @@ async def _post_persisted_retry(client, url, gql_payload, headers):
         op_name = m.group(1)
     doc = _GQL_DOCS.get(op_name.lower(), "") if op_name else ""
 
+    def _is_challenge(body):
+        b = (body or "").lstrip().lower()
+        return b.startswith("<!doctype html") or b.startswith("<html")
+
     last_status, last_body = 0, ""
     for attempt in range(3):
         resp = await client.post(url, data=gql_payload, headers=headers)
         last_status, last_body = resp.status_code, resp.text
-        if last_status in (429, 403) or last_status >= 500:
+        if last_status in (429, 403) or last_status >= 500 or _is_challenge(last_body):
             await asyncio.sleep(random.uniform(0.8, 1.4) * (attempt + 1))
             continue
         return last_status, last_body

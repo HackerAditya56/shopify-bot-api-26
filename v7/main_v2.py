@@ -116,6 +116,7 @@ _REAL_RESULTS = (
     "INVALID_PURCHASE_TYPE", "TEST_MODE_LIVE_CARD", "DECISION_RULE_BLOCK",
     "AMOUNT_TOO_SMALL", "TRANSACTION_NOT_ALLOWED", "RESTRICTED_CARD",
     "DO_NOT_HONOR", "GENERIC_DECLINE", "PROCESSING_ERROR", "PICK_UP_CARD",
+    "ORDER CANNOT BE PLACED DUE TO SUSPECTED FRAUD", "SUSPECTED FRAUD",
 )
 
 
@@ -145,7 +146,8 @@ def _is_site_err(text: str) -> bool:
     return any(k in m for k in (
         "no available products", "catalog blocked", "no valid products",
         "not shopify", "second address line", "shop configuration",
-        "404", "401", "subtotal", "minimum", "order subtotal"))
+        "404", "401", "subtotal", "minimum", "order subtotal",
+        "out of stock", "not published", "may not be purchased"))
 
 
 def _next_proxy(preferred: str, exclude: set) -> str:
