@@ -1324,7 +1324,8 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
                                      currency: str, country: str, signed_handles,
                                      is_digital: bool = False, tax_amount: str = None,
                                      total_any: bool = False,
-                                     payment_flexibility_terms_id: str = "") -> tuple:
+                                     payment_flexibility_terms_id: str = "",
+                                     card_bin: str = "") -> tuple:
     handle_lines        = [json.dumps({"signedHandle": h}) for h in (signed_handles or [])]
     signed_handles_json = "[" + ",".join(handle_lines) + "]"
     page_id             = generate_page_id()
@@ -1333,6 +1334,9 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
     if payment_flexibility_terms_id:
         flex_line = (',\n        "paymentFlexibilityTermsId": "'
                      + payment_flexibility_terms_id + '"')
+    bin_line = ""
+    if card_bin:
+        bin_line = (',\n        "creditCardBin": "' + card_bin + '"')
 
     if is_digital or total_any:
         total_amount_block = '"totalAmount": {"any": true}'
@@ -1480,7 +1484,7 @@ async def send_submit_for_completion(client: AsyncTLSClient, shop_url: str,
             "zoneCode": "{addr.zone_code}",
             "phone": "{addr.phone}"
           }}
-        }}{flex_line}
+        }}{bin_line}{flex_line}
       }},
       "buyerIdentity": {{
         "customer": {{"presentmentCurrency": "USD", "countryCode": "US"}},
@@ -1852,7 +1856,8 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                     current_total, pci_session_id, attempt_token, currency, country,
                     signed_handles, is_digital=is_digital, tax_amount=current_tax,
                     total_any=cover_any,
-                    payment_flexibility_terms_id=flex_terms_id)
+                    payment_flexibility_terms_id=flex_terms_id,
+                    card_bin=card_number[:8])
 
                 if "TAX_NEW_TAX_MUST_BE_ACCEPTED" in submit_body:
                     new_tax   = extract_tax_from_rejected(submit_body)
