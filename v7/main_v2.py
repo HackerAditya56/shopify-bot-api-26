@@ -467,15 +467,16 @@ async def route_sh(
     cc:    Optional[str] = Query(None),
     proxy: Optional[str] = Query(None),
     key:   Optional[str] = Query(None),
+    site:  Optional[str] = Query(None),
 ):
-    # `site` is intentionally NOT accepted: the API always draws from its own
-    # site pool (site.txt), so a caller-supplied site is dropped.
+    # Caller-supplied `site` (query or body) wins; otherwise draw from site.txt.
     if request.method == "POST":
         try:
             body  = await request.json()
             key   = body.get("key", key)
             cc    = body.get("cc", cc)
             proxy = body.get("proxy", proxy)
+            site  = body.get("site", site)
         except Exception:
             pass
 
@@ -499,7 +500,8 @@ async def route_sh(
             "site":     "",
         }, status_code=400)
 
-    site = _pick_site()
+    if not site:
+        site = _pick_site()
     if not site:
         return JSONResponse({
             "Gateway":  "Shopify Payments",
