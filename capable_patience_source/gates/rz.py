@@ -423,7 +423,9 @@ async def process_rz_check(message, proc_msg, user, user_id, formatted_cc, cc, p
             if cur_site:
                 rz_rotation.record_site_result(cur_site, _resp_low)
             if "403" in _resp_low or "forbidden" in _resp_low or "waf" in _resp_low:
+                # rotating proxy -> fresh IP on the next request, so just retry
                 rz_rotation.pause_proxy_403(_proxy)
+                continue
             if any(k in _resp_low for k in _site_error_kw):
                 cur_site = rz_rotation.next_site()
                 if not cur_site:
