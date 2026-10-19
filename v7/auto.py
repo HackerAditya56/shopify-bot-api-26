@@ -1483,8 +1483,9 @@ CARD_RESULT_MAP = {
     "LOST_CARD":          "LOST_CARD",
     "EXPIRE_CARD":        "EXPIRE_CARD",
     "EXPIRED_CARD":       "EXPIRE_CARD",
+    "BASE CREDIT CARD IS EXPIRED": "EXPIRE_CARD",
     "INCORRECT_CVC":      "INCORRECT_CVC",
-    "INCORRECT_ZIP":      "INCORRECT_CVC",
+    "INCORRECT_ZIP":      "INCORRECT_ZIP",
     "DO_NOT_HONOR":       "DO_NOT_HONOR",
 
     # ── order not processed ──
