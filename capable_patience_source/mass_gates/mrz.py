@@ -253,10 +253,15 @@ def _acquire_free_proxy():
         candidate = _proxies[next(_proxy_ctr) % n]
         if not _proxy_usable(candidate):
             continue
+        if _is_rotating(candidate):
+            # rotating proxy -> fresh IP per request, so allow concurrent (no lock)
+            return candidate, None
         lock = _proxy_lock(candidate)
         if lock.acquire(blocking=False):
             return candidate, lock
     candidate = _proxies[next(_proxy_ctr) % n]
+    if _is_rotating(candidate):
+        return candidate, None
     lock = _proxy_lock(candidate)
     lock.acquire()
     return candidate, lock
@@ -403,7 +408,8 @@ def check_fn(card):
         finally:
             _record_site_use(site)
             _record_proxy_use(proxy)
-            lock.release()
+            if lock:
+                lock.release()
     return "ERROR", "All sites unavailable (amount/blocked) — try later", "UNKNOWN", 0
 
 
@@ -512,7 +518,7 @@ async def mrz_command(message: types.Message):
 
     plan_name = "OWNER" if is_owner_user(user_id) else ("PREMIUM" if is_premium else "FREE")
 
-    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines, max_workers=5)
+    await show_selection(message, valid, check_fn, f"𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹{_amount_override // 100})" if _amount_override else "𝐑𝐚𝐳𝐨𝐫𝐩𝐚𝐲 𝐌𝐚𝐬𝐬 (₹23-100)", user_id, user, "mrz", plan_name, extra_stats_fn=_rz_extra_lines, max_workers=20)
 
 
 @router.callback_query(F.data.startswith("mrz_res_"))

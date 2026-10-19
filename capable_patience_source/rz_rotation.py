@@ -222,12 +222,17 @@ def acquire_proxy():
         cand = _proxies[next(_proxy_ctr) % n]
         if not _proxy_usable(cand):
             continue
+        if _is_rotating(cand):
+            # rotating proxy -> fresh IP per request, allow concurrent (no lock)
+            return cand, None
         lock = _proxy_lock(cand)
         if lock.acquire(blocking=False):
             return cand, lock
     for _ in range(n):
         cand = _proxies[next(_proxy_ctr) % n]
         if _proxy_usable(cand):
+            if _is_rotating(cand):
+                return cand, None
             lock = _proxy_lock(cand)
             lock.acquire()
             return cand, lock
