@@ -1860,6 +1860,20 @@ def _extract_session_token_v2(html_text: str) -> str:
     return html.unescape(m.group(1)).strip('"') if m else ""
 
 
+async def _refresh_session_token(client, checkout_url: str) -> str:
+    """Re-fetch the checkout page for a fresh serialized session token.
+
+    The session token can rotate/expire while persisted-query discovery is
+    running, so the first proposal returns INVALID_SESSION_TOKEN. A fresh GET
+    of the checkout URL yields the current token.
+    """
+    try:
+        r = await client.get(checkout_url, allow_redirects=True)
+        return _extract_session_token_v2(r.text)
+    except Exception:
+        return ""
+
+
 async def human_warmup_async(client, shop_url: str, variant_id: str,
                              product_id: str, product_handle: str, tracker):
     """Landing -> browse -> POST /cart/add.js -> POST /cart -> checkout,
@@ -2018,6 +2032,19 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 client, shop_url, checkout_url, checkout_token, session_token,
                 stable_id, variant_id, price, proposal_id, build_id, source_token,
                 currency, country)
+            queue_token = extract_queue_token(proposal_body)
+            if not queue_token:
+                # session token rotated/expired during id discovery -> refresh + retry
+                fresh_st = await _refresh_session_token(client, checkout_url)
+                if fresh_st and fresh_st != session_token:
+                    session_token = fresh_st
+                    _, proposal_body = await send_proposal(
+                        client, shop_url, checkout_url, checkout_token, session_token,
+                        stable_id, variant_id, price, proposal_id, build_id, source_token,
+                        currency, country)
+                    queue_token = extract_queue_token(proposal_body)
+                if not queue_token:
+                    raise Exception(f"could not extract queueToken: {proposal_body[:120]}")
             cur = extract_seller_currency(proposal_body)
             if cur and cur != currency:
                 currency = cur
@@ -2031,9 +2058,6 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                 sp = extract_seller_merchandise_price(proposal_body)
                 if sp and sp != price:
                     price = sp
-            queue_token = extract_queue_token(proposal_body)
-            if not queue_token:
-                raise Exception("could not extract queueToken")
         except Exception as e:
             result.status = CheckStatus.ERROR
             result.error = Exception(f"Step 4 failed: {e}")

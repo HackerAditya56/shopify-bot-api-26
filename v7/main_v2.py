@@ -268,6 +268,12 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
                 last_res = res
                 continue
 
+        # session token invalid/expired (proposal failed with INVALID_SESSION_TOKEN)
+        # -> retry the SAME site with a fresh checkout before falling back
+        if "could not extract queueToken" in err_text or "INVALID_SESSION_TOKEN" in (status_code + " " + err_text).upper():
+            last_res = res
+            continue
+
         # any other step failure -> legacy REST fallback, then direct, then fresh site
         # (1) legacy_checkout (captcha-free REST path)
         try:
