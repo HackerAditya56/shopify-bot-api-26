@@ -999,11 +999,25 @@ PCI_ENDPOINTS = [
 
 
 def extract_payment_method_id(body: str) -> str:
-    """Shopify Payments method identifier from a proposal body — sent in submit."""
+    """Shopify Payments method identifier from a proposal body — sent in submit.
+
+    Resolves the exact shopify_payments token. The naive 32-hex fallback can
+    grab a *different* instrument (shop_pay wallet, saved card, gift card), which
+    would charge the wrong method — so parse the seller proposal first (mirrors
+    main(6).py).
+    """
     m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([^"]+)"\s*,\s*"name"\s*:\s*"shopify_payments"',
                   body or "")
     if m:
         return m.group(1)
+    try:
+        seller = _seller_proposal(body)
+        for line in seller.get("payment", {}).get("availablePaymentLines", []) or []:
+            pm = line.get("paymentMethod", {}) if isinstance(line, dict) else {}
+            if pm.get("name") == "shopify_payments" and pm.get("paymentMethodIdentifier"):
+                return pm.get("paymentMethodIdentifier")
+    except Exception:
+        pass
     m = re.search(r'"paymentMethodIdentifier"\s*:\s*"([a-f0-9]{32})"', body or "")
     return m.group(1) if m else ""
 
