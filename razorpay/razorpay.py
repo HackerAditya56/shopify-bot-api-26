@@ -1640,8 +1640,9 @@ class RazorpaySession:
             risk_providers.append({'name': 'stripe_radar', 'metadata': {'session_id': stripe_session}})
         risk_token = base64.b64encode(json.dumps(risk_providers).encode()).decode()
 
-        customer_name = self.card['name'] if self.card.get('name') and self.card['name'] != 'Card Holder' \
-                        else f"{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}"
+        # cardholder name == customer name (same string everywhere)
+        customer_name = (self.tokens.get('full_name') or '').strip() or \
+                        f"{random.choice(FIRST_NAMES).title()} {random.choice(FIRST_NAMES).title()}"
 
         fields = [
             # Customer notes (live HAR: email, phone, phone_imei_no, description)
