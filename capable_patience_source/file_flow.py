@@ -31,6 +31,14 @@ ID_LOCK = "5258419835922030550"
 ID_TOP = "5463071033256848094"
 ID_STOP = "5247149163132493357"
 ID_WALLET = "5424976816530014958"
+# MinecraftEnchanted custom emoji IDs (unique per mass gate)
+EMOJI_MC_DIAMOND  = "5323344825016166715"   # 💎
+EMOJI_MC_HAMMER   = "5323558611308295365"   # 🔨
+EMOJI_MC_LOG      = "5323406835753984609"   # 🪵
+EMOJI_MC_COMPASS  = "5323308163175327669"   # 🧭
+EMOJI_MC_HELMET   = "5323508935716549367"   # 🪖
+EMOJI_MC_TARGET   = "5323410860138343577"   # 🎯
+EMOJI_MC_PICKAXE  = "5323815076690440002"   # ⛏️
 
 def _tg(eid, fb):
     return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
@@ -44,12 +52,13 @@ def _btn(text, data, style="primary", emoji=None):
 _STATE = {}  # user_id -> dict
 
 GATES = {
-    "msh": ("𝗦𝗵𝗼𝗽𝗶𝗳𝘆 𝗠𝗮𝘀𝘀", "/msh"),
-    "mrz": ("𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗠𝗮𝘀𝘀", "/mrz"),
-    "mst": ("𝗦𝘁𝗿𝗶𝗽𝗲 𝗠𝗮𝘀𝘀", "/mst"),
-    "mauth": ("𝗔𝘂𝘁𝗵 𝗠𝗮𝘀𝘀", "/mauth"),
-    "mchk": ("𝗖𝗵𝗸 𝗠𝗮𝘀𝘀", "/mchk"),
-    "mstripe": ("𝗦𝘁𝗿𝗶𝗽𝗲 𝟮 𝗠𝗮𝘀𝘀", "/mstripe"),
+    "msh": ("𝗦𝗵𝗼𝗽𝗶𝗳𝘆 𝗠𝗮𝘀𝘀", "/msh", EMOJI_MC_DIAMOND),
+    "mrz": ("𝗥𝗮𝘇𝗼𝗿𝗽𝗮𝘆 𝗠𝗮𝘀𝘀", "/mrz", EMOJI_MC_HAMMER),
+    "mst": ("𝗦𝘁𝗿𝗶𝗽𝗲 𝗠𝗮𝘀𝘀", "/mst", EMOJI_MC_LOG),
+    "mauth": ("𝗔𝘂𝘁𝗵 𝗠𝗮𝘀𝘀", "/mauth", EMOJI_MC_COMPASS),
+    "mchk": ("𝗖𝗵𝗸 𝗠𝗮𝘀𝘀", "/mchk", EMOJI_MC_HELMET),
+    "mstripe": ("𝗦𝘁𝗿𝗶𝗽𝗲 𝟮 𝗠𝗮𝘀𝘀", "/mstripe", EMOJI_MC_TARGET),
+    "mpu": ("𝗣𝗮𝘆𝗨 𝗠𝗮𝘀𝘀", "/mpu", EMOJI_MC_PICKAXE),
 }
 
 
@@ -301,8 +310,8 @@ async def _show_gates(msg, st, edit=False):
     cards = st.get("cards", [])
     cook = st.get("cook", "yy")
     rows = []
-    for key, (label, cmd) in GATES.items():
-        rows.append([_btn(label, f"ff_gate_{key}", "primary", ID_GATEWAY)])
+    for key, (label, cmd, emoji) in GATES.items():
+        rows.append([_btn(label, f"ff_gate_{key}", "primary", emoji)])
     rows.append([_btn("𝗖𝗮𝗻𝗰𝗲𝗹", "ff_cancel", "danger", ID_STOP)])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     text = (
@@ -331,6 +340,7 @@ async def _run_gate(callback, st, gate):
     from mass_gates.mauth import mauth_command
     from mass_gates.mchk import mchk_command
     from mass_gates.mstripe import mstripe_command
+    from mass_gates.mpu import mpu_command
     handlers = {
         "msh": msh_command,
         "mrz": mrz_command,
@@ -338,6 +348,7 @@ async def _run_gate(callback, st, gate):
         "mauth": mauth_command,
         "mchk": mchk_command,
         "mstripe": mstripe_command,
+        "mpu": mpu_command,
     }
     h = handlers.get(gate)
     if not h:
