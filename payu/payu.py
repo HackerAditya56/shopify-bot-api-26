@@ -281,8 +281,12 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
         }
         r = await s.post(f"{PAYU_BASE}/api/front/orders/{order_id}/payments", json=pay_payload, headers=api_headers)
         if r.status_code != 200:
-            raise Exception(f"payment submit failed: HTTP {r.status_code}")
-        pay_resp = r.json()
+            body = ""
+            try:
+                body = r.text[:500]
+            except Exception:
+                pass
+            raise Exception(f"payment submit failed: HTTP {r.status_code} {body}")
 
         # immediate decline?
         err_code = pay_resp.get("errorCode")
