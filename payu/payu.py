@@ -343,6 +343,19 @@ async def _throttle():
         _last_checkout_ts = time.time()
 
 
+# ── site cooldown (a site that 400s is parked, then returns to the pool) ──
+SITE_COOLDOWN_SECONDS = int(os.environ.get("PAYU_SITE_COOLDOWN", "3600"))
+_site_cooldown = {}
+
+
+def site_on_cooldown(site):
+    return time.time() < _site_cooldown.get(site, 0)
+
+
+def site_cooldown(site, seconds=SITE_COOLDOWN_SECONDS):
+    _site_cooldown[site] = time.time() + seconds
+
+
 def parse_card(cc: str) -> Tuple[str, str, str, str]:
     """cc format: number|MM|YYYY|cvv  (same as Shopify)."""
     parts = str(cc).strip().split("|")
@@ -729,6 +742,13 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
         return _finalize(card_entry, value or "IN_PROGRESS", amount, currency)
 
+    except Exception as e:
+        # a gateway/merchant failure (400, create order, payment submit, tokenize)
+        # parks this site for the cooldown window
+        low = str(e).lower()
+        if any(k in low for k in ("400", "create order", "payment submit", "tokenize", "order fetch")):
+            site_cooldown(site)
+        raise
     finally:
         try:
             await s.close()

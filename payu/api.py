@@ -23,7 +23,7 @@ import os
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from payu import run_payu_check, PayuResult, PAYU_SITES
+from payu import run_payu_check, PayuResult, PAYU_SITES, site_on_cooldown
 import itertools
 
 _site_cycle = itertools.cycle(list(PAYU_SITES.keys()))
@@ -72,7 +72,16 @@ async def payu(
 
     try:
         if site == "auto":
-            site = next(_site_cycle)
+            sites = list(PAYU_SITES.keys())
+            site = None
+            for _ in range(len(sites)):
+                cand = next(_site_cycle)
+                if not site_on_cooldown(cand):
+                    site = cand
+                    break
+            if site is None:
+                # all sites in cooldown -> fall back to the next in the cycle
+                site = next(_site_cycle)
         elif site not in PAYU_SITES:
             return JSONResponse({"error": f"unknown site: {site}"}, status_code=400)
         res = await run_payu_check(amount, cc, proxy_url, site=site)
