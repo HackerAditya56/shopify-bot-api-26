@@ -1962,6 +1962,12 @@ async def run_checkout_for_card_async(shop_url: str, card_entry: str,
                     result.receipt_url = checkout_url + "/thank_you"
                     return result
 
+                if outcome == "submitted":
+                    result.status      = CheckStatus.APPROVED
+                    result.status_code = "ORDER_SUBMITTED"
+                    result.error       = Exception("ORDER_SUBMITTED (payment pending, not captured)")
+                    return result
+
                 if outcome == "action":
                     result.status      = CheckStatus.APPROVED
                     result.status_code = "3DS_REQUIRED"

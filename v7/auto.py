@@ -1682,6 +1682,20 @@ RECEIPT_SUCCESS_STATUSES  = frozenset({"processed", "completed", "success", "pai
 RECEIPT_PENDING_STATUSES  = frozenset({"processing", "polling_for_order"})
 
 
+_RECEIPT_PENDING_PAYMENT_RE = re.compile(r'"financialPendingReason"\s*:\s*"(?!null)[^"]+"')
+
+
+def _receipt_payment_pending(body: str) -> bool:
+    """A 'processed' receipt whose payment is NOT actually captured (e.g.
+    authorize.net MERCHANT_ACTION_REQUIRED) or whose order is still
+    OrderCreationPending is NOT a real charge."""
+    if _RECEIPT_PENDING_PAYMENT_RE.search(body or ""):
+        return True
+    if '"OrderCreationPending"' in (body or ""):
+        return True
+    return False
+
+
 def classify_receipt(poll_body: str, receipt_type: str = "") -> str:
     """Reduce a poll response to one of: success, failure, action, pending,
     retryable, unknown. Never returns "failure" for an unrecognised shape."""
@@ -1693,6 +1707,8 @@ def classify_receipt(poll_body: str, receipt_type: str = "") -> str:
             receipt_type = found.group(1)
 
     if receipt_type in RECEIPT_SUCCESS_TYPES:
+        if _receipt_payment_pending(poll_body):
+            return "submitted"
         return "success"
     if receipt_type in RECEIPT_FAILURE_TYPES:
         return "failure"
@@ -2941,6 +2957,12 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
                 if outcome == "action":
                     result.status = CheckStatus.APPROVED
                     result.status_code = "3DS_REQUIRED"
+                    return result
+
+                if outcome == "submitted":
+                    result.status = CheckStatus.APPROVED
+                    result.status_code = "ORDER_SUBMITTED"
+                    result.error = Exception("ORDER_SUBMITTED (payment pending, not captured)")
                     return result
 
                 if outcome == "failure":

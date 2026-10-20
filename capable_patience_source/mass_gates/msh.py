@@ -1208,7 +1208,8 @@ async def process_single_card(session_id, cc_formatted, cc_num, user_id, bot, us
         'FRAUD_SUSPECTED', '3DS_REQUIRED',
         'INVALID_PURCHASE_TYPE', 'INVALID_PAYMENT_METHOD',
         'TEST_MODE_LIVE_CARD', 'AMOUNT_TOO_SMALL',
-        'INCORRECT_NUMBER', 'EXPIRED_CARD', 'DS_REQUIRED'
+        'INCORRECT_NUMBER', 'EXPIRED_CARD', 'DS_REQUIRED',
+        'ORDER_SUBMITTED'
     ]
 
     result_status = "ERROR"
