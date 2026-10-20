@@ -471,6 +471,7 @@ def get_fallback_addresses(exclude_country: str = "US") -> List[Address]:
 class TLSClient:
     def __init__(self, timeout=12, proxy_url=None, impersonate=None, user_agent=None):
         self.timeout = timeout
+        self.proxy_url = proxy_url
         if impersonate is None:
             impersonate = random.choice(BROWSER_PROFILES)
         if user_agent is None:
@@ -955,6 +956,90 @@ def merge_persisted_ids(into: Dict[str, str], found: Dict[str, str]) -> Dict[str
         if v:
             into.setdefault(k, v)
     return into
+
+# ── Persisted-query id discovery (sync, content-based sweep + buildId cache) ──
+_OP_CACHE_TTL = 3600       # 1h; ids only change when the checkout build changes
+_OP_SWEEP_CONCURRENCY = 12
+_op_id_cache: Dict[str, tuple] = {}
+_op_id_lock = threading.Lock()
+
+
+def _fetch_bundle_ids(client: TLSClient, url: str, referer: str = "") -> dict:
+    try:
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "sec-fetch-dest": "script",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+        }
+        if referer:
+            headers["referer"] = referer
+        resp = client.get(url, timeout=30, headers=headers)
+        if resp.status_code != 200:
+            return {}
+        return extract_persisted_ids(resp.text or "")
+    except Exception:
+        return {}
+
+
+def _fetch_bundle_cloned(args):
+    proxy_url, impersonate, user_agent, url, referer = args
+    c = TLSClient(timeout=30, proxy_url=proxy_url, impersonate=impersonate, user_agent=user_agent)
+    try:
+        return _fetch_bundle_ids(c, url, referer)
+    finally:
+        c.close()
+
+
+def discover_persisted_ids(client: TLSClient, checkout_html: str, shop_url: str,
+                           build_id: str = "", referer: str = "",
+                           required=None) -> Dict[str, str]:
+    """Resolve operation name -> persisted-query id by scanning checkout bundles.
+
+    Content-based and filename-independent, so it survives Shopify's chunk-name
+    rotation. Hint chunks (importmap/modulepreload) are tried first, then every
+    remaining checkout-web bundle, fetched in parallel and short-circuiting when
+    all requested ids are found. Cache is keyed on the checkout build id."""
+    required = tuple(required or _OPERATION_NAMES)
+    key = f"build:{build_id}" if build_id else f"shop:{shop_url}"
+
+    with _op_id_lock:
+        hit = _op_id_cache.get(key)
+        if hit and (time.time() - hit[1]) < _OP_CACHE_TTL:
+            cached = hit[0]
+            if all(cached.get(n) for n in required):
+                return {n: cached[n] for n in required}
+
+    found: Dict[str, str] = {}
+    hint_urls = [x for x in (extract_actions_js_url(checkout_html, shop_url) or "").split("\n") if x.strip()]
+    refs = [u for u in extract_js_refs(checkout_html, shop_url) if u not in hint_urls]
+    urls = hint_urls + refs
+    if not urls:
+        return {n: "" for n in required}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    WAVE = _OP_SWEEP_CONCURRENCY * 4
+    with ThreadPoolExecutor(max_workers=_OP_SWEEP_CONCURRENCY) as ex:
+        for start in range(0, len(urls), WAVE):
+            chunk = urls[start:start + WAVE]
+            futs = [ex.submit(_fetch_bundle_cloned, (client.proxy_url, client.impersonate,
+                                                     client.user_agent, u, referer)) for u in chunk]
+            for f in as_completed(futs):
+                try:
+                    ids = f.result()
+                except Exception:
+                    ids = {}
+                if ids:
+                    merge_persisted_ids(found, ids)
+            if all(found.get(n) for n in required):
+                break
+
+    if all(found.get(n) for n in required):
+        with _op_id_lock:
+            _op_id_cache[key] = (dict(found), time.time())
+    return {n: found.get(n, "") for n in required}
+
 def extract_queue_token(proposal_json: str) -> str:
     match = re.search(r'"queueToken"\s*:\s*"([^"]+)"', proposal_json)
     return match.group(1) if match else ""
@@ -2650,17 +2735,14 @@ def run_checkout_for_card(shop_url: str, card_entry: str, proxy_url: str = "") -
             result.error = Exception(f"Step 2 failed: {e}")
             return result
         
-        # Step 3 - Get actions JS and extract IDs
+        # Step 3 - Discover persisted-query IDs (content-based sweep)
         try:
-            actions_url = extract_actions_js_url(checkout_html, shop_url)
-            if not actions_url:
-                raise Exception("could not find actions JS URL")
-            js_body = fetch_actions_js(client, actions_url, shop_url)
-            proposal_id = extract_proposal_id(js_body)
-            submit_id = extract_submit_for_completion_id(js_body)
+            ids = discover_persisted_ids(client, checkout_html, shop_url, build_id, referer=checkout_url)
+            proposal_id = ids.get("Proposal", "")
+            submit_id = ids.get("SubmitForCompletion", "")
+            poll_for_receipt_id = ids.get("PollForReceipt", "")
             if not proposal_id or not submit_id:
                 raise Exception("missing Proposal or Submit ID")
-            poll_for_receipt_id = extract_poll_for_receipt_id(js_body)
             if not poll_for_receipt_id:
                 poll_for_receipt_id = "978b340f3027dc55313349c4089004147b6b0dccee75e42ed97685ef1feae418"
         except Exception as e:
