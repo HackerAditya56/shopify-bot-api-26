@@ -23,7 +23,10 @@ import os
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from payu import run_payu_check, PayuResult
+from payu import run_payu_check, PayuResult, PAYU_SITES
+import itertools
+
+_site_cycle = itertools.cycle(list(PAYU_SITES.keys()))
 
 app = FastAPI(title="PayU Checker API")
 
@@ -49,6 +52,7 @@ async def payu(
     cc: str = Query(default=""),
     proxy: str = Query(default=""),
     key: str = Query(default=""),
+    site: str = Query(default="auto"),
 ):
     if key != API_KEY:
         return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
@@ -67,7 +71,11 @@ async def payu(
         proxy_url = p
 
     try:
-        res = await run_payu_check(amount, cc, proxy_url)
+        if site == "auto":
+            site = next(_site_cycle)
+        elif site not in PAYU_SITES:
+            return JSONResponse({"error": f"unknown site: {site}"}, status_code=400)
+        res = await run_payu_check(amount, cc, proxy_url, site=site)
         return JSONResponse(_sanitize(res))
     except Exception as e:
         # classify the failure, never leak internals
