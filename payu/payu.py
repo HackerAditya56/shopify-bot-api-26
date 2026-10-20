@@ -288,6 +288,8 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 pass
             raise Exception(f"payment submit failed: HTTP {r.status_code} {body}")
 
+        pay_resp = r.json()
+
         # immediate decline?
         err_code = pay_resp.get("errorCode")
         if err_code:
