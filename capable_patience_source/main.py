@@ -193,6 +193,20 @@ EMOJI_MC_SHIELD   = "5323325115411245266"  # 🛡
 EMOJI_MC_FIRE     = "5323776971740588381"  # 🔥
 EMOJI_MC_PICKAXE  = "5323815076690440002"  # ⛏️
 EMOJI_MC_TROPHY   = "5321299626014323820"  # 🏆
+EMOJI_MC_BRONZE   = "5323735005615136620"  # 🥉
+EMOJI_MC_TRIDENT  = "5323559556201098169"  # 🔱
+EMOJI_MC_BOW      = "5323400479202387128"  # 🏹
+EMOJI_MC_AXE      = "5323436380834016178"  # 🪓
+EMOJI_MC_SWORD    = "5323688349385403680"  # 🗡
+EMOJI_MC_TARGET   = "5323410860138343577"  # 🎯
+EMOJI_MC_HELMET   = "5323508935716549367"  # 🪖
+EMOJI_MC_ROD      = "5323310353608649247"  # 🎣
+EMOJI_MC_ROCK     = "5323279696132088406"  # 🪨
+EMOJI_MC_STAR     = "5321214486877609476"  # ⭐️
+EMOJI_MC_COMPASS  = "5323308163175327669"  # 🧭
+EMOJI_MC_LOG      = "5323406835753984609"  # 🪵
+EMOJI_MC_HOE      = "5323397202142341449"  # 🪏
+EMOJI_MC_HAMMER   = "5323558611308295365"  # 🔨
 EMOJI_STOP = "5247149163132493357"        # ⛔️
 
 # ========== COLORFUL BUTTON HELPER (Bot API 9.4) ==========
@@ -472,26 +486,26 @@ _KB_HITTER = InlineKeyboardMarkup(inline_keyboard=[
 # CHARGE SECTION
 _KB_CHARGE_SECTION = InlineKeyboardMarkup(inline_keyboard=[
     [
-        colored_button(text="Sʜᴏᴘɪꜰʏ", callback_data="info_charge_shopify", style="primary", icon_custom_emoji_id=EMOJI_STAR),
-        colored_button(text="Pᴀʏꜰᴀsᴛ", callback_data="info_charge_payfast", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
+        colored_button(text="Sʜᴏᴘɪꜰʏ", callback_data="info_charge_shopify", style="primary", icon_custom_emoji_id=EMOJI_MC_DIAMOND),
+        colored_button(text="Pᴀʏꜰᴀsᴛ", callback_data="info_charge_payfast", style="primary", icon_custom_emoji_id=EMOJI_MC_TROPHY)
     ],
     [
-        colored_button(text="FᴀᴛᴢᴇʙƦᴀ", callback_data="info_charge_fatzebra", style="primary", icon_custom_emoji_id=EMOJI_TOP),
-        colored_button(text="Nᴍɪ", callback_data="info_charge_nmi", style="primary", icon_custom_emoji_id=EMOJI_BAT)
+        colored_button(text="FᴀᴛᴢᴇʙƦᴀ", callback_data="info_charge_fatzebra", style="primary", icon_custom_emoji_id=EMOJI_MC_BRONZE),
+        colored_button(text="Nᴍɪ", callback_data="info_charge_nmi", style="primary", icon_custom_emoji_id=EMOJI_MC_SHIELD)
     ],
     [
-        colored_button(text="Bʟᴜᴇᴘᴀʏ", callback_data="info_charge_bluepay", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING),
-        colored_button(text="Aᴜᴛʜɴᴇᴛ", callback_data="info_charge_authnet", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
+        colored_button(text="Bʟᴜᴇᴘᴀʏ", callback_data="info_charge_bluepay", style="primary", icon_custom_emoji_id=EMOJI_MC_TRIDENT),
+        colored_button(text="Aᴜᴛʜɴᴇᴛ", callback_data="info_charge_authnet", style="primary", icon_custom_emoji_id=EMOJI_MC_BOW)
     ],
     [
-        colored_button(text="Pᴀʏᴡᴀʏ", callback_data="info_charge_payway", style="primary", icon_custom_emoji_id=EMOJI_TOP),
-        colored_button(text="RᴀᴢᴏƦᴘᴀʏ", callback_data="info_charge_razorpay", style="primary", icon_custom_emoji_id=EMOJI_STAR)
+        colored_button(text="Pᴀʏᴡᴀʏ", callback_data="info_charge_payway", style="primary", icon_custom_emoji_id=EMOJI_MC_AXE),
+        colored_button(text="RᴀᴢᴏƦᴘᴀʏ", callback_data="info_charge_razorpay", style="primary", icon_custom_emoji_id=EMOJI_MC_FIRE)
     ],
     [
-        colored_button(text="PᴀʏU", callback_data="info_charge_payu", style="primary", icon_custom_emoji_id=EMOJI_BAT),
-        colored_button(text="Nᴍɪ𝟮", callback_data="info_charge_nmi2", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)
+        colored_button(text="PᴀʏU", callback_data="info_charge_payu", style="primary", icon_custom_emoji_id=EMOJI_MC_PICKAXE),
+        colored_button(text="Nᴍɪ𝟮", callback_data="info_charge_nmi2", style="primary", icon_custom_emoji_id=EMOJI_MC_SWORD)
     ],
-    [colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_charge_stripe", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)],
+    [colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_charge_stripe", style="primary", icon_custom_emoji_id=EMOJI_MC_TARGET)],
     [colored_button(text="« Bᴀᴄᴋ", callback_data="menu_gates", style="primary", icon_custom_emoji_id=EMOJI_TOP)]
 ])
 
@@ -504,20 +518,20 @@ _KB_3DS_SECTION = InlineKeyboardMarkup(inline_keyboard=[
 # MASS SECTION
 _KB_MASS = InlineKeyboardMarkup(inline_keyboard=[
     [
-        colored_button(text="Sᴛʀɪᴘᴇ Aᴜᴛʜ", callback_data="info_mass_stripe", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING),
-        colored_button(text="Pᴀʏᴘᴀʟ", callback_data="info_mass_paypal", style="primary", icon_custom_emoji_id=EMOJI_BAT)
+        colored_button(text="Sᴛʀɪᴘᴇ Aᴜᴛʜ", callback_data="info_mass_stripe", style="primary", icon_custom_emoji_id=EMOJI_MC_HELMET),
+        colored_button(text="Pᴀʏᴘᴀʟ", callback_data="info_mass_paypal", style="primary", icon_custom_emoji_id=EMOJI_MC_ROD)
     ],
     [
-        colored_button(text="SK ʙᴀsᴇᴅ", callback_data="info_mass_skbased", style="primary", icon_custom_emoji_id=EMOJI_STAR),
-        colored_button(text="Sʜᴏᴘɪꜰʏ", callback_data="info_mass_shopify", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
+        colored_button(text="SK ʙᴀsᴇᴅ", callback_data="info_mass_skbased", style="primary", icon_custom_emoji_id=EMOJI_MC_ROCK),
+        colored_button(text="Sʜᴏᴘɪꜰʏ", callback_data="info_mass_shopify", style="primary", icon_custom_emoji_id=EMOJI_MC_STAR)
     ],
     [
-        colored_button(text="Aᴜᴛʜ", callback_data="info_mass_auth", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
-        colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_mass_stripe2", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)
+        colored_button(text="Aᴜᴛʜ", callback_data="info_mass_auth", style="primary", icon_custom_emoji_id=EMOJI_MC_COMPASS),
+        colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_mass_stripe2", style="primary", icon_custom_emoji_id=EMOJI_MC_LOG)
     ],
     [
-        colored_button(text="PᴀʏU", callback_data="info_mass_payu", style="primary", icon_custom_emoji_id=EMOJI_MC_PICKAXE),
-        colored_button(text="RᴀᴢᴏƦᴘᴀʏ", callback_data="info_mass_razorpay", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
+        colored_button(text="PᴀʏU", callback_data="info_mass_payu", style="primary", icon_custom_emoji_id=EMOJI_MC_HOE),
+        colored_button(text="RᴀᴢᴏƦᴘᴀʏ", callback_data="info_mass_razorpay", style="primary", icon_custom_emoji_id=EMOJI_MC_HAMMER)
     ],
     [colored_button(text="« Bᴀᴄᴋ", callback_data="back_main", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
 ])
