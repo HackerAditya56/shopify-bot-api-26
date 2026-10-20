@@ -59,6 +59,7 @@ GATES = {
     "mchk": ("𝗖𝗵𝗸 𝗠𝗮𝘀𝘀", "/mchk", EMOJI_MC_HELMET),
     "mstripe": ("𝗦𝘁𝗿𝗶𝗽𝗲 𝟮 𝗠𝗮𝘀𝘀", "/mstripe", EMOJI_MC_TARGET),
     "mpu": ("𝗣𝗮𝘆𝗨 𝗠𝗮𝘀𝘀", "/mpu", EMOJI_MC_PICKAXE),
+    "mcf": ("𝗖𝗮𝘀𝗵𝗳𝗿𝗲𝗲 𝗠𝗮𝘀𝘀", "/mcf", EMOJI_MC_AXE),
 }
 
 
@@ -341,6 +342,7 @@ async def _run_gate(callback, st, gate):
     from mass_gates.mchk import mchk_command
     from mass_gates.mstripe import mstripe_command
     from mass_gates.mpu import mpu_command
+    from mass_gates.mcf import mcf_command
     handlers = {
         "msh": msh_command,
         "mrz": mrz_command,
@@ -349,6 +351,7 @@ async def _run_gate(callback, st, gate):
         "mchk": mchk_command,
         "mstripe": mstripe_command,
         "mpu": mpu_command,
+        "mcf": mcf_command,
     }
     h = handlers.get(gate)
     if not h:

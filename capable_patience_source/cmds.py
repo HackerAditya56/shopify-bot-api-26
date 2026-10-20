@@ -39,6 +39,7 @@ PAGES = [
             {"gate": "PayWay 1$",          "cmd": "/pw",   "limit": None,   "premium": False},
             {"gate": "Razorpay 1₹",        "cmd": "/rz",   "limit": None,   "premium": False},
             {"gate": "PayU 1$",            "cmd": "/pu",   "limit": None,   "premium": True},
+            {"gate": "Cashfree ₹230",      "cmd": "/cf",   "limit": None,   "premium": True},
         ],
     },
     {
@@ -50,6 +51,7 @@ PAGES = [
             {"gate": "Stripe Hitter Auto", "cmd": "/stco", "limit": None,   "premium": False},
             {"gate": "Jio Recharge 19₹",    "cmd": "/jio",  "limit": None,   "premium": True},
             {"gate": "PayU Mass 1$",        "cmd": "/mpu",  "limit": "5000", "premium": True},
+            {"gate": "Cashfree Mass ₹230",  "cmd": "/mcf",  "limit": "5000", "premium": True},
             {"gate": "Razorpay Mass 1₹",    "cmd": "/mrz",  "limit": "5000", "premium": True},
         ],
     },
