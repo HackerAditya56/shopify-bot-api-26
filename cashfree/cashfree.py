@@ -303,8 +303,13 @@ async def run_cashfree_check(card_entry: str, proxy_url: str = "") -> CashfreeRe
         elig_data = elig.json()
         bin_resp = elig_data.get("cardBinResponse") or {}
         card_type = (bin_resp.get("type") or "").lower()
-        card_scheme = bin_resp.get("scheme") or "unknown"
+        card_scheme = (bin_resp.get("scheme") or "unknown")
         card_country = (bin_resp.get("countryCode") or "US").upper()
+
+        # card not supported by Cashfree (empty BIN lookup / explicit error)
+        if elig_data.get("errorMessagePresent") or (not card_type and not card_scheme):
+            return CashfreeResult(card_entry, "CARD_NOT_SUPPORTED", "DECLINED",
+                                  elig_data.get("errorMessage") or "CARD_NOT_SUPPORTED", "230.00", "INR")
 
         # debit-only
         if card_type and card_type != "debit":
