@@ -504,8 +504,16 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 "support_words": "",
                 "is_anonymous": False,
             }
-            ah = {"Content-Type": "application/json", "Origin": cfg["origin"], "Referer": cfg["referer"],
-                  "Authorization": f"Token {cfg['auth_token']}"}
+            ah = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "Origin": cfg["origin"],
+                "Referer": cfg["referer"],
+                "Authorization": f"Token {cfg['auth_token']}",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+            }
             r = await s.post(cfg["add_url"], json=add_body, headers=ah)
             if r.status_code not in (200, 201):
                 raise Exception(f"orders/add failed: HTTP {r.status_code} {r.text[:150]}")
@@ -572,7 +580,14 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             # GET the page -> extract the anti-CSRF nonce + session cookie
             page_url = cfg.get("page_url") or cfg["create_url"]
             post_url = cfg.get("post_url") or cfg["create_url"]
-            r = await s.get(page_url, headers={"Referer": cfg["referer"]})
+            r = await s.get(page_url, headers={
+                "Referer": cfg["referer"],
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "same-origin",
+                "Upgrade-Insecure-Requests": "1",
+            })
             m = re.search(cfg["nonce_pattern"], r.text)
             if not m:
                 raise Exception("form_nonce: nonce not found")
@@ -582,7 +597,12 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             r2 = await s.post(
                 post_url, data=form, allow_redirects=False,
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
-                         "Content-Type": "application/x-www-form-urlencoded"})
+                         "Content-Type": "application/x-www-form-urlencoded",
+                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                         "Sec-Fetch-Dest": "document",
+                         "Sec-Fetch-Mode": "navigate",
+                         "Sec-Fetch-Site": "same-origin",
+                         "Sec-Fetch-User": "?1"})
             redirect = r2.headers.get("Location") or ""
         elif cfg["create_type"] == "ajax":
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
