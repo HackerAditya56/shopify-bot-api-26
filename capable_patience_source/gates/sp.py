@@ -316,6 +316,16 @@ async def process_sp_check(
     api_result = {"Response": "UNKNOWN_ERROR"}
     last_site = None
 
+    if not proxies or not sites:
+        try:
+            await proc_msg.edit_text(
+                "❌ <b>No proxies/sites available.</b>\n\n"
+                "Add proxies with <code>/proxy</code> first.",
+                parse_mode="HTML")
+        except Exception:
+            pass
+        return
+
     for _ in range(MAX_SITE_ROTATIONS):
         # Pick a site different from last if possible
         candidates = [s for s in sites if s != last_site] or sites
