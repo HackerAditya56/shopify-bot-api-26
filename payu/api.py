@@ -91,3 +91,14 @@ async def payu(
 @app.get("/")
 async def root():
     return {"ok": True, "api": "payu"}
+
+
+if __name__ == '__main__':
+    import uvicorn
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--port', type=int, default=9200)
+    ap.add_argument('--host', default='0.0.0.0')
+    args = ap.parse_args()
+    print(f"\n  FastAPI server: http://{args.host}:{args.port}\n")
+    uvicorn.run(app, host=args.host, port=args.port, workers=1)
