@@ -16,6 +16,17 @@ from aiogram import types, F, Router
 from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
+from proxy import parse_proxy_input
+
+
+def _norm_proxy(proxy):
+    try:
+        parsed = parse_proxy_input(proxy)
+        if parsed and parsed.get("url_format"):
+            return parsed["url_format"]
+    except Exception:
+        pass
+    return proxy
 from mass_gates._batch_common import show_selection, handle_result_callback, handle_stop_callback, GATE_GROUP_LOG
 
 # silent group log for PayU hits (charged/approved -> this group + pinned)
@@ -118,6 +129,7 @@ def check_fn(card):
     if proxy is None:
         return "ERROR", "No proxies — add via /proxy", "UNKNOWN", 0, ""
     amount = _amount_override or "1"
+    proxy = _norm_proxy(proxy)
     try:
         q = urllib.parse.urlencode({"cc": card, "proxy": proxy, "amount": amount, "key": "ladle"})
         url = f"{PU_API}/payu?{q}"

