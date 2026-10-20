@@ -226,6 +226,32 @@ PAYU_SITES = {
         "fundraising": 557,
         "description": "Pom\u00f3\u017c Stworzy\u0107 Godne Warunki \u2013 Wesprzyj Remont \u0141azienki i Kuchni dla Potrzebuj\u0105cej Rodziny",
     },
+    "zbieramtowszkole": {
+        "create_url": "https://www.zbieramtowszkole.pl/przekaz-darowizne/wplac",
+        "page_url": "https://www.zbieramtowszkole.pl/przekaz-darowizne",
+        "create_type": "form_nonce",
+        "nonce_field": "csrf_hash_name",
+        "nonce_pattern": r'name="csrf_hash_name" value="([^"]+)"',
+        "referer": "https://www.zbieramtowszkole.pl/przekaz-darowizne",
+        "origin": "https://www.zbieramtowszkole.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "price": "5",
+            "name": "{first}",
+            "surname": "{last}",
+            "email": "{email}",
+            "is-institution": "private",
+            "school": "",
+            "class": "",
+            "terms_accept": "on",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -408,7 +434,9 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             redirect = (r2.json().get("data") or "") if r2.headers.get("Content-Type", "").startswith("application/json") else ""
         elif cfg["create_type"] == "form_nonce":
             # GET the page -> extract the anti-CSRF nonce + session cookie
-            r = await s.get(cfg["create_url"], headers={"Referer": cfg["referer"]})
+            page_url = cfg.get("page_url") or cfg["create_url"]
+            post_url = cfg.get("post_url") or cfg["create_url"]
+            r = await s.get(page_url, headers={"Referer": cfg["referer"]})
             m = re.search(cfg["nonce_pattern"], r.text)
             if not m:
                 raise Exception("form_nonce: nonce not found")
@@ -416,7 +444,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["form_fields"].items()}
             form[cfg["nonce_field"]] = nonce_val
             r2 = await s.post(
-                cfg["create_url"], data=form, allow_redirects=False,
+                post_url, data=form, allow_redirects=False,
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                          "Content-Type": "application/x-www-form-urlencoded"})
             redirect = r2.headers.get("Location") or ""
