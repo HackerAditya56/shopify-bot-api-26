@@ -73,8 +73,14 @@ async def payu(
         # classify the failure, never leak internals
         msg = str(e) or ""
         low = msg.lower()
-        if any(k in low for k in ("proxy", "curl", "timed out", "timeout", "connect", "resolve", "tunnel")):
+        import logging
+        logging.getLogger("payu").error("check failed for %s: %s", cc[:6], msg[:200])
+        if any(k in low for k in ("proxy", "curl", "timed out", "timeout", "connect", "resolve", "tunnel", "refused")):
             code = "PROXY_ERROR"
+        elif any(k in low for k in ("create order", "order fetch", "tokenize", "payment submit", "status fetch", "threeds")):
+            code = "GATEWAY_ERROR"
+        elif "invalid card format" in low:
+            code = "INVALID_CARD"
         else:
             code = "ERROR"
         return JSONResponse({

@@ -191,9 +191,9 @@ async def pu_command(message: types.Message):
     plan_name = await get_user_plan_name(user_id)
     escaped_card = escape(formatted_cc)
     proc_msg = await safe_reply(message,
-        f"<blockquote>{EMOJI_PICKAXE} Ꮪꮖꮇꮐꮮꭼ ꏳꮋꭼꮯꮗ <tg-emoji emoji-id=\"{EMOJI_DIAMOND}\">💎</tg-emoji></blockquote>\n"
-        f"{EMOJI_COMPASS} 𝐂𝐚𝐫𝐝 ➠ <code>{escaped_card}</code>\n"
-        f"{EMOJI_DIAMOND} 𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ <b>𝐏𝐚𝐲𝐔</b>",
+        f"<blockquote><tg-emoji emoji-id=\"{EMOJI_PICKAXE}\">⛏️</tg-emoji> Ꮪꮖꮇꮐꮮꭼ ꏳꮋꭼꮯꮗ <tg-emoji emoji-id=\"{EMOJI_DIAMOND}\">💎</tg-emoji></blockquote>\n"
+        f"<tg-emoji emoji-id=\"{EMOJI_COMPASS}\">🧭</tg-emoji> 𝐂𝐚𝐫𝐝 ➠ <code>{escaped_card}</code>\n"
+        f"<tg-emoji emoji-id=\"{EMOJI_DIAMOND}\">💎</tg-emoji> 𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ <b>𝐏𝐚𝐲𝐔</b>",
         parse_mode="HTML")
 
     asyncio.create_task(process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, plan_name, amount))
