@@ -365,7 +365,8 @@ async def run_cashfree_check(card_entry: str, proxy_url: str = "") -> CashfreeRe
         msg = (dc.get("message") or {}).get("message") or ""
         txn_status = (dc.get("message") or {}).get("txnStatus") or ""
         code, label = map_result(txn_status, msg)
-        return CashfreeResult(card_entry, code, label, txn_status or msg, "230.00", "INR")
+        real = f"{txn_status}: {msg}" if msg and txn_status else (txn_status or msg)
+        return CashfreeResult(card_entry, code, label, real, "230.00", "INR")
 
     finally:
         try:
