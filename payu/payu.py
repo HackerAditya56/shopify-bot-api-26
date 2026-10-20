@@ -164,6 +164,30 @@ PAYU_SITES = {
             "gdpr_consent": "on",
         },
     },
+    "odbuduj_sokolowsko": {
+        "create_url": "https://odbuduj.sokolowsko.org/przekaz-darowizne/",
+        "create_type": "form",
+        "referer": "https://odbuduj.sokolowsko.org/przekaz-darowizne/",
+        "origin": "https://odbuduj.sokolowsko.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "amount": "custom",
+            "custom_amount": "5",
+            "first_name": "{first}",
+            "last_name": "{last}",
+            "email": "{email}",
+            "phone": "",
+            "data_processing": "on",
+            "agree_regulations": "on",
+            "payu_send": "",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
