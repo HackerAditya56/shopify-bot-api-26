@@ -49,6 +49,7 @@ async def payu(
     cc: str = Query(default=""),
     proxy: str = Query(default=""),
     key: str = Query(default=""),
+    site: str = Query(default="centaurus"),
 ):
     if key != API_KEY:
         return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
@@ -67,7 +68,7 @@ async def payu(
         proxy_url = p
 
     try:
-        res = await run_payu_check(amount, cc, proxy_url)
+        res = await run_payu_check(amount, cc, proxy_url, site=site)
         return JSONResponse(_sanitize(res))
     except Exception as e:
         # classify the failure, never leak internals
