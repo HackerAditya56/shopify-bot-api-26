@@ -39,6 +39,7 @@ EMOJI_MC_COMPASS  = "5323308163175327669"   # 🧭
 EMOJI_MC_HELMET   = "5323508935716549367"   # 🪖
 EMOJI_MC_TARGET   = "5323410860138343577"   # 🎯
 EMOJI_MC_PICKAXE  = "5323815076690440002"   # ⛏️
+EMOJI_MC_AXE      = "5323436380834016178"   # 🪓
 
 def _tg(eid, fb):
     return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
