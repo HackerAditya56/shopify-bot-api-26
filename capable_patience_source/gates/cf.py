@@ -211,6 +211,23 @@ async def process_cf_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     country_flag = bin_info.get("country_emoji", "")
     bin_country = f"{country_flag} {country_name}" if country_flag else country_name
 
+    # debit + prepaid only — skip credit cards BEFORE hitting the API
+    card_type = str(bin_info.get("type", "N/A")).upper()
+    if card_type == "CREDIT":
+        user_link = build_user_link(user)
+        dev_link = '<a href="https://t.me/Enchanted_linux_0x">Enchanted_linux_0x</a>'
+        user_display = f"{user_link} <b>[{plan_name}]</b>"
+        final_caption = build_hit_card(
+            "DECLINED", formatted_cc, "𝐂𝐚𝐬𝐡𝐟𝐫𝐞𝐞", "230.00", bin_info, "CARD_TYPE_NOT_SUPPORTED",
+            user_display, dev_link, proxy_status=None,
+            extra_lines=[f"{EMOJI_RESPONSE} 𝐑𝐞𝐚𝐥 𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ <b>CREDIT_CARD_SKIPPED (debit + prepaid only)</b>"],
+        )
+        try:
+            await proc_msg.edit_text(final_caption, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            await safe_reply(message, final_caption, parse_mode="HTML", disable_web_page_preview=True)
+        return
+
     # pull the user's OWN proxy pool (global, not rz_pxy.txt)
     user_proxies = await get_user_proxies(user_id)
     api_result = {"status": "error", "response": "ERROR", "real_response": "ERROR", "amount": "0.00"}

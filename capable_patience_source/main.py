@@ -713,11 +713,11 @@ STATIC_MENU_MAP["info_mass_payu"] = (
 )
 STATIC_MENU_MAP["info_charge_cashfree"] = (
     f"{_SEP}\n<b><i>Gate ➠ Cashfree ₹230</i></b>\n<b><i>Command ➠ /cf</i></b>\n"
-    f"<b><i>Gate Health ➠ 100%</i></b>\n{_SEP}",
+    f"<b><i>Only ➠ DEBIT + PREPAID</i></b>\n<b><i>Gate Health ➠ 100%</i></b>\n{_SEP}",
     _back("menu_charge_section")
 )
 STATIC_MENU_MAP["info_mass_cashfree"] = (
-    f"{_SEP}\n◆ 𝐂𝐀𝐒𝐇𝐅𝐑𝐄𝐄 𝐌𝐀𝐒𝐒 𝐂𝐇𝐄𝐂𝐊𝐈𝐍𝐆\n{_SEP}\n[⊀] Command: /mcf cc|mm|yy|cvv\n[⊀] Info: Mass Cashfree debit checking\n[⊀] Status: Online <tg-emoji emoji-id=\"{EMOJI_MC_CARROT}\">🥕</tg-emoji>\n[⊀] Type: Paid <tg-emoji emoji-id=\"{EMOJI_MC_DIAMOND}\">💎</tg-emoji>\n{_SEP}",
+    f"{_SEP}\n◆ 𝐂𝐀𝐒𝐇𝐅𝐑𝐄𝐄 𝐌𝐀𝐒𝐒 𝐂𝐇𝐄𝐂𝐊𝐈𝐍𝐆\n{_SEP}\n[⊀] Command: /mcf cc|mm|yy|cvv\n[⊀] Info: Mass Cashfree debit checking\n[⊀] Only: DEBIT + PREPAID\n[⊀] Status: Online <tg-emoji emoji-id=\"{EMOJI_MC_CARROT}\">🥕</tg-emoji>\n[⊀] Type: Paid <tg-emoji emoji-id=\"{EMOJI_MC_DIAMOND}\">💎</tg-emoji>\n{_SEP}",
     _KB_BACK_MASS_LOCAL
 )
 STATIC_MENU_MAP["info_mass_razorpay"] = (

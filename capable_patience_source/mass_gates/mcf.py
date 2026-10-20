@@ -16,6 +16,7 @@ from aiogram import types, F, Router
 from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
+from bin import get_bin_info
 from proxy import parse_proxy_input
 
 
@@ -217,6 +218,28 @@ async def mcf_command(message: types.Message):
 
     if not valid:
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
+        return
+
+    # debit + prepaid only — remove credit cards BEFORE hitting the API
+    valid_debit = []
+    credit_skipped = 0
+    for c in valid:
+        cc = c.split('|')[0]
+        try:
+            bi = await get_bin_info(cc[:6])
+        except Exception:
+            bi = {}
+        t = str(bi.get("type", "N/A")).upper()
+        if t == "CREDIT":
+            credit_skipped += 1
+            continue
+        valid_debit.append(c)
+    valid = valid_debit
+    if not valid:
+        await safe_reply(message,
+            f"❌ <b>No debit/prepaid cards to check.</b>\n"
+            f"Skipped <b>{credit_skipped}</b> credit card(s).",
+            parse_mode="HTML")
         return
 
     # user's OWN global proxy pool (not rz_pxy.txt)
