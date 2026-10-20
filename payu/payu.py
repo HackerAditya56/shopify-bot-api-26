@@ -209,39 +209,22 @@ PAYU_SITES = {
             "donation_value": "5",
         },
     },
-    "hospicjum_wlodawa": {
-        "create_url": "https://www.hospicjum-wlodawa.pl/odp.php",
-        "orders_url": "https://secure.payu.com/api/v2_1/orders",
-        "create_type": "v2_1",
-        "merchant_pos_id": "3141457",
-        "referer": "https://www.hospicjum-wlodawa.pl/darowizny_new.php",
-        "origin": "https://www.hospicjum-wlodawa.pl",
-        "amount": "5",
+    "efektmotyla": {
+        "create_type": "api_orders",
+        "add_url": "https://api.efektmotyla.ngo/orders/add/",
+        "pay_url": "https://api.efektmotyla.ngo/orders/pay/",
+        "auth_token": "c02093aeca6bf1b582c651507a70577727a0c0d8",
+        "referer": "https://efektmotyla.ngo/",
+        "origin": "https://efektmotyla.ngo",
+        "amount": "10",
         "mcp_fx_table_id": 597551,
         "mcp_fx_rate": 1,
-        "language": "pl",
+        "language": "en",
         "lang_param": "",
         "country": "PL",
         "timezone_offset": -60,
-        "order_fields": {
-            "buyer.firstName": "{first}",
-            "buyer.lastName": "{last}",
-            "buyer.email": "{email}",
-            "buyer.phone": "",
-            "buyer.Delivery.street": "",
-            "buyer.Delivery.postalCode": "",
-            "buyer.Delivery.city": "",
-            "totalAmount": "500",
-            "currencyCode": "PLN",
-            "customerIp": "0.0.0.0",
-            "merchantPosId": "3141457",
-            "description": "Wp\u0142ata na dzia\u0142alno\u015b\u0107 Hospicjum",
-            "continueUrl": "https://hospicjum-wlodawa.pl/artykul-dziekujemy-za-wplate#tresc_art",
-            "products[0].name": "Darowizna",
-            "products[0].unitPrice": "500",
-            "products[0].quantity": "1",
-            "notifyUrl": "https://hospicjum-wlodawa.pl/artykul-dziekujemy-za-wplate#tresc_art",
-        },
+        "fundraising": 557,
+        "description": "Pom\u00f3\u017c Stworzy\u0107 Godne Warunki \u2013 Wesprzyj Remont \u0141azienki i Kuchni dla Potrzebuj\u0105cej Rodziny",
     },
 }
 
@@ -392,27 +375,37 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
     try:
         # 1. create the order on the merchant (json API or html form + redirect)
-        if cfg["create_type"] == "v2_1":
-            # resolve the proxy's external IP (customerIp is part of the signature)
-            client_ip = "0.0.0.0"
-            try:
-                ipr = await s.get("https://api.ipify.org", headers={"Accept": "text/plain"})
-                client_ip = ipr.text.strip()
-            except Exception:
-                pass
-            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["order_fields"].items()}
-            form["customerIp"] = client_ip
-            # step 1: POST the merchant php -> SHA-256 signature
-            r = await s.post(cfg["create_url"], data=form,
-                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
-                                      "Content-Type": "application/x-www-form-urlencoded"})
-            sig = r.text.strip()
-            # step 2: POST api/v2_1/orders with the OpenPayu-Signature header
-            r2 = await s.post(cfg["orders_url"], data=form, allow_redirects=False,
-                              headers={"Referer": cfg["origin"] + "/", "Origin": cfg["origin"],
-                                       "Content-Type": "application/x-www-form-urlencoded",
-                                       "OpenPayu-Signature": f"sender={cfg['merchant_pos_id']};algorithm=SHA-256;signature={sig}"})
-            redirect = r2.headers.get("Location") or ""
+        if cfg["create_type"] == "api_orders":
+            add_body = {
+                "fundraising": cfg["fundraising"],
+                "moneybox": None,
+                "total": int(float(cfg["amount"])),
+                "currency": "PLN",
+                "donator": full_name,
+                "donator_email": email,
+                "support_words": "",
+                "is_anonymous": False,
+            }
+            ah = {"Content-Type": "application/json", "Origin": cfg["origin"], "Referer": cfg["referer"],
+                  "Authorization": f"Token {cfg['auth_token']}"}
+            r = await s.post(cfg["add_url"], json=add_body, headers=ah)
+            if r.status_code not in (200, 201):
+                raise Exception(f"orders/add failed: HTTP {r.status_code} {r.text[:150]}")
+            order_id = r.json().get("id")
+            if not order_id:
+                raise Exception("orders/add: no order id")
+            pay_body = {
+                "order": order_id,
+                "amount_required": f"{cfg['amount']}.00",
+                "description": cfg["description"],
+                "currency": "PLN",
+                "payment_method": "c",
+                "blik_code": "",
+            }
+            r2 = await s.post(cfg["pay_url"], json=pay_body, headers=ah)
+            if r2.status_code != 200:
+                raise Exception(f"orders/pay failed: HTTP {r2.status_code} {r2.text[:150]}")
+            redirect = (r2.json().get("data") or "") if r2.headers.get("Content-Type", "").startswith("application/json") else ""
         elif cfg["create_type"] == "form_nonce":
             # GET the page -> extract the anti-CSRF nonce + session cookie
             r = await s.get(cfg["create_url"], headers={"Referer": cfg["referer"]})
