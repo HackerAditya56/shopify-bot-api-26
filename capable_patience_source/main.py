@@ -45,6 +45,7 @@ from gates.rz import rz_command
 from gates.rzg import router as rzg_router
 from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
+from gates.pu import pu_command, router as pu_router
 from gates.py import py_command
 from gates.nmi import nmi_command
 from gates.nmi2 import nmi2_command
@@ -78,6 +79,7 @@ from mass_gates.mst import (
 from mass_gates.mauth import router as mauth_router, mauth_command
 from mass_gates.mstripe import router as mstripe_router, mstripe_command
 from mass_gates.mrz import router as mrz_router, mrz_command
+from mass_gates.mpu import router as mpu_router, mpu_command
 from mass_gates._batch_common import sel_router
 from mass_gates.stop import router as stop_router
 from proxy import router as proxy_router
@@ -151,6 +153,8 @@ dp.include_router(stripe_router)
 dp.include_router(mauth_router)
 dp.include_router(mstripe_router)
 dp.include_router(mrz_router)
+dp.include_router(mpu_router)
+dp.include_router(pu_router)
 dp.include_router(rzg_router)
 dp.include_router(mpin_router)
 dp.include_router(sel_router)
@@ -184,6 +188,11 @@ EMOJI_WINK = "6136672117455853855"        # 😉
 EMOJI_COOL = "6255570556104477305"        # 😎
 EMOJI_WARNING = "6255910249362885846"     # ⚠️
 EMOJI_WALLET = "5424976816530014958"      # 👛
+EMOJI_MC_DIAMOND  = "5323344825016166715"  # 💎 (MinecraftEnchanted)
+EMOJI_MC_SHIELD   = "5323325115411245266"  # 🛡
+EMOJI_MC_FIRE     = "5323776971740588381"  # 🔥
+EMOJI_MC_PICKAXE  = "5323815076690440002"  # ⛏️
+EMOJI_MC_TROPHY   = "5321299626014323820"  # 🏆
 EMOJI_STOP = "5247149163132493357"        # ⛔️
 
 # ========== COLORFUL BUTTON HELPER (Bot API 9.4) ==========
@@ -506,6 +515,10 @@ _KB_MASS = InlineKeyboardMarkup(inline_keyboard=[
         colored_button(text="Aᴜᴛʜ", callback_data="info_mass_auth", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND),
         colored_button(text="Sᴛʀɪᴘᴇ", callback_data="info_mass_stripe2", style="primary", icon_custom_emoji_id=EMOJI_LIGHTNING)
     ],
+    [
+        colored_button(text="PᴀʏU", callback_data="info_mass_payu", style="primary", icon_custom_emoji_id=EMOJI_MC_PICKAXE),
+        colored_button(text="RᴀᴢᴏƦᴘᴀʏ", callback_data="info_mass_razorpay", style="primary", icon_custom_emoji_id=EMOJI_DIAMOND)
+    ],
     [colored_button(text="« Bᴀᴄᴋ", callback_data="back_main", style="primary", icon_custom_emoji_id=EMOJI_BAT)]
 ])
 
@@ -626,7 +639,7 @@ STATIC_MENU_MAP["info_charge_razorpay"] = (
     _back("menu_charge_section")
 )
 STATIC_MENU_MAP["info_charge_payu"] = (
-    f"{_SEP}\n<b><i>Gate ➠ PayU 1$</i></b>\n<b><i>Command ➠ /pyu</i></b>\n"
+    f"{_SEP}\n<b><i>Gate ➠ PayU 1$</i></b>\n<b><i>Command ➠ /pu</i></b>\n"
     f"<b><i>Gate Health ➠ 100%</i></b>\n{_SEP}",
     _back("menu_charge_section")
 )
@@ -667,6 +680,15 @@ STATIC_MENU_MAP["info_mass_auth"] = (
 )
 STATIC_MENU_MAP["info_mass_stripe2"] = (
     f"{_SEP}\n◆ 𝐒𝐓𝐑𝐈𝐏𝐄 𝐌𝐀𝐒𝐒 𝐂𝐇𝐄𝐂𝐊𝐈𝐍𝐆\n{_SEP}\n[⊀] Command: /mstripe cc|mm|yy|cvv\n[⊀] Info: Mass stripe charge checking\n[⊀] Status: Online <tg-emoji emoji-id=\"6044254523009012231\">✅</tg-emoji>\n[⊀] Type: Paid <tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji>\n{_SEP}",
+    _KB_BACK_MASS_LOCAL
+)
+
+STATIC_MENU_MAP["info_mass_payu"] = (
+    f"{_SEP}\n◆ 𝐏𝐀𝐘𝐔 𝐌𝐀𝐒𝐒 𝐂𝐇𝐄𝐂𝐊𝐈𝐍𝐆\n{_SEP}\n[⊀] Command: /mpu cc|mm|yy|cvv\n[⊀] Info: Mass PayU checking\n[⊀] Status: Online <tg-emoji emoji-id=\"{EMOJI_MC_SHIELD}\">🛡</tg-emoji>\n[⊀] Type: Paid <tg-emoji emoji-id=\"{EMOJI_MC_DIAMOND}\">💎</tg-emoji>\n{_SEP}",
+    _KB_BACK_MASS_LOCAL
+)
+STATIC_MENU_MAP["info_mass_razorpay"] = (
+    f"{_SEP}\n◆ 𝐑𝐀𝐙𝐎𝐑𝐏𝐀𝐘 𝐌𝐀𝐒𝐒 𝐂𝐇𝐄𝐂𝐊𝐈𝐍𝐆\n{_SEP}\n[⊀] Command: /mrz cc|mm|yy|cvv\n[⊀] Info: Mass Razorpay checking\n[⊀] Status: Online <tg-emoji emoji-id=\"6044254523009012231\">✅</tg-emoji>\n[⊀] Type: Paid <tg-emoji emoji-id=\"5359719332542718652\">💎</tg-emoji>\n{_SEP}",
     _KB_BACK_MASS_LOCAL
 )
 
@@ -751,10 +773,10 @@ DOT_COMMAND_MAP = {
     "sp": sp_command, "hc": hc_command, "pf": pf_command,
     "vbv": vbv_command, "ft": ft_command, "bl": bl_command,
     "at": at_command, "pw": pw_command,
-    "rz": rz_command, "mpin": mpin_command, "pyu": pyu_command, "py": py_command,
+    "rz": rz_command, "mpin": mpin_command, "pyu": pyu_command, "py": py_command, "pu": pu_command,
     "nmi": nmi_command, "nmi2": nmi2_command,  # "stco": stco_command,  # hitter OFF
     "mst": mst_command, "msh": msh_command,  # "hit": hit_command, "co": hit_command,  # hitter OFF
-    "auth": auth_command, "stripe": stripe_command, "mauth": mauth_command, "mstripe": mstripe_command, "mrz": mrz_command, "bin": binn_command, "binn": binn_command,
+    "auth": auth_command, "stripe": stripe_command, "mauth": mauth_command, "mstripe": mstripe_command, "mrz": mrz_command, "mpu": mpu_command, "bin": binn_command, "binn": binn_command,
     "sub": sub_command, "rc": rc_command, "suball": suball_command,
     "g_code": g_code_command, "claim": claim_command, "info": info_command,
     "rsub": rsub_command, "plan": plan_command, "adcr": adcr_command,
@@ -775,7 +797,7 @@ async def dot_command_handler(message: types.Message):
 
 
 # ========== CALLBACK HANDLER ==========
-_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_", "mrz_res_", "mrz_stop_", "mpin_")
+_MASS_PREFIXES = ("mshs_", "mshr_", "msts_", "mstr_", "stco_", "fb_", "cmds_", "mchks_", "mchkr_", "mauth_res_", "mauth_stop_", "mstripe_res_", "mstripe_stop_", "mrz_res_", "mrz_stop_", "mpu_res_", "mpu_stop_", "mpin_")
 
 
 @router.callback_query()
@@ -860,11 +882,11 @@ for _cmd, _fn in [
     ("hc", hc_command), ("sp", sp_command),  # ("stco", stco_command),  # hitter OFF
     ("vbv", vbv_command),
     ("ft", ft_command), ("nmi", nmi_command), ("nmi2", nmi2_command), ("bl", bl_command),
-    ("rz", rz_command), ("pyu", pyu_command), ("sub", sub_command), ("rc", rc_command),
+    ("rz", rz_command), ("pyu", pyu_command), ("pu", pu_command), ("sub", sub_command), ("rc", rc_command),
     ("suball", suball_command), ("g_code", g_code_command), ("claim", claim_command),
     ("info", info_command), ("rsub", rsub_command), ("plan", plan_command),
     ("adcr", adcr_command), ("on", on_command), ("off", off_command),
-    ("mrz", mrz_command),
+    ("mrz", mrz_command), ("mpu", mpu_command),
     ("stats", stats_command), ("bin", binn_command), ("binn", binn_command),
     ("qfake", qfake_command), ("fake", fake_command), ("gen", gen_command), ("cl", cl_command), ("gate", gate_command), ("py", py_command),
     ("gmass", gmass_command), ("gatehelp", gatehelp_command), ("fakehelp", fakehelp_command), ("genhelp", genhelp_command),

@@ -336,6 +336,9 @@ def generate_result_file_content(session, result_type):
             lines.append(f"𝐂𝐚𝐫𝐝 ➠ {cc}")
             lines.append(f"𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ {session.get('gateway', '')}")
             lines.append(f"𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ {response}")
+            real_resp = cd.get("real_response", "")
+            if real_resp:
+                lines.append(f"𝐑𝐞𝐚𝐥 𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ {real_resp}")
             lines.append(f"𝐀𝐦𝐨𝐮𝐧𝐭 ➠ ₹{amount}")
             lines.append(f"𝐁𝐫𝐚𝐧𝐝 ➠ {brand}")
             lines.append(f"𝐈𝐬𝐬𝐮𝐞𝐫 ➠ {bank}")
@@ -481,7 +484,10 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
                 res = ("ERROR", str(e)[:80], "UNKNOWN")
             finally:
                 session["active_workers"] = max(0, session.get("active_workers", 0) - 1)
-            if isinstance(res, (tuple, list)) and len(res) >= 4:
+            real_response = None
+            if isinstance(res, (tuple, list)) and len(res) >= 5:
+                status, msg, brand, amount, real_response = res[0], res[1], res[2], res[3], res[4]
+            elif isinstance(res, (tuple, list)) and len(res) >= 4:
                 status, msg, brand, amount = res[0], res[1], res[2], res[3]
             elif isinstance(res, (tuple, list)) and len(res) >= 3:
                 status, msg, brand = res[0], res[1], res[2]
@@ -510,6 +516,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
             "country": (f"{bin_data.get('country', 'N/A')} {bin_data.get('country_emoji', '')}").strip(),
             "status": kind.upper() if kind != "errors" else "ERROR",
             "amount_inr": amount if amount is not None else "N/A",
+            "real_response": real_response,
         }
 
         async with lock:
@@ -646,6 +653,12 @@ async def handle_stop_callback(callback: types.CallbackQuery):
         try:
             import mass_gates.mrz as _mrz
             _mrz.stop_all()
+        except Exception:
+            pass
+    if session.get("prefix") == "mpu":
+        try:
+            import mass_gates.mpu as _mpu
+            _mpu.stop_all()
         except Exception:
             pass
     cancelled = 0
