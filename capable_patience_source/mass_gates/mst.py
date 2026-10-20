@@ -366,6 +366,17 @@ def luhn_check(card_number: str) -> bool:
         total += digit
     return total % 10 == 0
 
+
+def is_expired(mm: str, yy: str) -> bool:
+    try:
+        now = datetime.now()
+        cy = now.year % 100
+        cm = now.month
+        ey, em = int(yy), int(mm)
+        return ey < cy or (ey == cy and em < cm)
+    except (ValueError, TypeError):
+        return True
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # HIT NOTIFICATION FUNCTIONS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -959,7 +970,7 @@ async def mst_command(message: types.Message):
         if len(parts) != 4:
             continue
         cc, mm, yy, cvv = parts
-        if luhn_check(cc):
+        if luhn_check(cc) and not is_expired(mm, yy):
             valid_cards.append((card_string, cc))
 
     total_cards = len(valid_cards)
