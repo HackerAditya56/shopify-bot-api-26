@@ -21,6 +21,8 @@ import re
 import time
 import urllib.parse
 import uuid
+import os
+import subprocess
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -206,6 +208,86 @@ def _browser_data(user_agent: str, timezone_offset: int) -> dict:
     }
 
 
+def _ensure_display():
+    if not os.environ.get("DISPLAY"):
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.environ["DISPLAY"] = ":99"
+        time.sleep(2)
+
+
+async def _cf7_create_via_playwright(first, last, email, proxy_url=""):
+    """Submit the forummigracyjne.org CF7 donation form via a headful browser
+    (real Chrome + stealth + xvfb) so a valid reCAPTCHA token is produced."""
+    from playwright.async_api import async_playwright
+    from playwright_stealth import Stealth
+    _ensure_display()
+    for _attempt in range(4):
+        redirect = await _cf7_attempt(first, last, email, proxy_url)
+        if redirect:
+            return redirect
+        await asyncio.sleep(1.5)
+    return ""
+
+
+async def _cf7_attempt(first, last, email, proxy_url=""):
+    from playwright.async_api import async_playwright
+    from playwright_stealth import Stealth
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            channel="chrome", headless=False,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--window-size=1366,768"])
+        ctx_kwargs = {}
+        if proxy_url:
+            _pp = urllib.parse.urlparse(proxy_url)
+            ctx_kwargs["proxy"] = {
+                "server": f"{_pp.scheme}://{_pp.hostname}:{_pp.port}",
+                "username": _pp.username or "",
+                "password": _pp.password or "",
+            }
+        ctx = await browser.new_context(**ctx_kwargs)
+        page = await ctx.new_page()
+        st = Stealth()
+        await st.apply_stealth_async(page)
+        await page.goto("https://forummigracyjne.org/en/donate/", wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(5000)
+        await page.mouse.move(500, 400)
+        await page.mouse.wheel(0, 500)
+        await page.wait_for_timeout(800)
+        for sel in ["#cookie-info button", ".cookie-info button", "button.cookie-accept"]:
+            try:
+                await page.click(sel, timeout=1500, force=True)
+                await page.wait_for_timeout(400)
+                break
+            except Exception:
+                pass
+        await page.fill('input[name="firstName"]', first)
+        await page.fill('input[name="lastName"]', last)
+        await page.fill('input[name="yourEmail"]', email)
+        await page.check('input[name="selectamount"][value="50zł"]', force=True)
+        for i in range(2):
+            await page.check(f'input[name="acceptance"] >> nth={i}', force=True)
+        captured = {}
+        async def _route_feedback(route):
+            resp = await route.fetch()
+            try:
+                captured["body"] = await resp.text()
+            except Exception:
+                captured["body"] = ""
+            await route.fulfill(status=200, content_type="application/json", body="{}")
+        await page.route("**/feedback**", _route_feedback)
+        await page.click('input[type="submit"]', force=True)
+        await page.wait_for_timeout(3000)
+        try:
+            data = json.loads(captured.get("body") or "{}")
+        except Exception:
+            data = {}
+        redirect = data.get("redirectUri") or ""
+        await ctx.close()
+        await browser.close()
+        return redirect
+
+
 def _multipart_body(fields, boundary):
     """Build a multipart/form-data body from a list of (name, value) tuples."""
     parts = []
@@ -250,28 +332,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
     try:
         # 1. create the order on the merchant (JSON or Contact Form 7)
         if cfg["create_type"] == "cf7":
-            form_fields = [
-                ("_wpcf7", "17908"),
-                ("_wpcf7_version", "6.2.2"),
-                ("_wpcf7_locale", "pl_PL"),
-                ("_wpcf7_unit_tag", "wpcf7-f17908-p17852-o1"),
-                ("_wpcf7_container_post", "17852"),
-                ("_wpcf7_posted_data_hash", ""),
-                ("_wpcf7_recaptcha_response", ""),
-                ("firstName", first),
-                ("lastName", last),
-                ("yourEmail", email),
-                ("selectamount", cfg["amount"]),
-                ("inputamount", ""),
-                ("cykliczna", "single"),
-                ("acceptance", "1"),
-                ("acceptance", "1"),
-            ]
-            boundary = "----kakudev" + uuid.uuid4().hex
-            body = _multipart_body(form_fields, boundary)
-            r = await s.post(cfg["create_url"], data=body,
-                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
-                                      "Content-Type": f"multipart/form-data; boundary={boundary}"})
+            redirect = await _cf7_create_via_playwright(first, last, email, proxy_url)
         else:
             create_payload = {
                 "amount": float(amount) if amount else 1,
@@ -287,10 +348,10 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             }
             r = await s.post(cfg["create_url"], json=create_payload,
                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"], "Content-Type": "application/json"})
-        if r.status_code != 200:
-            raise Exception(f"create order failed: HTTP {r.status_code} {r.text[:200]}")
-        create = r.json()
-        redirect = create.get("redirectUri") or create.get("redirect") or ""
+            if r.status_code != 200:
+                raise Exception(f"create order failed: HTTP {r.status_code} {r.text[:200]}")
+            create = r.json()
+            redirect = create.get("redirectUri") or create.get("redirect") or ""
         if not redirect:
             raise Exception("create order: missing redirect")
 
