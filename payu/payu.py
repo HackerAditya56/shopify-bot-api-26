@@ -356,6 +356,19 @@ def site_cooldown(site, seconds=SITE_COOLDOWN_SECONDS):
     _site_cooldown[site] = time.time() + seconds
 
 
+# ── per-site reuse delay (a site must wait N sec before it can be used again) ──
+SITE_REUSE_DELAY = float(os.environ.get("PAYU_SITE_REUSE_DELAY", "3"))
+_site_last_used = {}
+
+
+def site_ready(site):
+    return time.time() - _site_last_used.get(site, 0) >= SITE_REUSE_DELAY
+
+
+def site_mark_used(site):
+    _site_last_used[site] = time.time()
+
+
 def parse_card(cc: str) -> Tuple[str, str, str, str]:
     """cc format: number|MM|YYYY|cvv  (same as Shopify)."""
     parts = str(cc).strip().split("|")
@@ -750,6 +763,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             site_cooldown(site)
         raise
     finally:
+        site_mark_used(site)
         try:
             await s.close()
         except Exception:

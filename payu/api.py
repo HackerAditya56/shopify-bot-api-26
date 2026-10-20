@@ -23,7 +23,7 @@ import os
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from payu import run_payu_check, PayuResult, PAYU_SITES, site_on_cooldown
+from payu import run_payu_check, PayuResult, PAYU_SITES, site_on_cooldown, site_ready
 import itertools
 
 _site_cycle = itertools.cycle(list(PAYU_SITES.keys()))
@@ -76,7 +76,7 @@ async def payu(
             site = None
             for _ in range(len(sites)):
                 cand = next(_site_cycle)
-                if not site_on_cooldown(cand):
+                if not site_on_cooldown(cand) and site_ready(cand):
                     site = cand
                     break
             if site is None:
