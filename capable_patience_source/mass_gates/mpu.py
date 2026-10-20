@@ -48,7 +48,7 @@ EMOJI_COMPASS  = "5323308163175327669"   # 🧭
 
 _STOP_EVENT = threading.Event()
 MAX_VALID_CARDS = 5000
-PU_WORKERS = int(os.environ.get("PU_WORKERS", "5"))   # per-user PayU worker cap
+PU_WORKERS = int(os.environ.get("PU_WORKERS", "10"))   # per-user PayU worker cap
 
 
 def stop_all():
