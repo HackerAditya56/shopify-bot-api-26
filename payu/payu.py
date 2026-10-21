@@ -640,6 +640,34 @@ PAYU_SITES = {
             "continue_url": "https://pomozim.org.pl/payment/fundacje-pomoz-im-hospicjum-dla-dzieci/",
         },
     },
+    "kociehospicjum": {
+        "create_type": "json_api",
+        "create_url": "https://api.nowe.platnosci.ngo.pl/Public/campaign/WA7PRG/StartPayment",
+        "redirect_field": "url",
+        "referer": "https://nowe.platnosci.ngo.pl/",
+        "origin": "https://nowe.platnosci.ngo.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "json_body": {
+            "terms": [],
+            "statute": True,
+            "paymentType": 0,
+            "marketingAgreement": False,
+            "buyer": {
+                "firstName": "{first}",
+                "lastName": "{last}",
+                "email": "{email}",
+            },
+            "price": 5,
+            "campaignId": 2112,
+            "payMethod": "",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
