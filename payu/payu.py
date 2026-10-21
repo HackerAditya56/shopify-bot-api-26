@@ -497,6 +497,34 @@ PAYU_SITES = {
             "productName": "Darowizna na cele statutowe - Stowarzyszenie Kombinat Aktywności Społecznej",
         },
     },
+    "fundacjaafriquia": {
+        "create_type": "json_api",
+        "create_url": "https://api.nowe.platnosci.ngo.pl/Public/campaign/p59JPG/StartPayment",
+        "redirect_field": "url",
+        "referer": "https://nowe.platnosci.ngo.pl/",
+        "origin": "https://nowe.platnosci.ngo.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "json_body": {
+            "terms": [],
+            "statute": True,
+            "paymentType": 0,
+            "marketingAgreement": True,
+            "buyer": {
+                "firstName": "{first}",
+                "lastName": "{last}",
+                "email": "{email}",
+            },
+            "price": 5,
+            "campaignId": 1553,
+            "payMethod": "",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -878,10 +906,15 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             data = r.json()
             redirect = data.get(cfg.get("redirect_field", "app-redirect-uri")) or ""
         elif cfg["create_type"] == "json_api":
-            body = dict(cfg["json_body"])
-            for k, v in body.items():
-                if isinstance(v, str):
-                    body[k] = v.format(first=first, last=last, email=email)
+            def _fmt(obj):
+                if isinstance(obj, str):
+                    return obj.format(first=first, last=last, email=email)
+                if isinstance(obj, dict):
+                    return {k: _fmt(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_fmt(v) for v in obj]
+                return obj
+            body = _fmt(cfg["json_body"])
             for k, gen in (cfg.get("dynamic_fields") or {}).items():
                 if gen == "uuid":
                     body[k] = str(uuid.uuid4())
