@@ -137,21 +137,26 @@ async def _solve_cloudflare(page, url: str):
 
 
 async def _bms_fetch(page, path: str, method="GET", body=None, extra=None):
-    """Run a fetch() inside the browser context (carries Cloudflare + BMS cookies + x-* headers)."""
+    """Request via the browser context's APIRequestContext (shares Cloudflare + BMS cookies,
+    no CORS restrictions — works for in.bookmyshow.com AND services-in.bookmyshow.com / api.payu.in)."""
     headers = dict(_BMS_HEADERS)
     headers["x-bms-id"] = _CURRENT_BMS_ID or _bms_id()
     if extra:
         headers.update(extra)
-    js = """
-    async ({path, method, body, headers}) => {
-        const opts = {method, headers, credentials: 'include'};
-        if (body !== undefined && body !== null) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
-        const r = await fetch(path, opts);
-        const text = await r.text();
-        return {status: r.status, url: r.url, body: text};
-    }
-    """
-    return await page.evaluate(js, {"path": path, "method": method, "body": body, "headers": headers})
+    url = path if path.startswith("http") else BMS_HOME + path
+    req = page.context.request
+    if method == "GET":
+        r = await req.get(url, headers=headers)
+    else:
+        if isinstance(body, dict):
+            headers.setdefault("Content-Type", "application/json")
+            data = json.dumps(body)
+        else:
+            headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+            data = body
+        r = await req.post(url, headers=headers, data=data)
+    text = await r.text()
+    return {"status": r.status, "url": url, "body": text}
 
 
 def _extract(data: dict, path: str, default=None):
@@ -274,21 +279,32 @@ async def book(page, event_code, venue_code, session_id, price_code, area_code, 
         "facebookBrowserId": fb_id,
     }
     referer = f"{BMS_HOME}/movies/mumbai/seat-layout/{event_code}/{venue_code}/{session_id}/{DATE}"
-    # probe seats until one is free (seat map is client-rendered; the booking rejects taken seats)
-    for row in range(1, 6):
-        for col in range(1, 21):
-            body["selectedSeats"] = f"|1|{area_code}|{row}|{col}|{col}|"
-            r = await _bms_fetch(page, "/api/v2/mobile/booking/movies", "POST", body,
-                                 extra={"Referer": referer, "Origin": BMS_HOME})
-            if r["status"] == 200:
-                data = json.loads(r["body"])
-                if data.get("transactionId"):
-                    return {
-                        "transactionId": str(data["transactionId"]),
-                        "transactionUID": data.get("transactionUID", ""),
-                        "bookingId": data.get("bookingId", ""),
-                    }
-            await asyncio.sleep(0.2)
+    # probe seats until one is free (seat map is client-rendered; booking rejects taken/invalid seats).
+    # seatNo scheme is venue-specific, so try several per grid cell.
+    def candidates(row, col):
+        return [
+            f"|1|{area_code}|{row}|{col}|{col}|",                 # SPCP: seatNo = col
+            f"|1|{area_code}|{row}|{col}|{col:03d}|",             # zero-padded
+            f"|1|{area_code}|{row}|{col}|{(row-1)*21 + col}|",    # CSWO: global seat count
+            f"|1|{area_code}|{row}|{col}|{(row-1)*21 + col:03d}|",
+            f"|1|{area_code}|{row}|{col}|{(row-1)*20 + col}|",
+            f"|1|{area_code}|{row}|{col}|{(row-1)*20 + col:03d}|",
+        ]
+    for row in range(1, 8):
+        for col in range(1, 26):
+            for seats in candidates(row, col):
+                body["selectedSeats"] = seats
+                r = await _bms_fetch(page, "/api/v2/mobile/booking/movies", "POST", body,
+                                     extra={"Referer": referer, "Origin": BMS_HOME})
+                if r["status"] == 200:
+                    data = json.loads(r["body"])
+                    if data.get("transactionId"):
+                        return {
+                            "transactionId": str(data["transactionId"]),
+                            "transactionUID": data.get("transactionUID", ""),
+                            "bookingId": data.get("bookingId", ""),
+                        }
+                await asyncio.sleep(0.1)
     raise Exception("booking: no available seat found")
 
 
