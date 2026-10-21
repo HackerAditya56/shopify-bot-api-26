@@ -715,6 +715,33 @@ PAYU_SITES = {
             "payment_operator": "payu",
         },
     },
+    "lzspomorski": {
+        "create_type": "ajax",
+        "create_url": "https://lzs-pomorski.pl/wp-admin/admin-ajax.php",
+        "redirect_field": "data.redirect_url",
+        "nonce_field": "security",
+        "nonce_pattern": r'"nonce":"([^"]+)"',
+        "nonce_page_url": "https://lzs-pomorski.pl/darowizna/",
+        "referer": "https://lzs-pomorski.pl/darowizna/",
+        "origin": "https://lzs-pomorski.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "action": "process_donation",
+            "name": "{first}",
+            "surname": "{last}",
+            "email": "{email}",
+            "amount": "5",
+            "purpose": "ksiazka_lzs",
+            "comment": "",
+            "anonymous": "true",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────

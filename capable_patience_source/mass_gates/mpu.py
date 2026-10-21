@@ -255,6 +255,7 @@ async def mpu_command(message: types.Message):
         f"𝐏𝐚𝐲𝐔 𝐌𝐚𝐬𝐬 (${_amount_override})" if _amount_override else "𝐏𝐚𝐲𝐔 𝐌𝐚𝐬𝐬 ($1)",
         user_id, user, "mpu", plan_name,
         max_workers=PU_WORKERS,
+        auto_send_approved=True,
     )
 
 
