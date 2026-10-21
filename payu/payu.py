@@ -668,6 +668,31 @@ PAYU_SITES = {
             "payMethod": "",
         },
     },
+    "zdzikiejstrony": {
+        "create_type": "form",
+        "create_url": "https://zdzikiejstrony.pl/wsparcie-fundacji/",
+        "referer": "https://zdzikiejstrony.pl/wsparcie-fundacji/",
+        "origin": "https://zdzikiejstrony.pl",
+        "amount": "10",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "flexible_donation[first_name]": "{first}",
+            "flexible_donation[last_name]": "{last}",
+            "flexible_donation[email]": "{email}",
+            "flexible_donation[amount]": "10",
+            "flexible_donation[comment]": "",
+            "flexible_donation[payment_method]": "payu",
+            "flexible_donation[anonymous_data]": "no",
+            "flexible_donation[anonymous_amount]": "no",
+            "flexible_donation[form_id]": "987557655",
+            "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
