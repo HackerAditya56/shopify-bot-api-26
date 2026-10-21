@@ -551,6 +551,41 @@ PAYU_SITES = {
             "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
         },
     },
+    "miesnieszczecin": {
+        "create_type": "payu_v21_form",
+        "page_url": "https://miesnie.szczecin.pl/payu",
+        "token_url": "https://miesnie.szczecin.pl/index.php?option=com_baforms&task=form.getFormToken",
+        "form_url": "https://miesnie.szczecin.pl/index.php",
+        "orders_url": "https://secure.payu.com/api/v2_1/orders",
+        "referer": "https://miesnie.szczecin.pl/payu",
+        "origin": "https://miesnie.szczecin.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "25": "{first}",
+            "32": "{last}",
+            "31": "5",
+            "27": "{email}",
+            "33": "",
+            "28": "5",
+            "29": '{"products":{"28":{"0":{"key":"0","quantity":1,"title":"Deklarowana kwota","price":5,"total":5}}},"total":5,"resultTotal":5}',
+            "36": 'Wyrażam zgodę na przetwarzanie danych osobowych zgodnie z ustawą o ochronie danych osobowych. Podanie danych jest dobrowolne, ale niezbędne do przetworzenia zapytania. Zostałem poinformowanych, że przysługuje mi prawo dostępu do swoich danych, możliwość ich poprawiania, żądania zaprzestania ich przetwarzania. administratorem danych osobowych jest Fundacja Pomocy Chorym na Zanik Mięśni im. Piotra Karlińskiego ul. Ks. Kardynała S. Wyszyńskiego 9/U2, 70-200 Szczecin.',
+        },
+        "form_meta": {
+            "form-id": "2",
+            "option": "com_balbooa_forms",
+            "task": "form.message",
+            "submit-btn": "30",
+            "page-title": "Fundacja Pomocy Chorym na Zanik Mi\u0119\u015bni im. Piotra Karli\u0144skiego - PayU",
+            "page-url": "https://miesnie.szczecin.pl/payu",
+            "page-id": "10",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -883,6 +918,46 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                          "Content-Type": "application/x-www-form-urlencoded"})
             redirect = r.headers.get("Location") or ""
+        elif cfg["create_type"] == "payu_v21_form":
+            # 1. GET the BAForms form token
+            r = await s.post(cfg["token_url"], data={"undefined": "1"},
+                             headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                      "Content-Type": "application/x-www-form-urlencoded",
+                                      "X-Requested-With": "XMLHttpRequest"})
+            token = (r.text or "").strip()
+            if not token or " " in token:
+                raise Exception(f"payu_v21_form: form token not returned: {token[:80]}")
+            # 2. submit the form (fields + meta + token) -> signed PayU form HTML
+            form = {}
+            for k, v in (cfg.get("form_fields") or {}).items():
+                if isinstance(v, str) and ("{first}" in v or "{last}" in v or "{email}" in v):
+                    form[k] = v.format(first=first, last=last, email=email)
+                else:
+                    form[k] = v
+            for k, v in (cfg.get("form_meta") or {}).items():
+                form[k] = v
+            form[token] = "1"
+            r2 = await s.post(cfg["form_url"], data=form,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded"})
+            signed = r2.text
+            # 3. extract the PayU v2_1 fields + the signature from the signed HTML
+            payu_form = {}
+            for m in re.finditer(r'<input[^>]*>', signed):
+                tag = m.group(0)
+                nm = re.search(r'name="([^"]+)"', tag)
+                if not nm:
+                    continue
+                val = re.search(r'value="([^"]*)"', tag)
+                payu_form[nm.group(1)] = html.unescape(val.group(1)) if val else ""
+            if "OpenPayu-Signature" not in payu_form:
+                raise Exception("payu_v21_form: signature not found in signed form")
+            # 4. POST the signed form to PayU v2_1 orders -> redirect
+            r3 = await s.post(cfg["orders_url"], data=payu_form, allow_redirects=False,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded",
+                                       "Sec-Fetch-Site": "cross-site"})
+            redirect = r3.headers.get("Location") or ""
         elif cfg["create_type"] == "payu_v21":
             # 1. GET the page -> extract the static form fields (merchantPosId, products, customerIp, ...)
             r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
