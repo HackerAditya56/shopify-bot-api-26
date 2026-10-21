@@ -24,6 +24,16 @@ _csv_data = {}
 _csv_loaded = False
 _csv_lock = threading.Lock()
 
+# shared aiohttp session (one per process) so per-lookup sessions don't leak connections
+_session = None
+
+
+async def _get_session():
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession()
+    return _session
+
 
 def _flag_from_country_code(code: str) -> str:
     """Regional-indicator flag from a 2-letter ISO code (US -> 🇺🇸)."""
@@ -208,39 +218,40 @@ async def get_bin_info(bin_number: str) -> dict:
     trial.append(None)  # direct as a last resort
 
     result = None
-    async with aiohttp.ClientSession() as session:
-        cb_data = None
-        for proxy in trial:
-            cb_data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number), proxy)
-            if cb_data is not None:
-                break
+    session = await _get_session()
 
-        ap_data = None
-        for proxy in trial:
-            ap_data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number), proxy)
-            if ap_data is not None:
-                break
-
+    cb_data = None
+    for proxy in trial:
+        cb_data = await _fetch_json(session, CHARGEBLAST_URL.format(bin_number), proxy)
         if cb_data is not None:
-            result = _normalize_chargeblast(cb_data)
-            # enrich with antipublic level/brand + type when available
-            if ap_data is not None:
-                ap_norm = _normalize_antipublic(ap_data)
-                if ap_norm.get("brand") != "N/A":
-                    result["brand"] = ap_norm["brand"]
-                if ap_norm.get("type") != "N/A":
-                    result["type"] = ap_norm["type"]
-        elif ap_data is not None:
-            result = _normalize_antipublic(ap_data)
-        elif row is not None:
-            # Rate-limited on both APIs -> serve the last known CSV row instead
-            # of null/error, so a rate limit never blanks the BIN output.
-            result = dict(row)
-            result["stale"] = True
-            logging.warning(f"[BIN] rate-limited for {bin_number}, serving stale cache")
-        else:
-            result = {"error": "BIN lookup failed (both APIs unavailable)."}
-            logging.warning(f"[BIN] lookup failed for {bin_number} (both APIs down/rate-limited)")
+            break
+
+    ap_data = None
+    for proxy in trial:
+        ap_data = await _fetch_json(session, ANTIPUBLIC_URL.format(bin_number), proxy)
+        if ap_data is not None:
+            break
+
+    if cb_data is not None:
+        result = _normalize_chargeblast(cb_data)
+        # enrich with antipublic level/brand + type when available
+        if ap_data is not None:
+            ap_norm = _normalize_antipublic(ap_data)
+            if ap_norm.get("brand") != "N/A":
+                result["brand"] = ap_norm["brand"]
+            if ap_norm.get("type") != "N/A":
+                result["type"] = ap_norm["type"]
+    elif ap_data is not None:
+        result = _normalize_antipublic(ap_data)
+    elif row is not None:
+        # Rate-limited on both APIs -> serve the last known CSV row instead
+        # of null/error, so a rate limit never blanks the BIN output.
+        result = dict(row)
+        result["stale"] = True
+        logging.warning(f"[BIN] rate-limited for {bin_number}, serving stale cache")
+    else:
+        result = {"error": "BIN lookup failed (both APIs unavailable)."}
+        logging.warning(f"[BIN] lookup failed for {bin_number} (both APIs down/rate-limited)")
 
     _bin_cache[bin_number] = (result, time.time())
 
