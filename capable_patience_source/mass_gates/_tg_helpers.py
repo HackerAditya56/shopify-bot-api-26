@@ -59,6 +59,9 @@ async def send_message_safe(bot, chat_id, text, parse_mode="HTML", **kw):
         try:
             return await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode, **kw)
         except TelegramRetryAfter as e:
+            if e.retry_after > 120:
+                logging.warning(f"[TG] FloodWait {e.retry_after}s — dropping")
+                return None
             logging.warning(f"[TG] FloodWait {e.retry_after}s — sleeping")
             await asyncio.sleep(e.retry_after + 1)
         except Exception as e:
@@ -76,6 +79,9 @@ async def send_hit(bot, chat_id, caption, gif_url=None, parse_mode="HTML"):
                 return await bot.send_animation(chat_id=chat_id, animation=gif_url,
                                                 caption=caption, parse_mode=parse_mode)
             except TelegramRetryAfter as e:
+                if e.retry_after > 120:
+                    logging.warning(f"[TG] FloodWait {e.retry_after}s — dropping")
+                    return None
                 logging.warning(f"[TG] FloodWait {e.retry_after}s — sleeping")
                 await asyncio.sleep(e.retry_after + 1)
             except TelegramForbiddenError as e:
@@ -96,6 +102,9 @@ async def edit_message_safe(bot, chat_id, message_id, text, parse_mode="HTML", *
             return await bot.edit_message_text(chat_id=chat_id, message_id=message_id,
                                                text=text, parse_mode=parse_mode, **kw)
         except TelegramRetryAfter as e:
+            if e.retry_after > 120:
+                logging.warning(f"[TG] FloodWait {e.retry_after}s — dropping")
+                return None
             logging.warning(f"[TG] FloodWait {e.retry_after}s — sleeping")
             await asyncio.sleep(e.retry_after + 1)
         except TelegramBadRequest:
@@ -107,14 +116,34 @@ async def edit_message_safe(bot, chat_id, message_id, text, parse_mode="HTML", *
 
 
 async def safe_reply(message, *args, **kwargs):
-    """Reply to a message; fall back to a plain answer if it was deleted."""
-    try:
-        return await message.reply(*args, **kwargs)
-    except TelegramBadRequest:
+    """Reply to a message; FloodWait-aware + rate-limited; fall back to answer if deleted.
+
+    Long FloodWaits (>2 min) are dropped instead of slept through, so the bot
+    never hangs for an hour on a single flooded chat."""
+    chat_id = message.chat.id
+    for _ in range(3):
+        await _throttle(chat_id)
         try:
-            return await message.answer(*args, **kwargs)
-        except Exception:
+            return await message.reply(*args, **kwargs)
+        except TelegramRetryAfter as e:
+            if e.retry_after > 120:
+                logging.warning(f"[TG] FloodWait {e.retry_after}s on reply — dropping")
+                return None
+            logging.warning(f"[TG] FloodWait {e.retry_after}s on reply — sleeping")
+            await asyncio.sleep(e.retry_after + 1)
+        except TelegramBadRequest:
+            break   # can't reply (deleted) -> fall through to plain answer
+        except Exception as e:
+            logging.warning(f"[TG] reply failed for {chat_id}: {e}")
             return None
+    try:
+        await _throttle(chat_id)
+        return await message.answer(*args, **kwargs)
+    except TelegramRetryAfter as e:
+        logging.warning(f"[TG] FloodWait {e.retry_after}s on answer — dropping")
+        return None
+    except Exception:
+        return None
 
 
 # ── premium emoji IDs (shared hit-card UI) ──────────────────────────────
