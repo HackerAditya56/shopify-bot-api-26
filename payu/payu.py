@@ -693,6 +693,28 @@ PAYU_SITES = {
             "flexible_donation[send_donation]": "Wy\u015blij darowizn\u0119",
         },
     },
+    "itaka": {
+        "create_type": "form",
+        "create_url": "https://api.zaginieni.pl/donate/payu",
+        "referer": "https://itaka.org.pl/",
+        "origin": "https://itaka.org.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "source": "itaka.org.pl",
+            "email": "{email}",
+            "name": "{first}",
+            "amount": "5",
+            "agreement1": "0",
+            "agreement2": "0",
+            "payment_operator": "payu",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
