@@ -34,7 +34,12 @@ REGION = "mumbai"
 REGION_CODE = "MUMBAI"
 BMS_HOME = "https://in.bookmyshow.com"
 SERVICES = "https://services-in.bookmyshow.com"
-DATE = "20261023"                    # show date (20261023 in the HAR)
+def _today():
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d")
+
+
+DATE = _today()                      # show date = today (matches the 2nd HAR)
 
 # browser impersonation (same curl_cffi profiles family as shopify v7)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -235,12 +240,8 @@ async def fetch_seat_layout(page, event_code: str, date_code: str, venue_code: s
 
 
 def _pick_cheapest(shows):
-    """Return (sessionId, priceCode, areaCatCode, curPrice) for the cheapest available
-    ticket whose area also carries the HAR-verified seat (2|8|029)."""
-    # HAR-verified seat lives in area 0000000003 (EXECUTIVE, priceCode 0002)
-    known_area = "0000000003"
+    """Return (sessionId, priceCode, areaCatCode, curPrice) for the cheapest available ticket."""
     best = None
-    best_known = None
     for sh in shows:
         for c in sh["categories"]:
             if not c["curPrice"]:
@@ -249,19 +250,15 @@ def _pick_cheapest(shows):
                     "areaCatCode": c["areaCatCode"], "curPrice": c["curPrice"]}
             if best is None or c["curPrice"] < best["curPrice"]:
                 best = cand
-            if c["areaCatCode"] == known_area:
-                best_known = cand
     if not best:
         raise Exception("seat layout: no available ticket category")
-    # prefer the known-good seat's area so the booking doesn't 468
-    return best_known or best
+    return best
 
 
 async def book(page, event_code, venue_code, session_id, price_code, area_code, first, last, email):
     """POST booking -> transactionId + transactionUID + bookingId."""
     bms_id = _CURRENT_BMS_ID or _bms_id()
     fb_id = _fb_id()
-    selected_seats = f"|1|{area_code}|2|8|029|"   # 1 ticket, cheapest area, valid seat (from HAR)
     body = {
         "appCode": APP_CODE,
         "venueCode": venue_code,
@@ -269,7 +266,6 @@ async def book(page, event_code, venue_code, session_id, price_code, area_code, 
         "sessionId": session_id,
         "numberOfTickets": 1,
         "ticketCategory": price_code,
-        "selectedSeats": selected_seats,
         "bmsId": bms_id,
         "token": TOKEN,
         "seatLayoutType": SEAT_LAYOUT_TYPE,
@@ -277,19 +273,23 @@ async def book(page, event_code, venue_code, session_id, price_code, area_code, 
         "companyCode": COMPANY_CODE,
         "facebookBrowserId": fb_id,
     }
-    r = await _bms_fetch(page, "/api/v2/mobile/booking/movies", "POST", body,
-                         extra={"Referer": f"{BMS_HOME}/movies/mumbai/seat-layout/{event_code}/{venue_code}/{session_id}/{DATE}",
-                                "Origin": BMS_HOME})
-    if r["status"] != 200:
-        raise Exception(f"booking: HTTP {r['status']} {r['body'][:200]}")
-    data = json.loads(r["body"])
-    if not data.get("transactionId"):
-        raise Exception(f"booking: no transactionId {r['body'][:200]}")
-    return {
-        "transactionId": str(data["transactionId"]),
-        "transactionUID": data.get("transactionUID", ""),
-        "bookingId": data.get("bookingId", ""),
-    }
+    referer = f"{BMS_HOME}/movies/mumbai/seat-layout/{event_code}/{venue_code}/{session_id}/{DATE}"
+    # probe seats until one is free (seat map is client-rendered; the booking rejects taken seats)
+    for row in range(1, 6):
+        for col in range(1, 21):
+            body["selectedSeats"] = f"|1|{area_code}|{row}|{col}|{col}|"
+            r = await _bms_fetch(page, "/api/v2/mobile/booking/movies", "POST", body,
+                                 extra={"Referer": referer, "Origin": BMS_HOME})
+            if r["status"] == 200:
+                data = json.loads(r["body"])
+                if data.get("transactionId"):
+                    return {
+                        "transactionId": str(data["transactionId"]),
+                        "transactionUID": data.get("transactionUID", ""),
+                        "bookingId": data.get("bookingId", ""),
+                    }
+            await asyncio.sleep(0.2)
+    raise Exception("booking: no available seat found")
 
 
 async def pay(page, trans, card, first, last, email, phone):
@@ -408,31 +408,36 @@ async def run_bms_check(cc: str, proxy_url: str = "") -> BmsResult:
     try:
         await _solve_cloudflare(page, f"{BMS_HOME}/movies/{REGION}")
 
-        # 1. movies -> cheapest event (first available)
+        # 1. movies -> iterate until one books (cheapest available across events)
         movies = await fetch_movies(page)
         if not movies:
             res.real_response = "no movies"
             return res
-        event_code = movies[0]["eventCode"]
-
-        # 2. showtimes -> sessions
-        sessions = await fetch_showtimes(page, event_code, DATE)
-        if not sessions:
-            res.real_response = "no showtimes"
+        trans = None
+        cheapest = None
+        for movie in movies[:10]:
+            event_code = movie["eventCode"]
+            try:
+                sessions = await fetch_showtimes(page, event_code, DATE)
+                if not sessions:
+                    continue
+                venue_code = sessions[0]["venueCode"]
+                session_id = sessions[0]["sessionId"]
+                shows = await fetch_seat_layout(page, event_code, DATE, venue_code)
+                if not shows:
+                    continue
+                cheapest = _pick_cheapest(shows)
+                trans = await book(page, event_code, venue_code, session_id,
+                                   cheapest["priceCode"], cheapest["areaCatCode"], first, last, email)
+                res.transaction_id = trans["transactionId"]
+                res.booking_id = trans["bookingId"]
+                res.amount = f"{cheapest['curPrice']:.2f}"
+                break
+            except Exception:
+                continue
+        if trans is None:
+            res.real_response = "no bookable movie/show"
             return res
-        venue_code = sessions[0]["venueCode"]
-        session_id = sessions[0]["sessionId"]
-
-        # 3. seat layout -> cheapest category
-        shows = await fetch_seat_layout(page, event_code, DATE, venue_code)
-        cheapest = _pick_cheapest(shows)
-        res.amount = f"{cheapest['curPrice']:.2f}"
-
-        # 4. book
-        trans = await book(page, event_code, venue_code, session_id,
-                           cheapest["priceCode"], cheapest["areaCatCode"], first, last, email)
-        res.transaction_id = trans["transactionId"]
-        res.booking_id = trans["bookingId"]
 
         # 5. pay (doPGPost + PayU)
         pay_resp = await pay(page, trans, card, first, last, email, phone)
