@@ -21,6 +21,8 @@ import re
 import html
 import time
 import urllib.parse
+import uuid
+import base64
 import os
 import itertools
 from dataclasses import dataclass, field
@@ -467,6 +469,34 @@ PAYU_SITES = {
             "email": "{email}",
         },
     },
+    "stowarzyszeniekas": {
+        "create_type": "json_api",
+        "create_url": "https://www.stowarzyszeniekas.pl/api/payu",
+        "redirect_field": "redirectUri",
+        "referer": "https://www.stowarzyszeniekas.pl/wsparcie",
+        "origin": "https://www.stowarzyszeniekas.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "dynamic_fields": {
+            "paymentAttemptId": "uuid",
+            "paymentAccessToken": "token32",
+        },
+        "json_body": {
+            "amount": 5,
+            "firstName": "{first}",
+            "lastName": "{last}",
+            "email": "{email}",
+            "language": "pl",
+            "termsAccepted": True,
+            "description": "Darowizna statutowa (5 PLN) - Stowarzyszenie Kombinat Aktywności Społecznej",
+            "productName": "Darowizna na cele statutowe - Stowarzyszenie Kombinat Aktywności Społecznej",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -852,6 +882,11 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             for k, v in body.items():
                 if isinstance(v, str):
                     body[k] = v.format(first=first, last=last, email=email)
+            for k, gen in (cfg.get("dynamic_fields") or {}).items():
+                if gen == "uuid":
+                    body[k] = str(uuid.uuid4())
+                elif gen == "token32":
+                    body[k] = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
             r = await s.post(
                 cfg["create_url"], json=body,
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
