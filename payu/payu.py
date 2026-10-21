@@ -449,6 +449,24 @@ PAYU_SITES = {
             "terms2": "1",
         },
     },
+    "campuspolska": {
+        "create_type": "form",
+        "create_url": "https://campuspolska.pl/2023/payu/checkout",
+        "referer": "https://campuspolska.pl/2023/wplaty/",
+        "origin": "https://campuspolska.pl",
+        "amount": "5",
+        "mcp_fx_table_id": 597551,
+        "mcp_fx_rate": 1,
+        "language": "pl",
+        "lang_param": "",
+        "country": "PL",
+        "timezone_offset": -60,
+        "form_fields": {
+            "service_id": "1",
+            "donation": "5",
+            "email": "{email}",
+        },
+    },
 }
 
 # ── real device profiles (screen / color depth) ──────────────────────
