@@ -159,8 +159,35 @@ def main():
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         print("  submit clicked")
 
-        # 9. captcha wait
-        step("waiting for reCAPTCHA...")
+        # 9. click the reCAPTCHA checkbox (inside the recaptcha iframe)
+        step("clicking reCAPTCHA checkbox...")
+        clicked = False
+        for i in range(20):
+            time.sleep(1)
+            try:
+                frames = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha']")
+                for fr in frames:
+                    driver.switch_to.frame(fr)
+                    try:
+                        anchor = driver.find_element(By.ID, "recaptcha-anchor")
+                        if anchor:
+                            anchor.click()
+                            clicked = True
+                            print("  checkbox clicked")
+                            break
+                    except Exception:
+                        pass
+                    finally:
+                        driver.switch_to.default_content()
+            except Exception:
+                pass
+            if clicked:
+                break
+        if not clicked:
+            print("  could not find/click the reCAPTCHA checkbox")
+
+        # 10. wait for the token
+        step("waiting for reCAPTCHA token...")
         token = None
         for i in range(60):
             time.sleep(1)

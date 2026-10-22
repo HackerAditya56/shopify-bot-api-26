@@ -150,7 +150,28 @@ def generate_one(proxy_str=None, scheme="socks5", headless=False):
         time.sleep(0.3)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
 
-        # wait for the invisible reCAPTCHA to self-solve / form to auto-submit
+        # click the reCAPTCHA checkbox (inside the recaptcha iframe) — webshare uses
+        # a checkbox captcha, not invisible, so the token only appears after the click
+        for _ in range(20):
+            time.sleep(1)
+            try:
+                frames = driver.find_elements(By.CSS_SELECTOR, "iframe[src*='recaptcha']")
+                for fr in frames:
+                    driver.switch_to.frame(fr)
+                    try:
+                        anchor = driver.find_element(By.ID, "recaptcha-anchor")
+                        if anchor:
+                            anchor.click()
+                            break
+                    except Exception:
+                        pass
+                    finally:
+                        driver.switch_to.default_content()
+            except Exception:
+                pass
+        driver.switch_to.default_content()
+
+        # wait for the reCAPTCHA token / form to auto-submit
         token = None
         for _ in range(90):
             time.sleep(1)
