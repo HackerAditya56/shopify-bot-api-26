@@ -216,7 +216,14 @@ async def _launch(proxy_url: str):
     browser = await pw.chromium.launch(
         headless=False,
         proxy=proxy,
-        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        args=[
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-software-rasterizer",
+            "--no-zygote",
+        ],
     )
     ctx = await browser.new_context(
         user_agent=UA,
