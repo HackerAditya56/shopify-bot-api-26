@@ -210,7 +210,7 @@ async def process_bms_check(message, proc_msg, user, user_id, formatted_cc, cc, 
     country_flag = bin_info.get("country_emoji", "")
     bin_country = f"{country_flag} {country_name}" if country_flag else country_name
 
-    user_proxies = load_bms_proxies() + await get_user_proxies(user_id)
+    user_proxies = load_bms_proxies()  # ONLY the generated bms_proxy.txt pool
     api_result = {"status": "error", "response": "ERROR", "real_response": "ERROR", "amount": "0.00"}
 
     if not user_proxies:

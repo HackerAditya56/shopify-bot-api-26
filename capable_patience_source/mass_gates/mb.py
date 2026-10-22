@@ -227,7 +227,7 @@ async def bms_txt_command(message: types.Message):
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
-    _proxies = load_bms_proxies() + await get_user_proxies(user_id)
+    _proxies = load_bms_proxies()  # ONLY the generated bms_proxy.txt pool
     if not _proxies:
         await safe_reply(message,
             f'<tg-emoji emoji-id="{EMOJI_COMPASS}">🧭</tg-emoji> <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀!</b>\n\n'
