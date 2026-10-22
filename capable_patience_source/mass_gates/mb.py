@@ -37,7 +37,7 @@ from mass_gates._tg_helpers import safe_reply
 router = Router()
 
 # ── BMS (payu3) API (local) ────────────────────────────────────────────
-BMS_API = os.environ.get("BMS_API", "http://127.0.0.1:9400")
+BMS_API = "http://127.0.0.1:9400"
 
 # ── MinecraftEnchanted custom emoji IDs (unique to BMS) ────────────────
 EMOJI_STAR    = "5321214486877609476"   # ⭐️

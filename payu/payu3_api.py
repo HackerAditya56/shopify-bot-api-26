@@ -120,10 +120,5 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=9400)
-    ap.add_argument("--host", default="0.0.0.0")
-    args = ap.parse_args()
-    print(f"\n  FastAPI server: http://{args.host}:{args.port}\n")
-    uvicorn.run(app, host=args.host, port=args.port, workers=1)
+    print("\n  BMS (payu3) FastAPI server: http://0.0.0.0:9400\n")
+    uvicorn.run(app, host="0.0.0.0", port=9400, workers=1)
