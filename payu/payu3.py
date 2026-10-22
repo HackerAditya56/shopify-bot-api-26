@@ -320,7 +320,10 @@ def preflight(proxy_url: str, timeout: float = 15.0) -> str:
         return "direct"
     p = _norm_proxy(proxy_url)
     try:
-        r = requests.get("http://api.ipify.org", timeout=timeout,
+        # HTTPS first: it forces a CONNECT tunnel, which is what the browser
+        # needs.  A proxy that only relays plain HTTP passes an http:// probe
+        # and then dies as ERR_TUNNEL_CONNECTION_FAILED.
+        r = requests.get("https://api.ipify.org", timeout=timeout,
                          proxies={"http": p, "https": p})
         body = (r.text or "").lower()
         if r.status_code in (402, 429) or "bandwidth" in body:
