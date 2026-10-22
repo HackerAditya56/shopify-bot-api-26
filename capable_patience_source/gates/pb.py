@@ -14,7 +14,7 @@ from bin import get_bin_info
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
 from proxy import parse_proxy_input
-from bms_proxy_pool import load_bms_proxies, prune_bms_proxy, prune_and_notify
+from bms_proxy_pool import load_bms_proxies, prune_bms_proxy, prune_and_notify, is_rotating
 
 
 def _norm_proxy(proxy):
@@ -230,7 +230,10 @@ async def process_bms_check(message, proc_msg, user, user_id, formatted_cc, cc, 
                 continue
             resp_code = str(api_result.get("response") or "").upper()
             if resp_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR"):
-                # proxy flagged by Cloudflare -> drop + DM dev immediately
+                if resp_code == "CLOUDFLARE_BLOCKED" and is_rotating(proxy):
+                    # rotating proxy -> a 403 is transient (next request = new IP)
+                    await asyncio.sleep(0.5)
+                    continue
                 await prune_and_notify(proxy, message.bot)
                 user_proxies = [x for x in user_proxies if x != proxy]
                 if not user_proxies:

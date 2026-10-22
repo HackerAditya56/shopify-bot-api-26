@@ -94,12 +94,12 @@ async def bms(
             low = msg.lower()
             import logging
             logging.getLogger("bms").error("check failed for %s: %s", cc[:6], msg[:200])
-            if any(k in low for k in ("proxy", "curl", "timed out", "timeout", "connect", "resolve", "tunnel", "refused")):
+            if "403" in low or "cloudflare" in low or "blocked" in low:
+                code = "CLOUDFLARE_BLOCKED"
+            elif any(k in low for k in ("proxy", "curl", "timed out", "timeout", "connect", "resolve", "tunnel", "refused")):
                 code = "PROXY_ERROR"
             elif "invalid card format" in low:
                 code = "INVALID_CARD"
-            elif "cloudflare" in low:
-                code = "CLOUDFLARE_BLOCKED"
             else:
                 code = "ERROR"
             return JSONResponse({

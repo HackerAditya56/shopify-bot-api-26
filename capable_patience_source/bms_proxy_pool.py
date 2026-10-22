@@ -48,6 +48,13 @@ async def prune_and_notify(proxy: str, bot) -> bool:
     return removed
 
 
+def is_rotating(proxy: str) -> bool:
+    """True for webshare rotating endpoints (p.webshare.io + -rotate user) —
+    these rotate to a fresh IP per request, so a single 403 is NOT fatal."""
+    p = str(proxy or "")
+    return "p.webshare.io" in p and "-rotate" in p
+
+
 def prune_bms_proxy(line: str) -> bool:
     """Remove a burned proxy from bms_proxy.txt. Returns True if removed."""
     try:

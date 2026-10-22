@@ -16,7 +16,7 @@ from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
 from proxy import parse_proxy_input
-from bms_proxy_pool import load_bms_proxies, prune_bms_proxy, prune_and_notify, OWNER_ID
+from bms_proxy_pool import load_bms_proxies, prune_bms_proxy, prune_and_notify, OWNER_ID, is_rotating
 
 
 def _norm_proxy(proxy):
@@ -189,10 +189,13 @@ def check_fn(card):
     amount_str = str(data.get("amount") or "0.00")
 
     if response_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR"):
-        # flagged by Cloudflare -> drop from bms_proxy.txt + DM dev
-        prune_bms_proxy(proxy)
-        _flag_dm(proxy)
-        _pause_proxy(proxy, 3600)
+        if response_code == "CLOUDFLARE_BLOCKED" and is_rotating(proxy):
+            # rotating proxy -> 403 is transient, brief pause + keep
+            _pause_proxy(proxy, random.randint(20, 45))
+        else:
+            prune_bms_proxy(proxy)
+            _flag_dm(proxy)
+            _pause_proxy(proxy, 3600)
 
     if "proxy" in response_code.lower() or ("error" in status and "proxy" in real.lower()):
         _pause_proxy(proxy, random.randint(60, 180))

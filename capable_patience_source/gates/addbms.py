@@ -95,7 +95,7 @@ def _bms_page_ok(proxy: str) -> tuple:
     try:
         r = requests.get(BMS_PAGE, proxies={"http": url, "https": url},
                          headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"},
-                         timeout=20, allow_redirects=True)
+                         timeout=(8, 12), allow_redirects=True)
         if r.status_code == 403:
             return False, "403 blocked"
         if r.status_code == 200:
