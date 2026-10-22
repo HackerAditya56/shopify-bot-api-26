@@ -47,7 +47,7 @@ from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
 from gates.pu import pu_command, router as pu_router
 from gates.pb import router as pb_router
-from gates.genproxy import router as genproxy_router
+from gates.genproxy import router as genproxy_router, start_bg_loop
 from gates.cf import cf_command, router as cf_router
 from gates.py import py_command
 from gates.nmi import nmi_command
@@ -936,10 +936,19 @@ setup_feedback_handler(dp)
 
 
 # ========== MAIN ==========
+async def _main_async():
+    # background self-sustaining webshare proxy generation (every 60s)
+    try:
+        start_bg_loop(60)
+    except Exception as e:
+        logging.error(f"[genproxy-bg] failed to start: {e}")
+    await dp.start_polling(bot, skip_updates=True)
+
+
 def main():
     logging.info("Bot starting in Polling mode with COLORFUL BUTTONS (Primary Blue) and custom emoji icons.")
     logging.info("⚠️ NOTE: Color styling only works on callback buttons, NOT on URL buttons (Telegram API limitation).")
-    dp.run_polling(bot, skip_updates=True)
+    asyncio.run(_main_async())
 
 
 if __name__ == "__main__":

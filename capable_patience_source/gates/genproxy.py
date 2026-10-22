@@ -7,7 +7,6 @@ import subprocess
 
 from aiogram import types, F, Router
 
-from database import is_owner_user
 from mass_gates._tg_helpers import safe_reply
 
 router = Router()
@@ -85,12 +84,47 @@ def _run_generator(proxy):
         return None
 
 
+_GEN_LOCK = asyncio.Lock()
+
+
+async def _bg_generate_loop(delay: int = 60):
+    """Background self-sustaining proxy generation.
+
+    Every `delay` seconds: pick a proxy (bms_proxy.txt first, kali fallback),
+    mint a webshare account through it (SOCKS5), store the rotating endpoint
+    in bms_proxy.txt. Serialised by _GEN_LOCK so it never overlaps a manual
+    /genproxy run."""
+    while True:
+        try:
+            proxy, source = _pick_proxy()
+            if proxy:
+                async with _GEN_LOCK:
+                    rotating = await asyncio.to_thread(_run_generator, proxy)
+                if rotating:
+                    _append_bms(rotating)
+                    logging.info(f"[genproxy-bg] generated {rotating} (source={source})")
+                else:
+                    logging.warning(f"[genproxy-bg] generation failed (source={source})")
+            else:
+                logging.warning("[genproxy-bg] no proxies in kali/bms files")
+        except Exception as e:
+            logging.error(f"[genproxy-bg] {e}")
+        await asyncio.sleep(delay)
+
+
+def start_bg_loop(delay: int = 60):
+    """Start the background proxy-generation loop. Returns the task."""
+    delay = int(os.environ.get("GENPROXY_BG_DELAY", str(delay)))
+    enabled = os.environ.get("GENPROXY_BG", "1") == "1"
+    if not enabled:
+        logging.info("[genproxy-bg] disabled via GENPROXY_BG=0")
+        return None
+    return asyncio.create_task(_bg_generate_loop(delay))
+
+
 @router.message(F.text.startswith("/genproxy"))
 async def genproxy_command(message: types.Message):
     user_id = message.from_user.id
-    if not await asyncio.to_thread(is_owner_user, user_id):
-        await safe_reply(message, f"{TARGET} <b>𝗢𝘄𝗻𝗲𝗿 𝗢𝗻𝗹𝘆</b>", parse_mode="HTML")
-        return
 
     proxy, source = _pick_proxy()
     if not proxy:
@@ -102,7 +136,8 @@ async def genproxy_command(message: types.Message):
         f"{COMPASS} 𝗦𝗼𝘂𝗿𝗰𝗲 ➠ <b>{source.upper()}</b>",
         parse_mode="HTML")
 
-    rotating = await asyncio.to_thread(_run_generator, proxy)
+    async with _GEN_LOCK:
+        rotating = await asyncio.to_thread(_run_generator, proxy)
 
     if rotating:
         added = _append_bms(rotating)
