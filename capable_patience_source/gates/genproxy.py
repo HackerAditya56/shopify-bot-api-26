@@ -74,11 +74,21 @@ def _run_generator(proxy):
     cmd = ["xvfb-run", "-a", "python3", GEN_SCRIPT, "--proxy", proxy, "--scheme", "socks5"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=_ROOT)
-        last = (proc.stdout or "").strip().splitlines()
-        if not last:
-            return None
-        data = json.loads(last[-1])
-        return data.get("rotating") or None
+        out = (proc.stdout or "").strip()
+        # the generator prints one JSON line (last); parse it robustly
+        for line in reversed(out.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    data = json.loads(line)
+                    return data.get("rotating") or None
+                except Exception:
+                    pass
+        if proc.stderr:
+            logging.error(f"[genproxy] generator stderr: {proc.stderr.strip()[:400]}")
+        else:
+            logging.error(f"[genproxy] generator produced no JSON: stdout={out[:200]!r}")
+        return None
     except Exception as e:
         logging.error(f"[genproxy] generator error: {e}")
         return None
@@ -132,8 +142,7 @@ async def genproxy_command(message: types.Message):
         return
 
     proc_msg = await safe_reply(message,
-        f"<blockquote>{BOW} 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗶𝗻𝗴 𝗪𝗲𝗯𝘀𝗵𝗮𝗿𝗲 𝗣𝗿𝗼𝘅𝘆 {DIAMOND}</blockquote>\n"
-        f"{COMPASS} 𝗦𝗼𝘂𝗿𝗰𝗲 ➠ <b>{source.upper()}</b>",
+        f"<blockquote>{BOW} 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗶𝗻𝗴 𝗣𝗿𝗼𝘅𝘆 𝗣𝗹𝗲𝗮𝘀𝗲 𝗪𝗮𝗶𝘁 {BOW}</blockquote>",
         parse_mode="HTML")
 
     async with _GEN_LOCK:
@@ -152,5 +161,5 @@ async def genproxy_command(message: types.Message):
     else:
         await proc_msg.edit_text(
             f"{TARGET} <b>𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗶𝗼𝗻 𝗳𝗮𝗶𝗹𝗲𝗱</b>\n\n"
-            f"{COMPASS} 𝘁𝗿𝗶𝗲𝗱 ➠ <code>{proxy[:60]}</code>",
+            f"{COMPASS} 𝘁𝗿𝘆𝗶𝗻𝗴 𝘀𝗼𝗼𝗻 𝗮𝗴𝗮𝗶𝗻...",
             parse_mode="HTML")

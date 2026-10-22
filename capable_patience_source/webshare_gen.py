@@ -202,11 +202,16 @@ def generate_one(proxy_str=None, scheme="socks5", headless=False):
 
 
 if __name__ == "__main__":
-    import argparse, json
+    import argparse, json, traceback
     ap = argparse.ArgumentParser()
     ap.add_argument("--proxy", default="")
     ap.add_argument("--scheme", default="socks5")
     ap.add_argument("--headless", action="store_true")
     args = ap.parse_args()
-    rotating = generate_one(args.proxy or None, args.scheme, args.headless)
-    print(json.dumps({"rotating": rotating or "", "proxy": args.proxy}))
+    try:
+        rotating = generate_one(args.proxy or None, args.scheme, args.headless)
+        print(json.dumps({"rotating": rotating or "", "proxy": args.proxy}))
+    except Exception as e:
+        # always emit a JSON line so the bot's parser doesn't hit empty output
+        print(json.dumps({"rotating": "", "proxy": args.proxy, "error": str(e)[:200]}))
+        traceback.print_exc()
