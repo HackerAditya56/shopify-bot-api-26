@@ -122,23 +122,33 @@ async def addbms_command(message: types.Message):
         parse_mode="HTML")
 
     existing = set(load_bms_proxies())
-    added, skipped = [], []
-    for line in raw_lines:
+    sem = asyncio.Semaphore(20)   # 20 concurrent BMS page checks
+
+    async def _check_one(line):
         url = _proxy_url(line)
         if not url:
-            skipped.append((line[:50], "bad format"))
-            continue
-        ok, reason = await asyncio.to_thread(_bms_page_ok, url)
-        if ok and url not in existing:
-            try:
-                with open(BMS_PROXY, "a", encoding="utf-8") as f:
-                    f.write(url + "\n")
-                existing.add(url)
-                added.append(url)
-            except Exception:
-                pass
+            return None, line, "bad format"
+        async with sem:
+            ok, reason = await asyncio.to_thread(_bms_page_ok, url)
+        return (url if ok else None), url, reason
+
+    results = await asyncio.gather(*(_check_one(line) for line in raw_lines))
+
+    added, skipped = [], []
+    for good_url, disp, reason in results:
+        if good_url and good_url not in existing:
+            existing.add(good_url)
+            added.append(good_url)
         else:
-            skipped.append((url[:50], reason))
+            skipped.append((disp[:50], reason))
+
+    if added:
+        try:
+            with open(BMS_PROXY, "a", encoding="utf-8") as f:
+                for u in added:
+                    f.write(u + "\n")
+        except Exception:
+            pass
 
     lines = [
         f"<blockquote>{STAR} 𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐂𝐡𝐞𝐜𝐤 {STAR}</blockquote>",
@@ -150,4 +160,10 @@ async def addbms_command(message: types.Message):
         lines.append(f"  {STAR} <code>{p[:50]}</code>")
     if len(added) > 5:
         lines.append(f"  <i>…+{len(added)-5} more</i>")
-    await proc.edit_text("\n".join(lines), parse_mode="HTML")
+    try:
+        await proc.edit_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    except Exception:
+        try:
+            await safe_reply(message, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            pass
