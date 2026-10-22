@@ -91,24 +91,30 @@ async def _extract_raw_lines(message):
 
 
 def _bms_page_ok(proxy: str) -> tuple:
-    """Test a proxy against the BMS page via curl (hard 15s cap — never hangs)."""
+    """Test a proxy against the BMS page via curl (hard 15s cap — never hangs).
+
+    On 403 the proxy may be a ROTATING endpoint (fresh IP per request), so it is
+    retried up to 3 times before being declared dead — never dropped on one 403."""
     url = _proxy_url(proxy)
     if not url:
         return False, "bad format"
-    try:
-        r = subprocess.run(
-            ["curl", "-s", "-m", "15", "-o", "/dev/null", "-w", "%{http_code}",
-             "-x", url, "-A", UA, "--connect-timeout", "8", BMS_PAGE],
-            capture_output=True, text=True, timeout=20,
-        )
-        code = (r.stdout or "").strip()
-        if code == "403":
-            return False, "403 blocked"
-        if code == "200":
-            return True, "ok"
-        return False, f"HTTP {code or (r.stderr or '')[:40]}"
-    except Exception as e:
-        return False, f"err {str(e)[:40]}"
+    for attempt in range(3):
+        try:
+            r = subprocess.run(
+                ["curl", "-s", "-m", "15", "-o", "/dev/null", "-w", "%{http_code}",
+                 "-x", url, "-A", UA, "--connect-timeout", "8", BMS_PAGE],
+                capture_output=True, text=True, timeout=20,
+            )
+            code = (r.stdout or "").strip()
+            if code == "200":
+                return True, "ok"
+            if code == "403":
+                # rotating proxy -> next request may hit a fresh IP
+                continue
+            return False, f"HTTP {code or (r.stderr or '')[:40]}"
+        except Exception as e:
+            return False, f"err {str(e)[:40]}"
+    return False, "403 after 3 retries"
 
 
 @router.message(F.text.startswith("/addbms"))
