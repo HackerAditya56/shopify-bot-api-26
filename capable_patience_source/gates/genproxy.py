@@ -20,7 +20,7 @@ BMS_PROXY = os.path.join(REPO, "bms_proxy.txt")
 GEN_SCRIPT = os.path.join(_ROOT, "webshare_gen.py")
 
 # ── MinecraftEnchanted premium emoji IDs (unique) ─────────────────────
-EMOJI_STAR    = "5321214486877609476"   # ⭐️
+EMOJI_STAR    = "6136275172283391020"   # ⭐️
 EMOJI_SHIELD  = "5323325115411245266"   # 🛡
 EMOJI_BOW     = "5323400479202387128"   # 🏹
 EMOJI_TARGET  = "5323410860138343577"   # 🎯

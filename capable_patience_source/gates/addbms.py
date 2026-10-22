@@ -18,7 +18,7 @@ BMS_PAGE = "https://in.bookmyshow.com/explore/home/patna"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # premium emoji IDs
-EMOJI_STAR    = "5321214486877609476"   # ⭐️
+EMOJI_STAR    = "6136275172283391020"   # ⭐️
 EMOJI_AXE     = "5323436380834016178"   # 🪓
 EMOJI_TARGET  = "5323410860138343577"   # 🎯
 EMOJI_BOW     = "5323400479202387128"   # 🏹

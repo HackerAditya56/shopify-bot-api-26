@@ -40,7 +40,7 @@ router = Router()
 BMS_API = "http://127.0.0.1:9400"
 
 # ── MinecraftEnchanted custom emoji IDs (unique to BMS) ────────────────
-EMOJI_STAR    = "5321214486877609476"   # ⭐️
+EMOJI_STAR    = "6136275172283391020"   # ⭐️
 EMOJI_BRONZE  = "5323735005615136620"   # 🥉
 EMOJI_AXE     = "5323436380834016178"   # 🪓
 EMOJI_TARGET  = "5323410860138343577"   # 🎯
