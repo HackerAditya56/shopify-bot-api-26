@@ -61,13 +61,14 @@ def _append_bms(line):
 
 
 def _pick_proxy():
-    """Self-sustaining: prefer a generated (bms) proxy; fall back to kali."""
-    bms = _load(BMS_PROXY)
-    if bms:
-        return random.choice(bms), "bms"
+    """Kali (residential) proxies first — datacenter webshare IPs trip reCAPTCHA.
+    Only fall back to bms proxies if the kali pool is empty."""
     kali = _load(KALI_PROXY)
     if kali:
         return random.choice(kali), "kali"
+    bms = _load(BMS_PROXY)
+    if bms:
+        return random.choice(bms), "bms"
     return None, None
 
 
