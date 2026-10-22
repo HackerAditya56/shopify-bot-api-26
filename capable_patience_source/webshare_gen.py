@@ -146,6 +146,7 @@ def generate_one(proxy_str=None, scheme="socks5", headless=False):
                 t = driver.execute_script("return grecaptcha.getResponse();")
                 if t:
                     token = t
+                    break
             except Exception:
                 pass
             try:
@@ -154,12 +155,22 @@ def generate_one(proxy_str=None, scheme="socks5", headless=False):
                     break
             except Exception:
                 pass
+        if not token:
+            print("DEBUG: no recaptcha token after 90s (captcha challenge?)", flush=True)
+            # dump page state
+            try:
+                body = driver.execute_script("return document.body.innerText.slice(0,300)")
+                print(f"DEBUG: page body: {body!r}", flush=True)
+            except Exception:
+                pass
 
-        # authoritative: token in localStorage -> fetch proxies
+        # authoritative: token in localStorage OR cookie -> fetch proxies
         for _ in range(10):
             time.sleep(1)
             try:
                 at = driver.execute_script("return localStorage.getItem('token') || '';")
+                if not at:
+                    at = driver.execute_script("return (document.cookie.match(/token=([^;]+)/)||[])[1] || '';")
                 if at:
                     rotating, _ = fetch_rotating_proxy(at)
                     if rotating:
