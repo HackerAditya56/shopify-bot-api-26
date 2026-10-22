@@ -30,7 +30,7 @@ from database import is_owner_user
 TEST_CARD = "4000223372377978|05|29|651"
 
 # API Configuration - SAME AS msh.py
-API_BASE_URL = "http://127.0.0.1:8080/sh"
+API_BASE_URL = "http://127.0.0.1:8090/sh"
 API_TIMEOUT = 30
 
 # Proxy List - Rotated randomly for each check

@@ -20,7 +20,7 @@ from curl_cffi import requests as curl_requests
 
 app = Flask(__name__)
 
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int(os.environ.get("PORT", "8090"))
 
 _SHOP_PACE = {}
 
