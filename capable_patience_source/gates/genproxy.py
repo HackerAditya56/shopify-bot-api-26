@@ -8,6 +8,7 @@ import subprocess
 from aiogram import types, F, Router
 
 from mass_gates._tg_helpers import safe_reply
+from proxy_pool import add_proxy_sync
 
 router = Router()
 
@@ -151,12 +152,14 @@ async def genproxy_command(message: types.Message):
         rotating = await asyncio.to_thread(_run_generator, proxy)
 
     if rotating:
-        added = _append_bms(rotating)
+        _append_bms(rotating)
+        # also hand the proxy to this user's /proxy pool
+        given = await asyncio.to_thread(add_proxy_sync, user_id, rotating)
         lines = [
             f"<blockquote>{STAR} 𝗣𝗿𝗼𝘅𝘆 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 {STAR}</blockquote>",
             "━━━━━━━━━━━━━━━━━━━━━",
             f"{SHIELD} 𝗥𝗼𝘁𝗮𝘁𝗶𝗻𝗴 ➠ <code>{rotating}</code>",
-            f"{DIAMOND} 𝗦𝘁𝗼𝗿𝗲𝗱 ➠ <b>bms_proxy.txt</b>",
+            f"{DIAMOND} 𝗦𝘁𝗼𝗿𝗲𝗱 ➠ <b>bms_proxy.txt</b> {'+ 𝘆𝗼𝘂𝗿 𝗽𝗼𝗼𝗹' if given else ''}",
             f"{COMPASS} 𝗦𝗼𝘂𝗿𝗰𝗲 ➠ <b>{source.upper()}</b>",
         ]
         await proc_msg.edit_text("\n".join(lines), parse_mode="HTML")
