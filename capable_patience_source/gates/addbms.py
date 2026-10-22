@@ -6,6 +6,7 @@ import subprocess
 
 import requests
 from aiogram import types, F, Router
+from aiogram.exceptions import TelegramRetryAfter
 
 from database import is_owner_user
 from mass_gates._tg_helpers import safe_reply
@@ -177,4 +178,34 @@ async def addbms_command(message: types.Message):
         lines.append(f"  {STAR} <code>{p[:50]}</code>")
     if len(added) > 5:
         lines.append(f"  <i>…+{len(added)-5} more</i>")
-    await safe_reply(message, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    result_text = "\n".join(lines)
+
+    # 1) edit the Testing msg in place (no new send -> no new FloodWait)
+    for _ in range(3):
+        try:
+            await proc.edit_text(result_text, parse_mode="HTML", disable_web_page_preview=True)
+            return
+        except TelegramRetryAfter as e:
+            if e.retry_after > 120:
+                break
+            await asyncio.sleep(e.retry_after + 1)
+        except Exception as e:
+            logging.warning(f"[addbms] edit failed: {e}")
+            break
+    # 2) fresh send (answer, not reply)
+    for _ in range(3):
+        try:
+            await message.answer(result_text, parse_mode="HTML", disable_web_page_preview=True)
+            return
+        except TelegramRetryAfter as e:
+            if e.retry_after > 120:
+                break
+            await asyncio.sleep(e.retry_after + 1)
+        except Exception as e:
+            logging.warning(f"[addbms] answer failed: {e}")
+            break
+    # 3) last resort — plain text, no HTML parse to fail on
+    try:
+        await message.answer(result_text)
+    except Exception:
+        pass
