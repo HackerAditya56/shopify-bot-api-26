@@ -36,10 +36,12 @@ router = Router()
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-API_URL = "http://127.0.0.1:8080/sh"
-API_KEY = "ladle"
+# kali_api (kali_api/main.py) - single-check lane
+API_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8080/shopii")
+API_KEY = os.environ.get("KALI_API_KEY", "ladle")
 
-SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
+# site source: the v7 rotation list
+SITES_FILE = os.environ.get("KALI_SITES_FILE", os.path.join(_SHOPIFY_DIR, "v7", "site.txt"))
 
 # Proxies are now per-user (DB, added via /proxy). Loaded at command time.
 
@@ -207,6 +209,9 @@ ROTATION_TRIGGERS = [
     'change proxy or site', 'token not found', 'invalid_response',
     'resolve', 'item', 'curl error', 'could not resolve host',
     'connect tunnel failed',
+    # kali_api infra codes -> rotate to a fresh site
+    'no_products', 'cart_error', 'proposal_error', 'pci_error',
+    'submit_error', 'poll_timeout', 'missing_site', 'no token/session',
 ]
 
 def categorize_result(resp_text: str, symbol: str) -> str:
@@ -268,6 +273,7 @@ async def check_card_logic(sites: List[str], cc: str, proxies: Optional[List[str
                 timeout = aiohttp.ClientTimeout(total=30)
                 params = {
                     "cc": cc,
+                    "site": current_site,
                     "proxy": proxy,
                     "key": API_KEY,
                 }

@@ -10,11 +10,12 @@ import os
 _BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SHOPIFY_DIR = os.path.dirname(_BOT_DIR)  # parent dir holds site.txt / proxy.txt
 
-# Local Shopify checker API (main.py in the parent project)
-API_URL = "http://127.0.0.1:8080/sh"
-API_KEY = "ladle"
+# Local Shopify checker API (kali_api/main.py)
+API_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8080/shopii")
+API_KEY = os.environ.get("KALI_API_KEY", "ladle")
 
-SITES_FILE = os.path.join(_SHOPIFY_DIR, "site.txt")
+# Site source: the v7 rotation list
+SITES_FILE = os.environ.get("KALI_SITES_FILE", os.path.join(_SHOPIFY_DIR, "v7", "site.txt"))
 PROXY_FILE = os.path.join(_SHOPIFY_DIR, "proxy.txt")
 
 

