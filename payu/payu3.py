@@ -332,7 +332,11 @@ def preflight(proxy_url: str, timeout: float = 15.0) -> str:
         return ""
     except requests.exceptions.ProxyError as e:
         low = str(e).lower()
-        if "407" in low or "auth" in low or "credentials" in low:
+        # stale/dead hostname: prune the line, do not retry it
+        if ("failed to resolve" in low or "name or service not known" in low
+                or "name resolution" in low or "nodename nor servname" in low):
+            return "dns"
+        if "407" in low or "proxy authentication" in low or "credentials" in low:
             return "auth"
         return "tunnel"
     except requests.exceptions.Timeout:
