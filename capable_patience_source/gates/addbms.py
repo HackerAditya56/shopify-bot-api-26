@@ -177,8 +177,4 @@ async def addbms_command(message: types.Message):
         lines.append(f"  {STAR} <code>{p[:50]}</code>")
     if len(added) > 5:
         lines.append(f"  <i>…+{len(added)-5} more</i>")
-    try:
-        await proc.delete()
-    except Exception:
-        pass
     await safe_reply(message, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
