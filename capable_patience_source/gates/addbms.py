@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import os
+import re
 
 import requests
 from aiogram import types, F, Router
 
 from database import is_owner_user
 from mass_gates._tg_helpers import safe_reply
-from proxy import extract_proxies_from_input, parse_proxy_input
 from bms_proxy_pool import load_bms_proxies, BMS_PROXY
 
 router = Router()
@@ -27,26 +27,66 @@ BOW    = f'<tg-emoji emoji-id="{EMOJI_BOW}">🏹</tg-emoji>'
 
 
 def _proxy_url(proxy):
-    """Return a clean http:// URL from either a parsed dict or a raw string."""
-    if isinstance(proxy, dict):
-        url = proxy.get("url_format")
-        if url:
-            return url
-        u = proxy.get("username") or ""
-        pw = proxy.get("password") or ""
-        host = proxy.get("ip") or proxy.get("host") or ""
-        port = proxy.get("port") or ""
-        if not host or not port:
-            return None
-        return f"http://{u}:{pw}@{host}:{port}" if (u and pw) else f"http://{host}:{port}"
-    try:
-        parsed = parse_proxy_input(proxy)
-        if parsed and parsed.get("url_format"):
-            return parsed["url_format"]
-    except Exception:
-        pass
-    p = str(proxy).strip()
-    return p if "://" in p else "http://" + p
+    """Normalize ANY proxy format -> http://user:pass@host:port (BMS API format).
+
+    Accepts: ip:port, user:pass@ip:port, user:pass:ip:port, ip:port:user:pass,
+    host:port:user:pass, http://..., socks5://... etc."""
+    raw = proxy.get("url_format") if isinstance(proxy, dict) else str(proxy)
+    s = raw.strip().lstrip("\ufeff")
+    if not s:
+        return None
+    # strip any scheme
+    s = re.sub(r"^(http|https|socks4|socks5)://", "", s, flags=re.IGNORECASE)
+    # user:pass@host:port
+    if "@" in s:
+        return "http://" + s
+    parts = s.split(":")
+    if len(parts) == 4:
+        # host:port:user:pass  vs  user:pass:host:port — port is always numeric
+        if parts[1].isdigit():
+            host, port, user, pwd = parts
+            return f"http://{user}:{pwd}@{host}:{port}"
+        user, pwd, host, port = parts
+        return f"http://{user}:{pwd}@{host}:{port}"
+    if len(parts) == 2:
+        # ip:port
+        return f"http://{s}"
+    if len(parts) == 3:
+        # user:pass:port (rare) -> treat last as port, no host
+        return None
+    return None
+
+
+async def _extract_raw_lines(message):
+    """Pull every raw proxy line from text / reply / file — no format filtering,
+    so mixed-format .txt files are handled line-by-line."""
+    raw_text = ""
+    cmd = message.text or message.caption or ""
+    parts = cmd.split(maxsplit=1)
+    if len(parts) > 1:
+        raw_text += parts[1].strip() + "\n"
+    if message.reply_to_message:
+        rm = message.reply_to_message
+        if rm.text:
+            raw_text += rm.text + "\n"
+        elif rm.caption:
+            raw_text += rm.caption + "\n"
+    document = message.document
+    if not document and message.reply_to_message:
+        document = message.reply_to_message.document
+    if document:
+        try:
+            fi = await message.bot.get_file(document.file_id)
+            data = await message.bot.download_file(fi.file_path)
+            raw_text += data.read().decode("utf-8", errors="ignore") + "\n"
+        except Exception as e:
+            logging.warning(f"[addbms] file read failed: {e}")
+    lines = []
+    for line in raw_text.splitlines():
+        line = line.strip().lstrip("\ufeff")
+        if line and not line.startswith("#"):
+            lines.append(line)
+    return lines
 
 
 def _bms_page_ok(proxy: str) -> tuple:
@@ -72,24 +112,21 @@ async def addbms_command(message: types.Message):
         await safe_reply(message, f"{TARGET} <b>𝐃𝐞𝐯 𝐎𝐧𝐥𝐲</b>", parse_mode="HTML")
         return
 
-    valid, total, err = await extract_proxies_from_input(message)
-    if err:
-        await safe_reply(message, err, parse_mode="HTML")
-        return
-    if not valid:
-        await safe_reply(message, f"{TARGET} <b>𝐍𝐨 𝐯𝐚𝐥𝐢𝐝 𝐩𝐫𝐨𝐱𝐢𝐞𝐬.</b>\n\nSend a file/reply with <code>/addbms</code>.", parse_mode="HTML")
+    raw_lines = await _extract_raw_lines(message)
+    if not raw_lines:
+        await safe_reply(message, f"{TARGET} <b>𝐍𝐨 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐟𝐨𝐮𝐧𝐝.</b>\n\nSend a file/reply with <code>/addbms</code>.", parse_mode="HTML")
         return
 
     proc = await safe_reply(message,
-        f"<blockquote>{BOW} 𝐓𝐞𝐬𝐭𝐢𝐧𝐠 {len(valid)} 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐚𝐠𝐚𝐢𝐧𝐬𝐭 𝐁𝐌𝐒 {BOW}</blockquote>",
+        f"<blockquote>{BOW} 𝐓𝐞𝐬𝐭𝐢𝐧𝐠 {len(raw_lines)} 𝐩𝐫𝐨𝐱𝐢𝐞𝐬 𝐚𝐠𝐚𝐢𝐧𝐬𝐭 𝐁𝐌𝐒 {BOW}</blockquote>",
         parse_mode="HTML")
 
     existing = set(load_bms_proxies())
     added, skipped = [], []
-    for p in valid:
-        url = _proxy_url(p)
+    for line in raw_lines:
+        url = _proxy_url(line)
         if not url:
-            skipped.append((str(p)[:50], "bad format"))
+            skipped.append((line[:50], "bad format"))
             continue
         ok, reason = await asyncio.to_thread(_bms_page_ok, url)
         if ok and url not in existing:
