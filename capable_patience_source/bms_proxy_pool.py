@@ -27,6 +27,27 @@ def load_bms_proxies() -> list:
     return out
 
 
+OWNER_ID = 8462705169
+
+_DEV_NOTIFY_TEXT = (
+    "🚨 <b>𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐅𝐥𝐚𝐠𝐠𝐞𝐝 + 𝐑𝐞𝐦𝐨𝐯𝐞𝐝</b> 🚨\n"
+    "━━━━━━━━━━━━━━━━━━━━━\n"
+    "🧭 <b>𝐏𝐫𝐨𝐱𝐲</b> ➠ <code>{proxy}</code>\n"
+    "⚙️ <i>dropped from bms_proxy.txt mid-check</i>"
+)
+
+
+async def prune_and_notify(proxy: str, bot) -> bool:
+    """Remove a flagged proxy from bms_proxy.txt + DM the dev."""
+    removed = prune_bms_proxy(proxy)
+    if removed and bot:
+        try:
+            await bot.send_message(OWNER_ID, _DEV_NOTIFY_TEXT.format(proxy=proxy), parse_mode="HTML")
+        except Exception as e:
+            logging.warning(f"[bms_proxy] dev notify failed: {e}")
+    return removed
+
+
 def prune_bms_proxy(line: str) -> bool:
     """Remove a burned proxy from bms_proxy.txt. Returns True if removed."""
     try:

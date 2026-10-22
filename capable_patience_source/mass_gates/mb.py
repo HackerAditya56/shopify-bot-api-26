@@ -16,7 +16,7 @@ from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
 from proxy import parse_proxy_input
-from bms_proxy_pool import load_bms_proxies, prune_bms_proxy
+from bms_proxy_pool import load_bms_proxies, prune_bms_proxy, prune_and_notify, OWNER_ID
 
 
 def _norm_proxy(proxy):
@@ -46,6 +46,26 @@ EMOJI_AXE     = "5323436380834016178"   # 🪓
 EMOJI_TARGET  = "5323410860138343577"   # 🎯
 EMOJI_BOW     = "5323400479202387128"   # 🏹
 EMOJI_COMPASS = "5323308163175327669"   # 🧭
+
+_notify_bot = None
+_notify_loop = None
+
+
+def _set_notify(bot, loop):
+    global _notify_bot, _notify_loop
+    _notify_bot = bot
+    _notify_loop = loop
+
+
+def _flag_dm(proxy):
+    global _notify_bot, _notify_loop
+    if _notify_bot and _notify_loop:
+        import asyncio as _aio
+        try:
+            _aio.run_coroutine_threadsafe(prune_and_notify(proxy, _notify_bot), _notify_loop)
+        except Exception:
+            pass
+
 
 _STOP_EVENT = threading.Event()
 MAX_VALID_CARDS = 5000
@@ -155,6 +175,12 @@ def check_fn(card):
     real = str(data.get("real_response") or "N/A")
     amount_str = str(data.get("amount") or "0.00")
 
+    if response_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR"):
+        # flagged by Cloudflare -> drop from bms_proxy.txt + DM dev
+        prune_bms_proxy(proxy)
+        _flag_dm(proxy)
+        _pause_proxy(proxy, 3600)
+
     if "proxy" in response_code.lower() or ("error" in status and "proxy" in real.lower()):
         _pause_proxy(proxy, random.randint(60, 180))
 
@@ -227,6 +253,7 @@ async def bms_txt_command(message: types.Message):
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
+    _set_notify(message.bot, asyncio.get_event_loop())
     _proxies = load_bms_proxies()  # ONLY the generated bms_proxy.txt pool
     if not _proxies:
         await safe_reply(message,

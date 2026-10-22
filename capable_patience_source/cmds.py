@@ -62,6 +62,7 @@ PAGES = [
         "entries": [
             {"gate": "BIN Lookup",         "cmd": "/bin",        "limit": None, "premium": False},
             {"gate": "Generate BMS Proxy",  "cmd": "/genproxy", "limit": None, "premium": True},
+            {"gate": "Add BMS Proxies",     "cmd": "/addbms",  "limit": None, "premium": True},
         ],
     },
     {
