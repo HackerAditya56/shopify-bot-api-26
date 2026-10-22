@@ -44,8 +44,8 @@ from proxy import global_proxy_manager
 SK_API_ENDPOINT = (
     "https://skbased.stormx.pw/skbased"
     "?key=Darkboy"
-    f"&sk={os.environ.get('SK_LIVE_KEY', '')}"
-    f"&pk={os.environ.get('PK_LIVE_KEY', '')}"
+    "&sk=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"
+    "&pk=pk_live_mml7hIGddV0ggi8yNy6WIyGT00BY9fU39e"
     "&amount=0.50"
     "&cc={}"
 )
