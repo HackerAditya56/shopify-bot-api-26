@@ -81,6 +81,8 @@ def _run_generator(proxy):
             if line.startswith("{"):
                 try:
                     data = json.loads(line)
+                    if data.get("error"):
+                        logging.error(f"[genproxy] generator error: {data['error'][:300]}")
                     return data.get("rotating") or None
                 except Exception:
                     pass
@@ -161,5 +163,5 @@ async def genproxy_command(message: types.Message):
     else:
         await proc_msg.edit_text(
             f"{TARGET} <b>𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗶𝗼𝗻 𝗳𝗮𝗶𝗹𝗲𝗱</b>\n\n"
-            f"{COMPASS} 𝘁𝗿𝘆𝗶𝗻𝗴 𝘀𝗼𝗼𝗻 𝗮𝗴𝗮𝗶𝗻...",
+            f"{COMPASS} 𝘁𝗿𝘆 𝗮𝗴𝗮𝗶𝗻 𝗮𝗳𝘁𝗲𝗿 𝘀𝗼𝗺𝗲 𝘁𝗶𝗺𝗲",
             parse_mode="HTML")

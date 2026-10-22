@@ -280,6 +280,7 @@ async def process_bms_check(message, proc_msg, user, user_id, formatted_cc, cc, 
         status_raw.upper(), formatted_cc, "𝐁𝐌𝐒", amt, bin_info, res_code,
         user_display, dev_link, proxy_status=px,
         extra_lines=[f"{EMOJI_RESPONSE} 𝐑𝐞𝐚𝐥 𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞 ➠ <b>{escape(str(real_resp))}</b>"],
+        currency="₹",
     )
 
     # silent group log + pin for CHARGED

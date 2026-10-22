@@ -166,7 +166,7 @@ ERROR_EMOJI    = '<tg-emoji emoji-id="6255910249362885846">⚠️</tg-emoji>'
 
 
 def build_hit_card(status, card, gateway, price, bin_info, response, user_display,
-                   dev_link, proxy_status=None, extra_lines=None):
+                   dev_link, proxy_status=None, extra_lines=None, currency="$"):
     """The premium single-check hit card (same look as the mass charged-hit UI)."""
     from html import escape
     status = (status or "").upper()
@@ -194,7 +194,7 @@ def build_hit_card(status, card, gateway, price, bin_info, response, user_displa
     lines = [header, "━━━━━━━━━━━━━━━━━━━━━",
              f"{EMOJI_CARD} 𝐂𝐚𝐫𝐝 ➠ <tg-spoiler><code>{safe_card}</code></tg-spoiler>",
              f"{EMOJI_GATEWAY} 𝐆𝐚𝐭𝐞𝐰𝐚𝐲 ➠ <b>{escape(str(gateway))}</b>",
-             f"{EMOJI_PRICE} 𝐏𝐫𝐢𝐜𝐞 ➠ <b>{safe_price} $</b>",
+             f"{EMOJI_PRICE} 𝐏𝐫𝐢𝐜𝐞 ➠ <b>{safe_price} {currency}</b>",
              f"{EMOJI_BRAND} 𝐁𝐫𝐚𝐧𝐝 ➠ <b>{bin_scheme}</b>",
              f"{EMOJI_LEVEL} 𝐋𝐞𝐯𝐞𝐥 ➠ <b>{bin_level}</b>",
              f"{EMOJI_ISSUER} 𝐈𝐬𝐬𝐮𝐞𝐫 ➠ <b>{bin_bank}</b>",
