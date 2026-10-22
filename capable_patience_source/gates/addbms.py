@@ -92,30 +92,31 @@ async def _extract_raw_lines(message):
 
 
 def _bms_page_ok(proxy: str) -> tuple:
-    """Test a proxy against the BMS page via curl (hard 15s cap — never hangs).
+    """Test a proxy against BMS via headful Chrome (the only real verdict).
 
-    On 403 the proxy may be a ROTATING endpoint (fresh IP per request), so it is
-    retried up to 3 times before being declared dead — never dropped on one 403."""
+    A plain curl gets 403 from BMS even on a clean IP, so the check launches
+    undetected Chrome through the proxy + waits for Cloudflare's cf_clearance
+    cookie. BLOCKED retries once (a rotating proxy gets a fresh IP)."""
     url = _proxy_url(proxy)
     if not url:
         return False, "bad format"
-    for attempt in range(3):
+    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bms_test_proxy.py")
+    for attempt in range(2):
         try:
             r = subprocess.run(
-                ["curl", "-s", "-m", "15", "-o", "/dev/null", "-w", "%{http_code}",
-                 "-x", url, "-A", UA, "--connect-timeout", "8", BMS_PAGE],
-                capture_output=True, text=True, timeout=20,
+                ["xvfb-run", "-a", "python3", script, "--proxy", url],
+                capture_output=True, text=True, timeout=110,
             )
-            code = (r.stdout or "").strip()
-            if code == "200":
+            verdict = (r.stdout or "").strip().splitlines()
+            last = verdict[-1].strip() if verdict else ""
+            if last.startswith("OK"):
                 return True, "ok"
-            if code == "403":
-                # rotating proxy -> next request may hit a fresh IP
-                continue
-            return False, f"HTTP {code or (r.stderr or '')[:40]}"
+            if last.startswith("BLOCKED"):
+                continue   # rotating proxy -> next attempt hits a fresh IP
+            return False, f"dead {last[:40]}"
         except Exception as e:
             return False, f"err {str(e)[:40]}"
-    return False, "403 after 3 retries"
+    return False, "blocked"
 
 
 @router.message(F.text.startswith("/addbms"))
@@ -135,7 +136,7 @@ async def addbms_command(message: types.Message):
         parse_mode="HTML")
 
     existing = set(load_bms_proxies())
-    sem = asyncio.Semaphore(20)   # 20 concurrent BMS page checks
+    sem = asyncio.Semaphore(3)    # 3 concurrent headful-Chrome checks (heavy)
 
     async def _check_one(line):
         url = _proxy_url(line)
