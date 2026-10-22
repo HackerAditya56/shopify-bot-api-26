@@ -26,14 +26,26 @@ TARGET = f'<tg-emoji emoji-id="{EMOJI_TARGET}">🎯</tg-emoji>'
 BOW    = f'<tg-emoji emoji-id="{EMOJI_BOW}">🏹</tg-emoji>'
 
 
-def _proxy_url(proxy: str):
+def _proxy_url(proxy):
+    """Return a clean http:// URL from either a parsed dict or a raw string."""
+    if isinstance(proxy, dict):
+        url = proxy.get("url_format")
+        if url:
+            return url
+        u = proxy.get("username") or ""
+        pw = proxy.get("password") or ""
+        host = proxy.get("ip") or proxy.get("host") or ""
+        port = proxy.get("port") or ""
+        if not host or not port:
+            return None
+        return f"http://{u}:{pw}@{host}:{port}" if (u and pw) else f"http://{host}:{port}"
     try:
         parsed = parse_proxy_input(proxy)
         if parsed and parsed.get("url_format"):
             return parsed["url_format"]
     except Exception:
         pass
-    p = proxy.strip()
+    p = str(proxy).strip()
     return p if "://" in p else "http://" + p
 
 
@@ -75,17 +87,21 @@ async def addbms_command(message: types.Message):
     existing = set(load_bms_proxies())
     added, skipped = [], []
     for p in valid:
-        ok, reason = await asyncio.to_thread(_bms_page_ok, p)
-        if ok and p not in existing:
+        url = _proxy_url(p)
+        if not url:
+            skipped.append((str(p)[:50], "bad format"))
+            continue
+        ok, reason = await asyncio.to_thread(_bms_page_ok, url)
+        if ok and url not in existing:
             try:
                 with open(BMS_PROXY, "a", encoding="utf-8") as f:
-                    f.write(p + "\n")
-                existing.add(p)
-                added.append(p)
+                    f.write(url + "\n")
+                existing.add(url)
+                added.append(url)
             except Exception:
                 pass
         else:
-            skipped.append((p, reason))
+            skipped.append((url[:50], reason))
 
     lines = [
         f"<blockquote>{STAR} 𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐂𝐡𝐞𝐜𝐤 {STAR}</blockquote>",
