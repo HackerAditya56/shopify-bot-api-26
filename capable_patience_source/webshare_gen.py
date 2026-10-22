@@ -16,6 +16,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
+def _find_browser():
+    """Locate a Chrome/Chromium binary (incl. snap)."""
+    import shutil
+    for cand in ("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
+                 "/usr/bin/chromium-browser", "/usr/bin/chromium", "/snap/bin/chromium"):
+        if os.path.exists(cand):
+            return cand
+    return (shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+            or shutil.which("chromium") or shutil.which("chromium-browser"))
+
+
 def rand_str(k=8):
     return "".join(random.choices(string.ascii_lowercase, k=k))
 
@@ -108,7 +119,8 @@ def generate_one(proxy_str=None, scheme="socks5", headless=False):
             if ext:
                 opts.add_argument(f"--load-extension={ext}")
 
-    driver = uc.Chrome(options=opts, driver_executable_path=cd_path)
+    browser_path = _find_browser()
+    driver = uc.Chrome(options=opts, driver_executable_path=cd_path, browser_executable_path=browser_path)
     w = WebDriverWait(driver, 20)
     rotating = None
 
