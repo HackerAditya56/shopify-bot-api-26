@@ -484,18 +484,41 @@ async def do_pg_post(page, trans, card, email, phone, isd_code="+1"):
         "isdCode": "+91",
         "presaleUUID": "",
     }
-    r = await _bms_fetch(page, DO_PG_POST, "POST", urllib.parse.urlencode(form),
-                         extra={"Content-Type": "application/x-www-form-urlencoded",
-                                "Referer": f"{BMS_HOME}/", "Origin": BMS_HOME})
-    # parse the juspay redirect from the HTML
-    m = re.search(r'action="(https://api\.juspay\.in[^"]+)"', r["body"])
-    return r, (m.group(1).replace("&amp;", "&") if m else "")
+    req = page.context.request
+    resp = await req.post(DO_PG_POST, headers={"Content-Type": "application/x-www-form-urlencoded",
+                                               "Referer": BMS_HOME + "/", "Origin": BMS_HOME},
+                          data=urllib.parse.urlencode(form))
+    text = await resp.text()
+    m = re.search(r'action="(https://api\.juspay\.in[^"]+)"', text)
+    juspay_url = urllib.parse.unquote(m.group(1)) if m else ""
+    return {"status": resp.status, "body": text}, juspay_url
 
 
 async def checkoutx(page, payu_id):
     r = await _bms_fetch(page, f"https://api.payu.in/checkoutx?paymentId={payu_id}", "GET",
                          extra={"Referer": "https://api.payu.in/public/"})
     return json.loads(r["body"]) if r["status"] == 200 else {}
+
+
+async def payu_load_spa(page, payu_id, posted_params):
+    """POST the juspay redirect form to payu.in/public/ + load the SPA (generates
+    the PHP session + device-fingerprint cookies needed by checkoutx/payments)."""
+    await page.evaluate("""async ({mihpayid, postedParams}) => {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'https://api.payu.in/public/#/' + mihpayid;
+        form.style.display = 'none';
+        form.innerHTML = '<input name="mihpayid" value="' + mihpayid + '"><input name="postedParams" value="' + postedParams + '">';
+        document.body.appendChild(form);
+        form.submit();
+    }""", {"mihpayid": payu_id, "postedParams": posted_params})
+    for _ in range(15):
+        await page.wait_for_timeout(3000)
+        cookies = await page.context.cookies("https://api.payu.in")
+        names = {c["name"] for c in cookies}
+        if "PHPSESSID" in names and "DEVICEINFO" in names:
+            return
+    raise Exception("payu: SPA device-fingerprint cookies not obtained")
 
 
 async def payu_submit_card(page, payu_id, card, mcp_lookup_id=""):
@@ -511,12 +534,16 @@ async def payu_submit_card(page, payu_id, card, mcp_lookup_id=""):
     if mcp_lookup_id:
         payload["mcpLookupId"] = mcp_lookup_id
     key_b64, enc_body = encrypt_payu_card(json.dumps(payload))
-    r = await _bms_fetch(page, "https://api.payu.in/checkoutx/payments", "POST",
-                         json.dumps({"encryptedBody": enc_body}),
-                         extra={"Content-Type": "application/json",
-                                "x-payu-encryption-key": key_b64,
-                                "Referer": "https://api.payu.in/public/"})
-    return json.loads(r["body"]) if r["status"] == 200 else {"status": r["status"]}
+    r = await page.evaluate("""async ({key, body}) => {
+        const r = await fetch('https://api.payu.in/checkoutx/payments', {
+            method: 'POST', credentials: 'include',
+            headers: {'Content-Type': 'application/json', 'x-payu-encryption-key': key},
+            body: JSON.stringify({encryptedBody: body}),
+        });
+        const text = await r.text();
+        return {status: r.status, body: text};
+    }""", {"key": key_b64, "body": enc_body})
+    return json.loads(r["body"]) if r["status"] == 200 else {"status": r["status"], "raw": r["body"][:200]}
 
 
 async def check_result(page, trans_id, payment_id):
@@ -659,18 +686,21 @@ async def run_bms_check(cc: str, proxy_url: str = "", region: str = REGION) -> B
         await set_user_details(page, email, phone)
         await osp_summary(page, trans)
 
-        # payment: doPGPost -> juspay -> checkoutx -> card -> check-status
+        # payment: doPGPost -> juspay -> payu SPA -> checkoutx -> card -> check-status
         _, juspay_url = await do_pg_post(page, trans, card, email, phone)
-        payu_id = ""
+        payu_id, posted_params = "", ""
         if juspay_url:
             jr = await _bms_fetch(page, juspay_url, "GET")
-            m = re.search(r'mihpayid" value="([a-f0-9]+)"', jr["body"])
+            m = re.search(r'name="mihpayid" value="([a-f0-9]+)"', jr["body"])
             payu_id = m.group(1) if m else ""
+            mp = re.search(r'name="postedParams" value="([^"]+)"', jr["body"])
+            posted_params = mp.group(1) if mp else ""
         if not payu_id:
             res.real_response = "payment redirect failed"
             return res
         res.payu_id = payu_id
 
+        await payu_load_spa(page, payu_id, posted_params)
         cx = await checkoutx(page, payu_id)
         mcp_id = ""
         mcc = _extract(cx, "auth.mccData", []) or []
