@@ -1,0 +1,74 @@
+HTTP/2 302 
+date: Tue, 29 Sep 2026 15:49:52 GMT
+content-type: text/html; charset=utf-8
+content-length: 0
+location: https://shop.app/checkout/8684109904/cn/hWNHOeM0yiHiQuvcmvWkUNxh/en-us/shoppay?_mcs=3.AMPS&_r=AQABvW7pAYylXB9SxOkv1PTo7jnT7u0DAmE0jgygZNh1yHcpgHDQ&cart_link_id=DAH0jMIK&redirect_source=checkout_universal_redirect&shop_pay_token=eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaWQ6XC9cL3Nob3BpZnlcL1Nob3BcLzg2ODQxMDk5MDQiLCJuYmYiOjE3OTA2OTY5OTIsInNlc3Npb25fdG9rZW4iOiJBQUVCSV9vRkVhcWxnNlFrMWdHUklGMUlGQ2M1ejlpdV9PWXE5N204THN5VUcySEk4UlFmWU0wa1hzT2poc0NJU2dqMlJRTEZZR1JhOHVpSjNEaVVMWUowV28xY1F3eFZ2b1hmenRLTTBxd3EyaXZQX2hLeHNDWjAzYngwVm4yenl5MjcyeTl5MGVuLWRrM29xTUlFajZXSW1tdkIySTNOWkVSWGxlQl9JeXJkMDN0MW92Y2JNVTg2Z0Zva2h1VUNIR0I2LVo1V1JIcThmVURUMzNZZGNETmhWT0IyakdNU0QtRU1ZREg5bi04LUQ3c2RnOUdzRGciLCJleHAiOjE3OTA3MDA1OTIsImxhbmRpbmdfcGFnZSI6IlwvY2FydFwvMzkzNzQ3NjcxMjg3NDk6MSIsIm9yaWdfcmVmZXJyZXIiOiIiLCJtZXJjaGFudF9jb25zZW50IjoiMy5BTVBTIn0.iLARTFrOEZIvzxrH9BF7ISeiV5iQxGW1LPAoeE40KpY&tracking_unique=e15c4c7a-e4ab-4a7c-9f34-bb9b2b0954b9&tracking_visit=0ec5d796-2894-4766-8d4f-c8992c4cc34e&ur_back_url=https%3A%2F%2Fwww.fortworthfabricstudio.com%2Fcheckouts%2Fcn%2FhWNHOeM0yiHiQuvcmvWkUNxh%2Fen-us%3F_r%3DAQABiqjqak18AZDJvwcfUJiRbBz1vTfBdNSZs-8781U5fIM8KnmM%26auto_redirect%3Dfalse%26cart_link_id%3DDAH0jMIK%26edge_redirect%3Dtrue%26skip_shop_pay%3Dtrue&ur_verify=mvEFMmOjO67Pghw0g1f1dSFNJrU%3D
+x-dc: gcp-us-central1,gcp-us-central1,gcp-us-central1
+cache-control: no-cache, no-store
+timing-allow-origin: https://shop.app, https://www.fortworthfabricstudio.com
+x-download-options: noopen
+set-cookie: _shopify_essential=:AaDt268tAAEAYewDkKO3ODRpVNSja6abVqC9EdrFyzF7Zeps_SKNuzxLdzovRzf1J-kvU184l_w1Log6nQ2DU6JK-JKW_8aC1_w5pOsMysOekr0uxPuPHtvr_ee1Kribu_4QUTewb2FW76ms4O9smcSbM2ycEuhaWZKyO7xQ9QO4189A5tneL2UHVTLvr4yZ-wjSxjIqpvruP7AfpI-YEOyDlfU3nDMOstltNL2vTELp_CwxdXjzGRfAsEzbjKzLGH_j6EQaMgZLEWQ:; Max-Age=31536000; Path=/; HttpOnly; Secure; Priority=High; SameSite=Lax
+set-cookie: _shopify_analytics=:AaDt2681AAEATczakWXuXXp2YxBNgHAx6ulVd_j2NyZAX6P2i2_EGTJsRLMoBxWLJIPNx5LFE3ogq-l4QykUChXrc64:; Max-Age=31536000; Path=/; HttpOnly; Secure; Priority=High; SameSite=Lax
+set-cookie: _shopify_marketing=:AaDt2682AAEA9d1JaRfPDYzu_CMYGRdRzLp39QCRMi20WQ7ioFceFJvJXrqWjJoprt3KRODJjuadtEwdVKsuBjWmbTU:; Max-Age=31536000; Path=/; HttpOnly; Secure; Priority=High; SameSite=Lax
+set-cookie: localization=US; path=/; expires=Wed, 29 Sep 2027 15:49:52 GMT; SameSite=Lax
+set-cookie: cart=hWNHOeM0yiHiQuvcmvWkUNxh%3Fkey%3Da2fa4ca52405302e87ba07cb52353d32; path=/; expires=Tue, 29 Dec 2026 16:49:52 GMT; SameSite=Lax
+set-cookie: cart_currency=USD; path=/; expires=Tue, 29 Dec 2026 16:49:52 GMT; SameSite=Lax
+clear-site-data: "prefetchCache", "prerenderCache"
+shopify-complexity-score: 0
+shopify-complexity-score-v2: 501
+x-frame-options: DENY
+content-security-policy: block-all-mixed-content; frame-ancestors 'none'; upgrade-insecure-requests;
+strict-transport-security: max-age=7889238
+vary: Accept
+cdn-cache-control: no-cache, no-store
+link: </.well-known/ucp>; rel="ucp"; version="2026-08-25"
+powered-by: Shopify
+server-timing: processing;dur=503, db;dur=1, db_async;dur=2.874, edge_cart;dur=9.96;desc="trips=1", fetch;dur=479, asn;desc="393398", edge;desc="DFW", country;desc="US", servedBy;desc="jfw7", requestID;desc="cd7d825f-c78c-46d1-9883-1f8a5302ce35-1790696992", _y;desc="103c80f8-60a2-439f-95d1-18143bdd8ddc", _s;desc="0da1abf0-c1c6-4b78-8d18-4eb8bcbd1e13"
+x-request-id: cd7d825f-c78c-46d1-9883-1f8a5302ce35-1790696992
+alt-svc: h3=":443"; ma=86400
+cf-cache-status: DYNAMIC
+nel: {"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=btWJecsOLw3bqzjchh0x3NoxhBwQ7J0FCT%2BldPRjwDvmN6N4hQGee1M7YDwmzdlJyDb6sSKYtWQ59VrgvHNlzvu5Q%2FiW5sdCFvwdjBnBe5K0HbN%2B4C0MYyueq3GylKOXX6pEvkhFKKnK5flbivt5"}]}
+x-xss-protection: 1; mode=block
+server: cloudflare
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+cf-ray: a42c23e84b1af0a1-DFW
+
+HTTP/2 302 
+date: Tue, 29 Sep 2026 15:49:52 GMT
+content-length: 0
+location: https://www.fortworthfabricstudio.com/checkouts/cn/hWNHOeM0yiHiQuvcmvWkUNxh/en-us?_r=AQABiqjqak18AZDJvwcfUJiRbBz1vTfBdNSZs-8781U5fIM8KnmM&auto_redirect=false&cart_link_id=DAH0jMIK&edge_redirect=true&skip_shop_pay=true
+timing-allow-origin: *
+x-checkout-web-redirect-reason: Missing Shop Pay user
+nel: {"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}
+strict-transport-security: max-age=15552000; includeSubDomains; preload
+x-content-type-options: nosniff
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=ZqeMHhMAfujOuapF4jQFnoKJ8eqTnQ4%2BOC1w6zZ0INONBUfLxSgZtYtgJ1FtAIRNfstFwjtAQF3xdlxicWKecIzS0Le0jz9SzcHRMu8AwkYU5I7nVSMm87rQ"}]}
+server: cloudflare
+cf-ray: a42c23ebfce90864-DFW
+alt-svc: h3=":443"; ma=86400
+
+HTTP/2 200 
+date: Tue, 29 Sep 2026 15:49:52 GMT
+content-type: text/html; encoding=utf-8
+cache-control: no-cache, no-store, must-revalidate
+content-language: en-US
+strict-transport-security: max-age=7889238
+content-security-policy: block-all-mixed-content; upgrade-insecure-requests; frame-ancestors 'self' fortworthfabricstudio.myshopify.com admin.shopify.com; report-to security-policy
+cross-origin-opener-policy: same-origin-allow-popups
+referrer-policy: strict-origin-when-cross-origin
+reporting-endpoints: security-policy="https://security-reports.shopifysvc.com/reporting-api?source_app=checkout_web_worker"
+server-timing: _cta;desc="1"
+x-download-options: noopen
+timing-allow-origin: https://shop.app
+x-content-type-options: nosniff
+x-robots-tag: none
+x-permitted-cross-domain-policies: none
+x-xss-protection: 1; mode=block
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=Kg5Ug2DwlVr3Gl5%2F8EWYbk%2B7ok5pyjKLPy%2Fz3Pl%2FOdG6kyZ91wVYJP4E4SKEKj6J25IflTh%2Fen%2BrnYWZieFjmVwba0T0PaVwrXJok29r1ZJjKFmMs1SLCYIL8jUTIZqlDgXd5rOzHe1QkGo8JNmN"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}
+server: cloudflare
+cf-ray: a42c23ec29a4f0a1-DFW
+alt-svc: h3=":443"; ma=86400
+

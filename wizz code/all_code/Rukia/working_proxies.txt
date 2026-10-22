@@ -1,0 +1,9 @@
+px015601.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px031901.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px014236.pointtoserver.com:10780:reseller3270s320237:7Grp9Gki
+px022507.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px023005.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px052001.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px022505.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px051003.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj
+px043006.pointtoserver.com:10780:purevpn0s551451:9dpdlc2nfxgj

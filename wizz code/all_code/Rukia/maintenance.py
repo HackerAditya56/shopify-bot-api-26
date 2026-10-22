@@ -1,0 +1,173 @@
+import asyncio
+import logging
+import time
+from typing import Callable, Dict, Any, Awaitable
+from datetime import datetime
+from aiogram import Router, types, BaseMiddleware
+from aiogram.filters import Command
+from database import get_collection
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIGURATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADMIN_IDS = {8423281554}
+
+router = Router()
+
+# Premium Emoji IDs (matches admin.py / cmds.py style)
+EMOJI_RED_TICK   = "6147565374289220368"
+EMOJI_BLUE_TICK  = "5278620528588008305"  # placeholder
+EMOJI_FIRE       = "6186076099764555777"
+EMOJI_CROWN      = "6338940587193930733"
+EMOJI_WHITE_STAR = "5247131412032670246"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PERSISTENT STATE (MongoDB)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Stored in collection `bot_settings` with key `maintenance_mode`.
+# Survives bot restarts.
+
+def _get_maintenance_sync() -> bool:
+    col = get_collection("bot_settings")
+    doc = col.find_one({"_id": "maintenance_mode"})
+    return bool(doc and doc.get("enabled"))
+
+def _set_maintenance_sync(enabled: bool) -> None:
+    col = get_collection("bot_settings")
+    col.update_one(
+        {"_id": "maintenance_mode"},
+        {"$set": {"enabled": enabled,
+                  "updated_at": datetime.now()}},
+        upsert=True,
+    )
+
+# In-memory cache so the middleware doesn't hit MongoDB on every message.
+# Cached state is refreshed every 30s and whenever /maintenance is run.
+_cache_lock = asyncio.Lock()
+_cached_state: bool = False
+_last_refresh: float = 0.0
+_CACHE_TTL = 30.0
+
+
+async def _refresh_cache() -> None:
+    """Reload maintenance state from DB. Called on command + every 30s."""
+    global _cached_state, _last_refresh
+    try:
+        state = await asyncio.to_thread(_get_maintenance_sync)
+    except Exception as e:
+        logging.error(f"[maintenance] Failed to read state from DB: {e}")
+        return
+    _cached_state = state
+    _last_refresh = time.time()
+
+
+def is_maintenance_on() -> bool:
+    """Synchronous check used by middleware (with auto-refresh on TTL)."""
+    global _last_refresh
+    if (time.time() - _last_refresh) > _CACHE_TTL:
+        try:
+            _cached_state = _get_maintenance_sync()
+            _last_refresh = time.time()
+        except Exception:
+            pass
+    return _cached_state
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAINTENANCE WARNING TEXT (sent to blocked users)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MAINTENANCE_TEXT = (
+    f"🔧 <b>Bot is currently under maintenance.</b>\n\n"
+    f"All user commands are temporarily disabled.\n"
+    f"Please try again in a few minutes."
+)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# /maintenance COMMAND
+# Usage:
+#   /maintenance         → toggle on/off
+#   /maintenance on      → turn ON
+#   /maintenance off     → turn OFF
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@router.message(Command("maintenance"))
+async def maintenance_command(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.reply("⛔ Admin only.")
+        return
+
+    parts = message.text.split()
+    current = await asyncio.to_thread(_get_maintenance_sync)
+
+    if len(parts) == 1:
+        # No arg → toggle
+        new_state = not current
+    elif parts[1].lower() in ("on", "enable", "1", "true"):
+        new_state = True
+    elif parts[1].lower() in ("off", "disable", "0", "false"):
+        new_state = False
+    else:
+        await message.reply(
+            "Usage:\n"
+            "• <code>/maintenance</code> — toggle\n"
+            "• <code>/maintenance on</code> — enable\n"
+            "• <code>/maintenance off</code> — disable",
+            parse_mode="HTML",
+        )
+        return
+
+    await asyncio.to_thread(_set_maintenance_sync, new_state)
+    await _refresh_cache()
+
+    if new_state:
+        crown = f'<tg-emoji emoji-id="{EMOJI_CROWN}">👑</tg-emoji>'
+        await message.reply(
+            f"{crown} <b>Maintenance Mode ➛ ENABLED</b>\n\n"
+            f"All non-admin users are now blocked from using the bot.",
+            parse_mode="HTML",
+        )
+    else:
+        tick = f'<tg-emoji emoji-id="{EMOJI_BLUE_TICK}">✅</tg-emoji>'
+        await message.reply(
+            f"{tick} <b>Maintenance Mode ➛ DISABLED</b>\n\n"
+            f"Bot is back online for all users.",
+            parse_mode="HTML",
+        )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAINTENANCE MIDDLEWARE
+# Drop on /start as well? — no: /start is the entry point and should always
+# work so blocked users get a friendly notice. So we only block on every
+# OTHER command. We detect "everything except /start" by checking the text.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+class MaintenanceMiddleware(BaseMiddleware):
+    """
+    When maintenance mode is ON, all messages from non-admin users are
+    dropped after sending the maintenance notice.
+    Admin commands (/maintenance, /ban, /restart, etc.) keep working.
+    """
+
+    async def __call__(
+        self,
+        handler: Callable[[types.Message, Dict[str, Any]], Awaitable[Any]],
+        event: types.Message,
+        data: Dict[str, Any],
+    ) -> Any:
+        user = event.from_user
+        if not user or user.id in ADMIN_IDS:
+            # Admins always pass through
+            return await handler(event, data)
+
+        # Refresh cache if stale (cheap, single DB hit every 30s)
+        if (time.time() - _last_refresh) > _CACHE_TTL:
+            await _refresh_cache()
+
+        if _cached_state:
+            try:
+                await event.reply(MAINTENANCE_TEXT, parse_mode="HTML")
+            except Exception:
+                pass
+            return  # stop processing — user can't use any command
+
+        return await handler(event, data)

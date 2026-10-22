@@ -1,0 +1,29 @@
+# ── build / runtime junk ────────────────────────────────
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+*.exe
+*.tar.gz
+*.tgz
+*.zip
+*.har
+*.log
+
+# ── runtime databases (never source) ────────────────────
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ── vendored binaries / artifacts ───────────────────────
+all_code/phptest/php
+all_code/api/dist/pyarmor_runtime_000000/
+
+# ── nested third-party repo (has its own .git) ──────────
+all_code/neofetch/

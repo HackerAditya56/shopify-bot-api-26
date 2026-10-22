@@ -1,0 +1,23 @@
+# CHK X WIZ  —  Python Dependencies
+
+aiogram>=3.7,<4.0
+psycopg2-binary>=2.9
+pyrogram>=2.0,<3.0
+TgCrypto
+websockets
+
+aiohttp>=3.9
+aiofiles
+requests>=2.31
+urllib3>=2.0
+
+beautifulsoup4>=4.12
+lxml>=4.9
+faker>=20.0
+fake-useragent>=1.4
+curl_cffi>=0.7
+PySocks>=1.7
+httpx>=0.27
+
+Flask>=3.0
+PyTelegramBotAPI>=4.15

@@ -1,0 +1,94 @@
+import re
+
+# Exchange rates: 1 USD = X foreign
+RATES = {
+    'USD': 1.0,
+    'A': 1.43,    # AUD
+    'C': 1.41,    # CAD
+    'NZ': 1.73,   # NZD
+    'S': 1.29,    # SGD
+    'GBP': 0.752,
+    'EUR': 0.879,
+}
+
+path = r'administator\Rukia\mass_gates\sites.txt'
+DOLLAR = chr(36)
+POUND = chr(163)
+EURO = chr(8364)
+
+with open(path, 'r', encoding='utf-8') as f:
+    text = f.read()
+
+lines = text.split('\n')
+kept = []
+removed = 0
+url_only_kept = 0
+foreign_kept = 0
+foreign_removed = 0
+
+for line in lines:
+    raw = line.rstrip('\r')
+    if not raw.strip():
+        kept.append(line)
+        continue
+
+    # URL only line (no pipes)
+    if '|' not in raw:
+        kept.append(line)
+        url_only_kept += 1
+        continue
+
+    parts = [p.strip() for p in raw.split('|')]
+    if len(parts) < 3:
+        kept.append(line)
+        continue
+
+    price_field = parts[-1].strip()
+    usd_value = None
+
+    # Try USD: digits.dollar (no prefix letter)
+    m = re.match(r'^(\d+(?:\.\d+)?)' + re.escape(DOLLAR) + r'$', price_field)
+    if m:
+        usd_value = float(m.group(1))
+    else:
+        # Try prefixed AUD/CAD/NZD/SGD: digits + 1-2 letters + dollar
+        m = re.match(r'^(\d+(?:\.\d+)?)([A-Z]{1,2})' + re.escape(DOLLAR) + r'$', price_field)
+        if m:
+            amount = float(m.group(1))
+            prefix = m.group(2)
+            if prefix in RATES:
+                usd_value = amount / RATES[prefix]
+        else:
+            # Try GBP: digits + pound
+            m = re.match(r'^(\d+(?:\.\d+)?)' + re.escape(POUND) + r'$', price_field)
+            if m:
+                amount = float(m.group(1))
+                usd_value = amount / RATES['GBP']
+            else:
+                # Try EUR: digits + euro
+                m = re.match(r'^(\d+(?:\.\d+)?)' + re.escape(EURO) + r'$', price_field)
+                if m:
+                    amount = float(m.group(1))
+                    usd_value = amount / RATES['EUR']
+
+    if usd_value is not None:
+        if usd_value <= 6.0:
+            kept.append(line)
+            if price_field.endswith(DOLLAR) and not re.match(r'^\d+(?:\.\d+)?[A-Z]', price_field):
+                pass  # plain USD kept
+            else:
+                foreign_kept += 1
+        else:
+            removed += 1
+            if not (price_field.endswith(DOLLAR) and not re.match(r'^\d+(?:\.\d+)?[A-Z]', price_field)):
+                foreign_removed += 1
+    else:
+        # Unparseable - keep to be safe
+        kept.append(line)
+
+with open(path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(kept))
+
+print(f'Total kept: {len(kept)} | Removed: {removed}')
+print(f'URL-only lines kept (unchecked): {url_only_kept}')
+print(f'Foreign-currency entries kept: {foreign_kept} | removed: {foreign_removed}')

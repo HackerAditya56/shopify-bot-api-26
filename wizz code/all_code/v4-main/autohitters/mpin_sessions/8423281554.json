@@ -1,0 +1,29 @@
+{
+  "phone": "919024789228",
+  "user_id": "93136480",
+  "auth_token": "@@_93136480_01ff6169-473c-48df-8054-8e38910179d0",
+  "user_w_id": "OTE5MDI0Nzg5MjI4",
+  "user_name": "Magicpin User",
+  "email": "",
+  "city": "New Delhi",
+  "locality": "Chandni Chowk",
+  "lat": "28.6505942",
+  "lon": "77.2303284",
+  "config": {
+    "key": "kQLMCQBrfevxhzuPpFWT",
+    "version": "5001",
+    "captcha": "6Ld16sUhAAAAAFvZrLRlgs1FMOK-NDAgMyeXTZai",
+    "ts": 1792675601.2581754
+  },
+  "cookies": {
+    "is_new_user": "false",
+    "locality": "Chandni%20Chowk",
+    "city": "New%20Delhi",
+    "lat": "28.6505942",
+    "lon": "77.2303284",
+    "user_id": "93136480",
+    "auth_token": "%40%40_93136480_01ff6169-473c-48df-8054-8e38910179d0",
+    "user_w_id": "OTE5MDI0Nzg5MjI4",
+    "_GRECAPTCHA": "09AKhCRwgAzsZW_SC9QJxp9lZqRiN_CqYc9ZUuqIOY0Ae50Eaxk-EdPmYSminYuA8FyI43LWLcpDZ6OQrLI1nfUUs"
+  }
+}

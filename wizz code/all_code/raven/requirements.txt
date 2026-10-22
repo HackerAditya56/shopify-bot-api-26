@@ -1,0 +1,5 @@
+telethon
+aiohttp
+aiofiles
+uvloop
+aiosqlite

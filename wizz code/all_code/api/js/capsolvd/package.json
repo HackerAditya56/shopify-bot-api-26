@@ -1,0 +1,33 @@
+{
+  "name": "shopify-bot-api",
+  "version": "1.0.0",
+  "description": "Shopify checkout automation API with hCaptcha solving",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "destroy": "^1.2.0",
+    "express": "^4.22.1",
+    "fetch-cookie": "^3.0.1",
+    "jimp": "^0.22.10",
+    "node-fetch": "^3.3.2",
+    "puppeteer": "^21.11.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "send": "^1.2.1",
+    "tough-cookie": "^4.1.3"
+  },
+  "keywords": [
+    "shopify",
+    "checkout",
+    "hcaptcha"
+  ],
+  "author": "",
+  "license": "ISC"
+}

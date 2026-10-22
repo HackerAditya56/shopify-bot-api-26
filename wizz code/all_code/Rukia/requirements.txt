@@ -1,0 +1,25 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Telegram Card-Checker Bot — Production Dependencies
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Python 3.11+ (tested on 3.14)
+# Install:    pip install -r requirements.txt
+# Upgrade:    pip install -U -r requirements.txt
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Telegram bot framework (aiogram 3.x)
+aiogram==3.26.0
+
+# Async HTTP client (used by gates, msh, shopify_api, sitechk)
+aiohttp==3.13.3
+
+# Sync HTTP client (used by payments, gates/utils for legacy proxy list)
+requests==2.31.0
+
+# MongoDB driver (sync, used in database.py)
+pymongo==4.17.0
+
+# Legacy pyTelegramBotAPI — kept only because a couple of helper
+# modules (gates/utils.py, mass_gates/utils.py) still reference
+# `telebot.types` in dead type-hint annotations. Safe to remove
+# once those imports are cleaned up.
+pyTelegramBotAPI==4.21.0

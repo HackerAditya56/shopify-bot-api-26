@@ -1,0 +1,25 @@
+{
+  "phone": null,
+  "user_id": null,
+  "auth_token": null,
+  "user_w_id": null,
+  "user_name": "Magicpin User",
+  "email": "",
+  "city": "New Delhi",
+  "locality": "Chandni Chowk",
+  "lat": "28.6505942",
+  "lon": "77.2303284",
+  "config": {
+    "key": "kQLMCQBrfevxhzuPpFWT",
+    "version": "5001",
+    "captcha": "6Ld16sUhAAAAAFvZrLRlgs1FMOK-NDAgMyeXTZai",
+    "ts": 1792307600.5585575
+  },
+  "cookies": {
+    "is_new_user": "false",
+    "locality": "Chandni%20Chowk",
+    "city": "New%20Delhi",
+    "lat": "28.6505942",
+    "lon": "77.2303284"
+  }
+}

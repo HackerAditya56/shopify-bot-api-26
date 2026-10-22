@@ -1,0 +1,26 @@
+# Only index.php is needed at runtime. Everything else in this directory is
+# large and irrelevant to the PHP container.
+*
+!index.php
+
+# Never bake credentials or card data into the image.
+.venv
+venv
+__pycache__
+*.py
+*.go
+config.py
+requirements.txt
+
+# Debug artifacts the script writes at runtime.
+debug/
+header1.txt
+cart_debug.html
+final_url.txt
+header3.txt
+response3.json
+response4.json
+
+.env
+.git
+.gitignore
