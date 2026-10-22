@@ -144,7 +144,12 @@ async def addbms_command(message: types.Message):
             ok, reason = await asyncio.to_thread(_bms_page_ok, url)
         return (url if ok else None), url, reason
 
-    results = await asyncio.gather(*(_check_one(line) for line in raw_lines))
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*(_check_one(line) for line in raw_lines)), timeout=120)
+    except Exception as e:
+        logging.error(f"[addbms] gather failed: {e}")
+        await safe_reply(message, f"{TARGET} <b>𝐏𝐫𝐨𝐱𝐲 𝐜𝐡𝐞𝐜𝐤 𝐭𝐢𝐦𝐞𝐝 𝐨𝐮𝐭.</b>", parse_mode="HTML")
+        return
 
     added, skipped = [], []
     for good_url, disp, reason in results:
@@ -173,9 +178,7 @@ async def addbms_command(message: types.Message):
     if len(added) > 5:
         lines.append(f"  <i>…+{len(added)-5} more</i>")
     try:
-        await proc.edit_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+        await proc.delete()
     except Exception:
-        try:
-            await safe_reply(message, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
-        except Exception:
-            pass
+        pass
+    await safe_reply(message, "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
