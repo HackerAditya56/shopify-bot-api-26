@@ -576,9 +576,50 @@ _PAYU_CODE_MAP = {
 }
 
 
+_PAYU_ERROR_MAP = {
+    "insufficient": "INSUFFICIENT_FUNDS",
+    "do not honor": "DECLINED",
+    "cvv": "INCORRECT_CVV",
+    "invalid cvv": "INCORRECT_CVV",
+    "expired": "EXPIRED_CARD",
+    "stolen": "STOLEN_CARD",
+    "3ds": "3DS_REQUIRED",
+    "authentication": "3DS_REQUIRED",
+    "invalid card": "INVALID_CARD",
+}
+
+
 def _map_payu_direct(data: dict) -> tuple:
-    """Map the checkoutx/payments response straight from PayU."""
-    if data.get("acsTemplate"):
+    """Map the checkoutx/payments response straight from PayU.
+
+    The response carries an `acsTemplate` — a base64 HTML POST-back form that
+    holds the REAL verdict (status + error + error_Message), not a 3DS page."""
+    acs = data.get("acsTemplate") or ""
+    if acs:
+        try:
+            html = base64.b64decode(acs).decode("utf-8", errors="ignore")
+        except Exception:
+            html = ""
+        status = ""
+        em = ""
+        m = re.search(r'name="status"\s+value="([^"]*)"', html)
+        if m:
+            status = m.group(1)
+        m = re.search(r'name="error_Message"\s+value="([^"]*)"', html)
+        if m:
+            em = m.group(1)
+        if not em:
+            m = re.search(r'name="error"\s+value="([^"]*)"', html)
+            if m:
+                em = m.group(1)
+        if status.lower() == "success":
+            return "CHARGED", em or "SUCCESS"
+        low = em.lower()
+        for key, code in _PAYU_ERROR_MAP.items():
+            if key in low:
+                return code, em
+        if low:
+            return "DECLINED", em
         return "3DS_REQUIRED", "3DS challenge"
     status = str(data.get("status", "")).upper()
     if status == "SUCCESS":

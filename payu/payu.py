@@ -1308,7 +1308,9 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
             token = (r.text or "").strip()
             if not token or " " in token:
                 raise Exception(f"payu_v21_form: form token not returned: {token[:80]}")
-            # 2. submit the form (fields + meta + token) -> signed PayU form HTML
+            # 2. submit the form (fields + meta + token) -> signed PayU form HTML.
+            #    BAForms has a spam filter ("Submitting too fast") — pace the submit
+            #    and retry with a fresh token when it trips.
             form = {}
             for k, v in (cfg.get("form_fields") or {}).items():
                 if isinstance(v, str) and ("{first}" in v or "{last}" in v or "{email}" in v):
@@ -1317,11 +1319,26 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                     form[k] = v
             for k, v in (cfg.get("form_meta") or {}).items():
                 form[k] = v
-            form[token] = "1"
-            r2 = await s.post(cfg["form_url"], data=form,
-                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
-                                       "Content-Type": "application/x-www-form-urlencoded"})
-            signed = r2.text
+            signed = ""
+            for attempt in range(3):
+                await asyncio.sleep(2.0)
+                form[token] = "1"
+                r2 = await s.post(cfg["form_url"], data=form,
+                                  headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                           "Content-Type": "application/x-www-form-urlencoded"})
+                signed = r2.text
+                if "<input" in signed or "OpenPayu-Signature" in signed:
+                    break
+                # spam filter tripped -> fresh token + longer wait
+                if "Spam" in signed or "spam" in signed or "too fast" in signed:
+                    await asyncio.sleep(3.0)
+                    r = await s.post(cfg["token_url"], data={"undefined": "1"},
+                                     headers={"Referer": cfg["referer"], "Origin": cfg["origin"],
+                                              "Content-Type": "application/x-www-form-urlencoded",
+                                              "X-Requested-With": "XMLHttpRequest"})
+                    token = (r.text or "").strip()
+                    continue
+                break
             # 3. extract the PayU v2_1 fields + the signature from the signed HTML
             payu_form = {}
             for m in re.finditer(r'<input[^>]*>', signed):
