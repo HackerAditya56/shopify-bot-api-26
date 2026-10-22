@@ -58,11 +58,18 @@ def _set_notify(bot, loop):
 
 
 def _flag_dm(proxy):
+    _notify_dev(
+        "🚨 <b>𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐅𝐥𝐚𝐠𝐠𝐞𝐝 + 𝐑𝐞𝐦𝐨𝐯𝐞𝐝</b> 🚨\n"
+        f"🧭 <b>𝐏𝐫𝐨𝐱𝐲</b> ➠ <code>{proxy}</code>"
+    )
+
+
+def _notify_dev(text):
     global _notify_bot, _notify_loop
     if _notify_bot and _notify_loop:
         import asyncio as _aio
         try:
-            _aio.run_coroutine_threadsafe(prune_and_notify(proxy, _notify_bot), _notify_loop)
+            _aio.run_coroutine_threadsafe(_notify_bot.send_message(OWNER_ID, text, parse_mode="HTML"), _notify_loop)
         except Exception:
             pass
 
@@ -145,7 +152,13 @@ def check_fn(card):
         return "STOPPED", "Stopped", "UNKNOWN", 0, ""
     proxy = _next_proxy()
     if proxy is None:
-        return "ERROR", "No proxies — add via /proxy", "UNKNOWN", 0, ""
+        # all proxies dead mid-check -> stop immediately + tell the dev
+        _STOP_EVENT.set()
+        _notify_dev(
+            "🛑 <b>𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐏𝐨𝐨𝐥 𝐄𝐦𝐩𝐭𝐲</b> 🛑\n"
+            "🧭 𝐌𝐚𝐬𝐬 𝐜𝐡𝐞𝐜𝐤 𝐬𝐭𝐨𝐩𝐩𝐞𝐝 — 𝐚𝐝𝐝 𝐩𝐫𝐨𝐱𝐲 𝐭𝐨 𝐛𝐦𝐬 𝐩𝐨𝐨𝐥."
+        )
+        return "STOPPED", "proxy pool empty", "UNKNOWN", 0, ""
     proxy = _norm_proxy(proxy)
     try:
         _opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
@@ -257,8 +270,8 @@ async def bms_txt_command(message: types.Message):
     _proxies = load_bms_proxies()  # ONLY the generated bms_proxy.txt pool
     if not _proxies:
         await safe_reply(message,
-            f'<tg-emoji emoji-id="{EMOJI_COMPASS}">🧭</tg-emoji> <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀!</b>\n\n'
-            "𝗔𝗱𝗱 𝗽𝗿𝗼𝘅𝗶𝗲𝘀 𝘄𝗶𝘁𝗵 <code>/proxy</code> (𝗼𝗻𝗲 𝗽𝗲𝗿 𝗹𝗶𝗻𝗲).",
+            f'<tg-emoji emoji-id="{EMOJI_COMPASS}">🧭</tg-emoji> <b>𝗣𝗿𝗼𝘅𝘆 𝗽𝗼𝗼𝗹 𝗲𝗺𝗽𝘁𝘆</b>\n\n'
+            "𝗣𝗹𝗲𝗮𝘀𝗲 𝗮𝗱𝗱 𝗽𝗿𝗼𝘅𝘆 — <code>/addbms</code> 𝗼𝗿 <code>/genproxy</code>.",
             parse_mode="HTML")
         return
 

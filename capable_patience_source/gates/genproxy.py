@@ -101,14 +101,13 @@ def _run_generator(proxy):
 _GEN_LOCK = asyncio.Lock()
 
 
-async def _bg_generate_loop(delay: int = 60):
+async def _bg_generate_loop(delay: int = 60, fail_delay: int = 300):
     """Background self-sustaining proxy generation.
 
-    Every `delay` seconds: pick a proxy (bms_proxy.txt first, kali fallback),
-    mint a webshare account through it (SOCKS5), store the rotating endpoint
-    in bms_proxy.txt. Serialised by _GEN_LOCK so it never overlaps a manual
-    /genproxy run."""
+    On success: wait `delay` (60s). On failure: wait `fail_delay` (5 min) and
+    retry — the loop never breaks. Serialised by _GEN_LOCK."""
     while True:
+        ok = False
         try:
             proxy, source = _pick_proxy()
             if proxy:
@@ -117,13 +116,14 @@ async def _bg_generate_loop(delay: int = 60):
                 if rotating:
                     _append_bms(rotating)
                     logging.info(f"[genproxy-bg] generated {rotating} (source={source})")
+                    ok = True
                 else:
-                    logging.warning(f"[genproxy-bg] generation failed (source={source})")
+                    logging.warning(f"[genproxy-bg] generation failed (source={source}) — retry in {fail_delay}s")
             else:
-                logging.warning("[genproxy-bg] no proxies in kali/bms files")
+                logging.warning(f"[genproxy-bg] no proxies in kali/bms files — retry in {fail_delay}s")
         except Exception as e:
-            logging.error(f"[genproxy-bg] {e}")
-        await asyncio.sleep(delay)
+            logging.error(f"[genproxy-bg] {e} — retry in {fail_delay}s")
+        await asyncio.sleep(delay if ok else fail_delay)
 
 
 def start_bg_loop(delay: int = 60):
