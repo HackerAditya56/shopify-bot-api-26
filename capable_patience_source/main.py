@@ -47,6 +47,7 @@ from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
 from gates.pu import pu_command, router as pu_router
 from gates.pb import router as pb_router
+from gates.genproxy import router as genproxy_router
 from gates.cf import cf_command, router as cf_router
 from gates.py import py_command
 from gates.nmi import nmi_command
@@ -161,6 +162,7 @@ dp.include_router(mpu_router)
 dp.include_router(mb_router)
 dp.include_router(pu_router)
 dp.include_router(pb_router)
+dp.include_router(genproxy_router)
 dp.include_router(cf_router)
 dp.include_router(mcf_router)
 dp.include_router(rzg_router)

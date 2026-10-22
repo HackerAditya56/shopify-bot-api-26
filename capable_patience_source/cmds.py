@@ -61,6 +61,7 @@ PAGES = [
         "title": "Tools",
         "entries": [
             {"gate": "BIN Lookup",         "cmd": "/bin",        "limit": None, "premium": False},
+            {"gate": "Generate BMS Proxy",  "cmd": "/genproxy", "limit": None, "premium": True},
         ],
     },
     {

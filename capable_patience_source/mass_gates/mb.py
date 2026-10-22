@@ -16,6 +16,7 @@ from database import is_gate_enabled, get_user_credits, is_owner_user
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
 from proxy import parse_proxy_input
+from bms_proxy_pool import load_bms_proxies, prune_bms_proxy
 
 
 def _norm_proxy(proxy):
@@ -127,6 +128,15 @@ def check_fn(card):
         return "ERROR", "No proxies — add via /proxy", "UNKNOWN", 0, ""
     proxy = _norm_proxy(proxy)
     try:
+        _opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        _r = _opener.open("http://api.ipify.org", timeout=12)
+        if "bandwidth" in _r.read().decode("utf-8", "ignore").lower():
+            prune_bms_proxy(proxy)
+            _pause_proxy(proxy, 3600)
+            return "ERROR", "Bandwidth limit", "UNKNOWN", 0, ""
+    except Exception:
+        pass
+    try:
         q = urllib.parse.urlencode({"cc": card, "proxy": proxy, "key": "ladle"})
         url = f"{BMS_API}/bms?{q}"
         resp = urllib.request.urlopen(url, timeout=300)
@@ -217,7 +227,7 @@ async def bms_txt_command(message: types.Message):
         await safe_reply(message, "❌ No valid cards to check.", parse_mode="HTML")
         return
 
-    _proxies = await get_user_proxies(user_id)
+    _proxies = load_bms_proxies() + await get_user_proxies(user_id)
     if not _proxies:
         await safe_reply(message,
             f'<tg-emoji emoji-id="{EMOJI_COMPASS}">🧭</tg-emoji> <b>𝗡𝗼 𝗽𝗿𝗼𝘅𝗶𝗲𝘀!</b>\n\n'

