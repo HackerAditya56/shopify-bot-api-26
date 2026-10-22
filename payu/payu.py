@@ -1300,6 +1300,12 @@ async def run_payu_check(amount: str, card_entry: str, proxy_url: str = "",
                                        "Sec-Fetch-Site": "cross-site"})
             redirect = r2.headers.get("Location") or ""
         elif cfg["create_type"] == "payu_v21_form":
+            # 0. load the form page first (BAForms spam filter tracks page-load time)
+            try:
+                await s.get(cfg.get("page_url") or cfg["referer"], headers={"Referer": cfg["referer"]})
+                await asyncio.sleep(2.0)
+            except Exception:
+                pass
             # 1. GET the BAForms form token
             r = await s.post(cfg["token_url"], data={"undefined": "1"},
                              headers={"Referer": cfg["referer"], "Origin": cfg["origin"],

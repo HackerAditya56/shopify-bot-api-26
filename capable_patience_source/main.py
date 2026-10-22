@@ -46,6 +46,7 @@ from gates.rzg import router as rzg_router
 from gates.mpin import mpin_command, router as mpin_router
 from gates.pyu import pyu_command
 from gates.pu import pu_command, router as pu_router
+from gates.pb import router as pb_router
 from gates.cf import cf_command, router as cf_router
 from gates.py import py_command
 from gates.nmi import nmi_command
@@ -81,6 +82,7 @@ from mass_gates.mauth import router as mauth_router, mauth_command
 from mass_gates.mstripe import router as mstripe_router, mstripe_command
 from mass_gates.mrz import router as mrz_router, mrz_command
 from mass_gates.mpu import router as mpu_router, mpu_command
+from mass_gates.mb import router as mb_router
 from mass_gates.mcf import router as mcf_router, mcf_command
 from mass_gates._batch_common import sel_router
 from mass_gates.stop import router as stop_router
@@ -156,7 +158,9 @@ dp.include_router(mauth_router)
 dp.include_router(mstripe_router)
 dp.include_router(mrz_router)
 dp.include_router(mpu_router)
+dp.include_router(mb_router)
 dp.include_router(pu_router)
+dp.include_router(pb_router)
 dp.include_router(cf_router)
 dp.include_router(mcf_router)
 dp.include_router(rzg_router)
