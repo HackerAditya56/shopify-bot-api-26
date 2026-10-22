@@ -110,6 +110,10 @@ async def show_selection(message, cards, check_fn, gateway, user_id, user_obj, p
         parse_mode="HTML",
         reply_markup=_selection_keyboard(sel_id, True, False),
     )
+    if msg is None:
+        logging.warning("[BATCH] selection window dropped (FloodWait)")
+        BATCH_PENDING.pop(sel_id, None)
+        return
     BATCH_PENDING[sel_id]["msg_id"] = msg.message_id
     BATCH_PENDING[sel_id]["chat_id"] = message.chat.id
 
@@ -447,6 +451,9 @@ async def run_batch_check(message, cards, check_fn, gateway, user_id, user_obj, 
     initial_text = build_progress_text(session_id, gateway, 0, total, 0, 0, 0, 0, 0, "0s")
     initial_buttons = get_result_buttons(prefix, session_id, session, is_running=True)
     proc_msg = await safe_reply(message, initial_text, parse_mode="HTML", reply_markup=initial_buttons)
+    if proc_msg is None:
+        logging.warning(f"[BATCH] progress message dropped (FloodWait) for session {session_id}")
+        return
     session["msg_id"] = proc_msg.message_id
     session["chat_id"] = message.chat.id
 
