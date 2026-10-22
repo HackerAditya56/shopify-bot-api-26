@@ -229,7 +229,8 @@ async def process_bms_check(message, proc_msg, user, user_id, formatted_cc, cc, 
             except Exception:
                 continue
             resp_code = str(api_result.get("response") or "").upper()
-            if resp_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR"):
+            if resp_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR",
+                             "PROXY_BANDWIDTH", "PROXY_AUTH"):
                 if resp_code == "CLOUDFLARE_BLOCKED" and is_rotating(proxy):
                     # rotating proxy -> a 403 is transient (next request = new IP)
                     await asyncio.sleep(0.5)

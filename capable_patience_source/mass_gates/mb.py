@@ -181,7 +181,7 @@ def check_fn(card):
     real = str(data.get("real_response") or "N/A")
     amount_str = str(data.get("amount") or "0.00")
 
-    if response_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR"):
+    if response_code in ("CLOUDFLARE_BLOCKED", "PROXY_ERROR", "PROXY_BANDWIDTH", "PROXY_AUTH"):
         if response_code == "CLOUDFLARE_BLOCKED" and is_rotating(proxy):
             # rotating proxy -> 403 is transient, brief pause + keep
             _pause_proxy(proxy, random.randint(20, 45))
