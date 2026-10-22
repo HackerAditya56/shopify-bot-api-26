@@ -608,10 +608,14 @@ def _map_payu_direct(data: dict) -> tuple:
         except Exception:
             html = ""
         status = ""
+        unmapped = ""
         em = ""
         m = re.search(r'name="status"\s+value="([^"]*)"', html)
         if m:
             status = m.group(1)
+        m = re.search(r'name="unmappedstatus"\s+value="([^"]*)"', html)
+        if m:
+            unmapped = m.group(1)
         m = re.search(r'name="error_Message"\s+value="([^"]*)"', html)
         if m:
             em = m.group(1)
@@ -619,8 +623,12 @@ def _map_payu_direct(data: dict) -> tuple:
             m = re.search(r'name="error"\s+value="([^"]*)"', html)
             if m:
                 em = m.group(1)
-        if status.lower() == "success":
-            return "CHARGED", em or "SUCCESS"
+        low_s = status.lower()
+        low_u = unmapped.lower()
+        if (low_s in ("success", "successful", "captured")
+                or low_u in ("captured", "success", "successful")
+                or "payment successful" in low_s or "payment successful" in em.lower()):
+            return "CHARGED", em or "Payment Successful"
         low = em.lower()
         for key, code in _PAYU_ERROR_MAP.items():
             if key in low:
@@ -629,8 +637,8 @@ def _map_payu_direct(data: dict) -> tuple:
             return "DECLINED", em
         return "3DS_REQUIRED", "3DS challenge"
     status = str(data.get("status", "")).upper()
-    if status == "SUCCESS":
-        return "CHARGED", str(data.get("result") or data.get("message") or "SUCCESS")
+    if status in ("SUCCESS", "SUCCESSFUL", "PAYMENT SUCCESSFUL", "CAPTURED"):
+        return "CHARGED", str(data.get("result") or data.get("message") or "Payment Successful")
     if status in ("FAILURE", "FAILED"):
         return "DECLINED", str(data.get("result") or data.get("message") or "FAILURE")
     result = str(data.get("result", "")).upper()
@@ -641,8 +649,8 @@ def _map_payu_direct(data: dict) -> tuple:
 
 def _map_result(state, msg, errcode=""):
     s = str(state or "").lower()
-    if s == "success":
-        return "CHARGED", state or msg
+    if s in ("success", "successful", "captured") or "payment successful" in s:
+        return "CHARGED", state or msg or "Payment Successful"
     if s == "failed":
         return "DECLINED", (errcode or msg)
     if "3ds" in s or "challenge" in str(msg).lower():
