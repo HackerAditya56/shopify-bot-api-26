@@ -29,23 +29,12 @@ def load_bms_proxies() -> list:
 
 OWNER_ID = 8462705169
 
-_DEV_NOTIFY_TEXT = (
-    "🚨 <b>𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐅𝐥𝐚𝐠𝐠𝐞𝐝 + 𝐑𝐞𝐦𝐨𝐯𝐞𝐝</b> 🚨\n"
-    "━━━━━━━━━━━━━━━━━━━━━\n"
-    "🧭 <b>𝐏𝐫𝐨𝐱𝐲</b> ➠ <code>{proxy}</code>\n"
-    "⚙️ <i>dropped from bms_proxy.txt mid-check</i>"
-)
+async def prune_and_notify(proxy: str, bot=None) -> bool:
+    """Remove a flagged proxy from bms_proxy.txt.
 
-
-async def prune_and_notify(proxy: str, bot) -> bool:
-    """Remove a flagged proxy from bms_proxy.txt + DM the dev."""
-    removed = prune_bms_proxy(proxy)
-    if removed and bot:
-        try:
-            await bot.send_message(OWNER_ID, _DEV_NOTIFY_TEXT.format(proxy=proxy), parse_mode="HTML")
-        except Exception as e:
-            logging.warning(f"[bms_proxy] dev notify failed: {e}")
-    return removed
+    Silent by design: no dev DM on prune. Name kept for call sites.
+    """
+    return prune_bms_proxy(proxy)
 
 
 def is_rotating(proxy: str) -> bool:

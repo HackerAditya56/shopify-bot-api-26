@@ -57,13 +57,6 @@ def _set_notify(bot, loop):
     _notify_loop = loop
 
 
-def _flag_dm(proxy):
-    _notify_dev(
-        "🚨 <b>𝐁𝐌𝐒 𝐏𝐫𝐨𝐱𝐲 𝐅𝐥𝐚𝐠𝐠𝐞𝐝 + 𝐑𝐞𝐦𝐨𝐯𝐞𝐝</b> 🚨\n"
-        f"🧭 <b>𝐏𝐫𝐨𝐱𝐲</b> ➠ <code>{proxy}</code>"
-    )
-
-
 def _notify_dev(text):
     global _notify_bot, _notify_loop
     if _notify_bot and _notify_loop:
@@ -193,8 +186,7 @@ def check_fn(card):
             # rotating proxy -> 403 is transient, brief pause + keep
             _pause_proxy(proxy, random.randint(20, 45))
         else:
-            prune_bms_proxy(proxy)
-            _flag_dm(proxy)
+            prune_bms_proxy(proxy)          # silent prune, no dev DM
             _pause_proxy(proxy, 3600)
 
     if "proxy" in response_code.lower() or ("error" in status and "proxy" in real.lower()):
