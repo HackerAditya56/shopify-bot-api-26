@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 
 import requests
 from aiogram import types, F, Router
@@ -90,17 +91,22 @@ async def _extract_raw_lines(message):
 
 
 def _bms_page_ok(proxy: str) -> tuple:
-    """Test a proxy against the BMS page. Returns (ok, reason)."""
+    """Test a proxy against the BMS page via curl (hard 15s cap — never hangs)."""
     url = _proxy_url(proxy)
+    if not url:
+        return False, "bad format"
     try:
-        r = requests.get(BMS_PAGE, proxies={"http": url, "https": url},
-                         headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"},
-                         timeout=(8, 12), allow_redirects=True)
-        if r.status_code == 403:
+        r = subprocess.run(
+            ["curl", "-s", "-m", "15", "-o", "/dev/null", "-w", "%{http_code}",
+             "-x", url, "-A", UA, "--connect-timeout", "8", BMS_PAGE],
+            capture_output=True, text=True, timeout=20,
+        )
+        code = (r.stdout or "").strip()
+        if code == "403":
             return False, "403 blocked"
-        if r.status_code == 200:
+        if code == "200":
             return True, "ok"
-        return False, f"HTTP {r.status_code}"
+        return False, f"HTTP {code or (r.stderr or '')[:40]}"
     except Exception as e:
         return False, f"err {str(e)[:40]}"
 
