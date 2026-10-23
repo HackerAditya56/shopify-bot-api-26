@@ -29,7 +29,7 @@ SERVER  = os.environ.get("KALI_SERVER", "auto")
 WORKERS = _int("KALI_WORKERS", 1)      # gunicorn processes (keep 1: shared caches)
 # Server threads = how many requests can be INSIDE the process at once
 # (running + queued). Keep it >= the burst you expect; waiting is nearly free.
-THREADS = _int("KALI_THREADS", 256)
+THREADS = _int("KALI_THREADS", 3000)
 
 # ── limits ────────────────────────────────────────────────────────────────
 # How many checks may RUN at once.
