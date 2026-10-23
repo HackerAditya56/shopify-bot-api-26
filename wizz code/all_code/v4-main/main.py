@@ -129,19 +129,19 @@ from split import (
 # BOT CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-BOT_TOKEN = "8856177227:AAGEk-IqfbhlTcxEVSohO8Wg_msQSh4_uTk"
+BOT_TOKEN = "8817680595:AAFeJ7ts_5LXOmiHXLGsfFSHo9HmZlPP168"
 
 START_IMAGE_URL     = "https://i.ibb.co/27F3HxbX/IMG-20260521-222337.jpg"
 #BCcode full link
 LOG_CHANNEL_ID      = -1003912886127
 BOT_LINK            = "https://t.me/CHKXWZ_BOT"
-REQUIRED_CHANNEL_ID = -1003845510693
-REQUIRED_GROUP_ID   = -1003822850440
-REQUIRED_GROUP2_ID  = -1003822850440
-CHANNEL_LINK        = "https://t.me/+JQnEj1GfOKJiNWEx"
-GROUP_LINK          = "https://t.me/+GyN8O7ZBsNg3ZmMx"
-GROUP2_LINK         = "https://t.me/+GyN8O7ZBsNg3ZmMx"
-OWNER_LINK = "https://t.me/broken_wiz"
+REQUIRED_CHANNEL_ID = -1004453592223
+REQUIRED_GROUP_ID   = -1004453592223
+REQUIRED_GROUP2_ID  = -1004453592223
+CHANNEL_LINK        = "https://t.me/+I3047b0vANk3NjRl"
+GROUP_LINK          = "https://t.me/+I3047b0vANk3NjRl"
+GROUP2_LINK         = "https://t.me/+I3047b0vANk3NjRl"
+OWNER_LINK = "https://t.me/Enchanted_linux_0x"
 JOIN_TEXT = (
     "<tg-emoji emoji-id=\"6174632717750115359\">❓</tg-emoji> <b>Aᴄᴄᴇss Rᴇsᴛʀɪᴄᴛᴇᴅ</b> "
     "<tg-emoji emoji-id=\"5116151848855667552\">🚫</tg-emoji>\n\n"
@@ -228,7 +228,7 @@ EMOJI_DIAMOND   = "5359719332542718652"
 EMOJI_APPROVED  = "6100515480735321747"
 EMOJI_DECLINED  = "6100541628496219252"
 
-ADMIN_IDS = {8423281554}
+ADMIN_IDS = {8462705169}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Button Helper

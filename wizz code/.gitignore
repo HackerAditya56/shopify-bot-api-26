@@ -14,7 +14,11 @@ __pycache__/
 *.har
 *.log
 
-# ── runtime databases (never source) ────────────────────
+# ── runtime databases / dumps (never source) ────────────
+backups/
+*.sql
+*.sql.gz
+
 *.db
 *.db-wal
 *.db-shm

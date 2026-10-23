@@ -30,7 +30,7 @@ router = Router()
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-OWNER_IDS           = {8423281554}
+OWNER_IDS           = {8462705169}
 MAX_CONCURRENT_CHECKS = 5      # Parallel proxy-check limit
 PROXY_TIMEOUT       = 8        # Timeout per proxy check (seconds)
 IPIFY_API_URL       = "https://api.ipify.org?format=json"

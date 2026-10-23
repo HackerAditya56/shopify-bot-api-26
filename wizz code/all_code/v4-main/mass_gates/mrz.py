@@ -27,7 +27,7 @@ from aiogram.filters.callback_data import CallbackData
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LOCAL IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, increment_lifetime_stats
+from database import is_gate_enabled, get_user_credits, update_credits, update_user_stats, get_db_connection, deduct_credits_atomic, increment_lifetime_stats, is_owner_user
 from bin import get_bin_info
 from sub import get_premium_status
 from proxy import global_proxy_manager
@@ -1515,7 +1515,7 @@ async def mrz_command(message: types.Message):
 
     # ── Credit check: user must have at least 1 credit per card ──
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
-    if current_credits < total_cards:
+    if not is_owner_user(user_id) and current_credits < total_cards:
         await message.reply(
             f"❌ <b>𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗖𝗿𝗲𝗱𝗶𝘁𝘀</b>\n\n"
             f"You need <b>{total_cards}</b> credits to check <b>{total_cards}</b> cards.\n"

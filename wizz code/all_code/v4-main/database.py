@@ -12,11 +12,11 @@ import logging
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DB_CONFIG = {
-    "host":     "localhost",
-    "database": "broken",
+    "host":     "127.0.0.1",
+    "database": "linux",
     "user":     "chkx",
-    "password": "SUBHAMOP90",     #🔴 replace with your real password
-    "port":     5432,
+    "password": "linux@",
+    "port":     5433,
     # Keep idle connections alive through NAT / firewalls
     "keepalives":          1,
     "keepalives_idle":     30,
@@ -25,6 +25,20 @@ DB_CONFIG = {
     # Hard cap how long a single query is allowed to run (seconds)
     "options":  "-c statement_timeout=30000",
 }
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# OWNERSHIP  (single source of truth for admin bypasses)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OWNER_IDS = {8462705169}
+
+
+def is_owner_user(user_id) -> bool:
+    try:
+        return int(user_id) in OWNER_IDS
+    except (TypeError, ValueError):
+        return False
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # POOL SETTINGS

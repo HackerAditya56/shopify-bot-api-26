@@ -31,7 +31,7 @@ from aiogram.filters.callback_data import CallbackData
 from database import (
     is_gate_enabled, get_user_credits, update_credits,
     update_user_stats, get_db_connection,
-    deduct_credits_atomic, increment_lifetime_stats
+    deduct_credits_atomic, increment_lifetime_stats, is_owner_user
 )
 from bin import get_bin_info
 from sub import get_premium_status
@@ -964,7 +964,7 @@ async def msk_command(message: types.Message):
 
     # Credit check
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
-    if (current_credits or 0) < total_cards:
+    if not is_owner_user(user_id) and (current_credits or 0) < total_cards:
         await message.reply(
             f"❌ <b>Iɴsᴜꜰꜰɪᴄɪᴇɴᴛ Cʀᴇᴅɪᴛs</b>\n\n"
             f"You need <b>{total_cards}</b> credits to check <b>{total_cards}</b> cards.\n"

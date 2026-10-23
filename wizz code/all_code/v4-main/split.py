@@ -52,7 +52,7 @@ DATABASE_PATH           = "split_bot.db"
 MAX_CHUNK_SIZE          = 500_000
 
 # Admins — keep in sync with main.py ADMIN_IDS
-ADMIN_IDS: set = {8423281554}
+ADMIN_IDS: set = {8462705169}
 
 # ============================================================
 # LOGGING

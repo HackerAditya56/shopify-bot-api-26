@@ -12,7 +12,7 @@ from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 
-from database import get_user_credits, update_credits, create_user
+from database import get_user_credits, update_credits, create_user, is_owner_user
 from sub import get_premium_status
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -381,7 +381,7 @@ async def jio_command(message: types.Message):
         await asyncio.to_thread(create_user, user_id, username)
         current_credits = await asyncio.to_thread(get_user_credits, user_id)
 
-        if current_credits is None or current_credits < 1:
+        if not is_owner_user(user_id) and (current_credits is None or current_credits < 1):
             await message.reply(
                 "<tg-emoji emoji-id=\"4956612582816351459\">❌</tg-emoji> <b>Iɴsᴜғғɪᴄɪᴇɴᴛ Cʀᴇᴅɪᴛs</b>\n\n"
                 "Yᴏᴜ Nᴇᴇᴅ Aᴛ Lᴇᴀsᴛ <b>1 Cʀᴇᴅɪᴛ</b> Tᴏ Usᴇ Tʜɪs Gᴀᴛᴇ.\n"

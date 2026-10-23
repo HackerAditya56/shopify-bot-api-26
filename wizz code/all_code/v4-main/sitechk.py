@@ -19,7 +19,7 @@ from aiogram.types import FSInputFile
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ADD YOUR TELEGRAM ID HERE
-ADMIN_IDS = [8423281554] 
+ADMIN_IDS = [8462705169] 
 
 # Test card to verify site functionality
 TEST_CARD = "4000223372377978|05|29|651"

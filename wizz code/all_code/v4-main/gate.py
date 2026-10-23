@@ -11,7 +11,7 @@ from database import (
 import gifs
 
 # 🔴 Replace with your Telegram user ID(s)
-ADMINS = [8423281554]
+ADMINS = [8462705169]
 
 router = Router()
 

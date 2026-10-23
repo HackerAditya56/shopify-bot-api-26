@@ -21,9 +21,9 @@ router = Router()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION & IMPORTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from database import PooledConn, _premium_cache, _premium_cache_ttl, get_user_lifetime_stats, get_all_lifetime_stats_totals
+from database import PooledConn, _premium_cache, _premium_cache_ttl, get_user_lifetime_stats, get_all_lifetime_stats_totals, is_owner_user
 
-ADMIN_ID       = 8423281554
+ADMIN_ID       = 8462705169
 LOG_CHANNEL_ID = -1003822850440
 BOT_LINK       = "https://t.me/ladkichut03_bot"
 
@@ -326,6 +326,10 @@ def get_premium_status(user_id):
     Returns (is_premium: bool, expiry: datetime | None).
     Results are cached for _premium_cache_ttl seconds.
     """
+    # owners always carry premium — no plan, no expiry, nothing to buy
+    if is_owner_user(user_id):
+        return (True, None)
+
     now = _time.monotonic()
     cached = _premium_cache.get(user_id)
     if cached is not None and now < cached[1]:

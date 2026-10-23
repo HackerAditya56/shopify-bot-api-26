@@ -56,7 +56,7 @@ def _admin_id() -> int:
         from sub import ADMIN_ID
         return ADMIN_ID
     except Exception:
-        return 8423281554
+        return 8462705169
 
 
 def _dump_db_sql(tmp_sql: Path) -> None:

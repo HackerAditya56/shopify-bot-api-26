@@ -14,7 +14,7 @@ from aiogram.types import (
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ADMIN_ID         = 8423281554  # Owner's Telegram ID
+ADMIN_ID         = 8462705169  # Owner's Telegram ID
 FEEDBACK_CHANNEL = -1003912886127   # Channel where approved feedback is posted
 
 router = Router()

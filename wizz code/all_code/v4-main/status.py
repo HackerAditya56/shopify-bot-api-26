@@ -22,7 +22,7 @@ except ImportError:
 # Clickable bullet link (Telegram channel/username)
 BULLET_LINK = '<a href="https://t.me/wizs_hub">⌬</a>'
 
-OWNER_IDS: set = {8423281554}
+OWNER_IDS: set = {8462705169}
 
 router = Router()
 

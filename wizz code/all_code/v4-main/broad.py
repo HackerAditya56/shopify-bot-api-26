@@ -10,7 +10,7 @@ from database import DB_CONFIG
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIGURATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ADMIN_ID = 8423281554
+ADMIN_ID = 8462705169
 
 # Edit the live counter at most once every N seconds (no flood)
 UPDATE_INTERVAL = 10

@@ -21,7 +21,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Local Imports  (mirrors chk.py pattern exactly)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection
+from database import is_gate_enabled, get_user_credits, update_credits, get_db_connection, is_owner_user
 from sub import get_premium_status
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -451,7 +451,7 @@ async def scr_command(message: types.Message):
 
     # ── 5. Credits check ─────────────────────────────────────────────────────
     current_credits = await asyncio.to_thread(get_user_credits, user_id)
-    if current_credits is None or current_credits <= 0:
+    if not is_owner_user(user_id) and (current_credits is None or current_credits <= 0):
         await message.reply(
             "❌ <b>Insufficient Credits!</b>\n\n"
             "You have <b>0 credits</b> left.\n"
