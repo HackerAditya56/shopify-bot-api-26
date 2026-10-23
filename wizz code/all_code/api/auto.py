@@ -2371,22 +2371,29 @@ def normalize_proxy(raw: str) -> str:
         scheme = m.group(1).lower()
         p = p[m.end():]
 
-    p = p.strip().lstrip("@").strip()
+    p = p.strip().strip("\"'<>;, ").lstrip("@").strip()
+    # v7/auto.py accepted '+' as a field separator ("user+pass+host+port");
+    # only apply it when there is no '@' so a '+' inside a password survives.
+    if "@" not in p and "+" in p:
+        p = p.replace("+", ":")
 
     def _host_port(hp):
-        hp = hp.strip()
+        hp = hp.strip().rstrip("/")
         if hp.startswith("[") and "]" in hp:                 # [v6]:port
             host, _, port = hp.partition("]")
-            return host.strip("[]"), port.lstrip(":")
+            host, port = host.strip("[]"), port.lstrip(":")
+            return (host, port) if host and port.isdigit() else None
         if hp.count(":") == 1:
             host, _, port = hp.partition(":")
-            return host, port
-        return None, None
+            if host and port.isdigit():
+                return host, port
+        return None
 
     def _build(user, pwd, hostport):
-        host, port = _host_port(hostport)
-        if not host or not (port and port.isdigit()):
+        hp = _host_port(hostport)
+        if not hp:
             raise Exception(f"invalid proxy format: {raw}")
+        host, port = hp
         hostport = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
         if user:
             # unquote first: pools hand us already-encoded creds sometimes
@@ -2421,14 +2428,19 @@ def normalize_proxy(raw: str) -> str:
         if _port(d):
             return _build(a, b, f"{c}:{d}")
         raise Exception(f"invalid proxy format: {raw}")
-    if len(toks) == 3:                                   # host:port user pass
-        if _host_port(toks[0]) is not None:
+    if len(toks) == 3:
+        if _host_port(toks[0]):              # host:port user pass  (pattern C)
             return _build(toks[1], toks[2], toks[0])
+        if _host_port(toks[2]):              # user pass host:port  (pattern D)
+            return _build(toks[0], toks[1], toks[2])
         raise Exception(f"invalid proxy format: {raw}")
-    if len(toks) == 2:                                   # host:port user:pass
-        if _host_port(toks[0]) is not None:
-            u, _, pw = toks[1].partition(":")
-            return _build(u, pw, toks[0])
+    if len(toks) == 2:
+        if _host_port(toks[1]):              # user:pass host:port  (pattern B)
+            user, _, pwd = toks[0].partition(":")
+            return _build(user, pwd, toks[1])
+        if _host_port(toks[0]):              # host:port user:pass
+            user, _, pwd = toks[1].partition(":")
+            return _build(user, pwd, toks[0])
         return _build("", "", toks[0])
 
     # 3) colon separated
