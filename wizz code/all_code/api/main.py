@@ -183,8 +183,13 @@ async def check_card_async(cc: str, site: str, proxy: str) -> dict:
     if proxy:
         try:
             proxy_url = auto_async.normalize_proxy(proxy)
-        except Exception:
-            pass
+        except Exception as e:
+            # never fall through to a direct connection — that would leak the
+            # server IP and hide a malformed pool line behind a card verdict.
+            _log.warning("bad proxy %r: %s", proxy[:60], e)
+            return _build_response(
+                _result_error(cc, site, "PROXY_FORMAT"),
+                cc=cc, site=site, proxy=proxy, proxy_dead=True)
 
     proxy_dead = False
     try:

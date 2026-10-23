@@ -2352,22 +2352,96 @@ def parse_card_entry(card_entry: str) -> Tuple[str, int, int, str]:
     return number, card_month, card_year, cvv
 
 def normalize_proxy(raw: str) -> str:
-    p = raw.strip()
+    """Accept every proxy shape the bot and the pools throw at us.
+
+        user:pass@host:port      host:port               http://user:pass@host:port
+        user pass host port      host port user pass     host:port:user:pass
+        user:pass:host:port      user:pass host:port     socks5://user:pass@host:port
+
+    Credentials are percent-encoded; a bare host:port stays unauthenticated.
+    Raises on anything that cannot be read as host + numeric port.
+    """
+    p = (raw or "").strip()
     if not p:
         raise Exception("empty proxy")
 
-    if '://' not in p:
-        parts = p.split(':')
-        if len(parts) == 4:
-            p = f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-        else:
-            p = "http://" + p
+    scheme = "http"
+    m = re.match(r"^(https?|socks4|socks5)://", p, re.I)
+    if m:
+        scheme = m.group(1).lower()
+        p = p[m.end():]
 
-    parsed = urllib.parse.urlparse(p)
-    if not parsed.netloc:
+    p = p.strip().lstrip("@").strip()
+
+    def _host_port(hp):
+        hp = hp.strip()
+        if hp.startswith("[") and "]" in hp:                 # [v6]:port
+            host, _, port = hp.partition("]")
+            return host.strip("[]"), port.lstrip(":")
+        if hp.count(":") == 1:
+            host, _, port = hp.partition(":")
+            return host, port
+        return None, None
+
+    def _build(user, pwd, hostport):
+        host, port = _host_port(hostport)
+        if not host or not (port and port.isdigit()):
+            raise Exception(f"invalid proxy format: {raw}")
+        hostport = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        if user:
+            # unquote first: pools hand us already-encoded creds sometimes
+            user = urllib.parse.unquote(user)
+            pwd = urllib.parse.unquote(pwd or "")
+            return (f"{scheme}://{urllib.parse.quote(user, safe='')}:"
+                    f"{urllib.parse.quote(pwd, safe='')}@{hostport}")
+        return f"{scheme}://{hostport}"
+
+    # 1) userinfo@host:port
+    if "@" in p:
+        userinfo, _, hostport = p.rpartition("@")
+        user, _, pwd = userinfo.partition(":")
+        return _build(user, pwd, hostport)
+
+    # 2) whitespace separated
+    toks = [x for x in re.split(r"\s+", p) if x]
+    if len(toks) == 4:
+        a, b, c, d = toks
+
+        def _port(x):
+            return x.isdigit() and 0 < int(x) <= 65535
+
+        def _host(x):
+            return ("." in x) or x.startswith("[") or not x.isdigit()
+
+        # A: host port user pass      B: user pass host port
+        sa = int(_port(b) and _host(a)) + int("." in a)
+        sb = int(_port(d) and _host(c)) + int("." in c)
+        if sa >= sb and _port(b):
+            return _build(c, d, f"{a}:{b}")
+        if _port(d):
+            return _build(a, b, f"{c}:{d}")
         raise Exception(f"invalid proxy format: {raw}")
+    if len(toks) == 3:                                   # host:port user pass
+        if _host_port(toks[0]) is not None:
+            return _build(toks[1], toks[2], toks[0])
+        raise Exception(f"invalid proxy format: {raw}")
+    if len(toks) == 2:                                   # host:port user:pass
+        if _host_port(toks[0]) is not None:
+            u, _, pw = toks[1].partition(":")
+            return _build(u, pw, toks[0])
+        return _build("", "", toks[0])
 
-    return p
+    # 3) colon separated
+    parts = p.split(":")
+    if len(parts) == 2:                      # host:port
+        return _build("", "", p)
+    if len(parts) == 4:
+        if parts[1].isdigit():               # host:port:user:pass
+            return _build(parts[2], parts[3], f"{parts[0]}:{parts[1]}")
+        return _build(parts[0], parts[1], f"{parts[2]}:{parts[3]}")  # user:pass:host:port
+
+    # 4) last resort: bare host:port with a scheme that had no //
+    return _build("", "", p)
 
 # ──────────────────────── c3.py-style response mapping ───────────────
 
