@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import os
+import random
 import sys
 import threading
 import time
@@ -57,6 +58,38 @@ def _err_text(exc: BaseException | None) -> str:
     if exc.args and exc.args[0]:
         return str(exc.args[0])
     return str(exc) or ""
+
+
+_sites_cache: dict = {"ts": 0.0, "sites": []}
+
+
+def _load_sites() -> list:
+    """Read cfg.SITES_FILE (default: v4-main/sites.txt). Cached on mtime."""
+    try:
+        st = os.stat(cfg.SITES_FILE)
+    except OSError:
+        return []
+    if _sites_cache["ts"] == st.st_mtime and _sites_cache["sites"]:
+        return _sites_cache["sites"]
+    out = []
+    try:
+        with open(cfg.SITES_FILE, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if not s.startswith("http"):
+                    s = "https://" + s
+                out.append(s.rstrip("/"))
+    except OSError:
+        return []
+    _sites_cache.update(ts=st.st_mtime, sites=out)
+    return out
+
+
+def _pick_site() -> str:
+    sites = _load_sites()
+    return random.choice(sites) if sites else ""
 
 
 _STATUS_TRUE = ("ORDER_PAID", "INSUFFICIENT_FUNDS", "ORDER_SUBMITTED")
@@ -258,7 +291,7 @@ async def route_shopii(
         except Exception:
             pass
 
-    if not cc or not site:
+    if not cc:
         # Routed through _build_response so every reply carries the same shape.
         # This hand-rolled dict was the one response missing "Outcome" and
         # "elapsed", so a caller could not tell a bad request from a card result
@@ -267,6 +300,17 @@ async def route_shopii(
             _build_response(_result_error(cc or "", site or "", "MISSING_PARAMETERS"),
                             cc or "", site or "", proxy or ""),
             status_code=400)
+
+    # SITE_MODE=file (default): SITES_FILE wins over ?site=. request: caller wins.
+    if not site or getattr(cfg, "SITE_MODE", "file") == "file":
+        picked = _pick_site()
+        if picked:
+            site = picked
+    if not site:
+        return JSONResponse(
+            _build_response(_result_error(cc, "", "NO_SITES_AVAILABLE"),
+                            cc, "", proxy or ""),
+            status_code=503)
 
     if not site.startswith("http"):
         site = "https://" + site

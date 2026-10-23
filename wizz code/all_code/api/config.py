@@ -22,6 +22,15 @@ UA_KEEP_ALIVE = int(os.environ.get("CHECKER_KEEP_ALIVE", "55"))
 # API key for auth — leave empty to disable auth
 CHECKER_API_KEY = os.environ.get("CHECKER_API_KEY", "")
 
+# Site list used when the caller does not pass ?site=
+# Where the site comes from: "file" = SITES_FILE always wins, "request" = honour ?site=
+SITE_MODE = os.environ.get("SITE_MODE", "file")
+
+SITES_FILE = os.environ.get(
+    "SITES_FILE",
+    str(__import__("pathlib").Path(__file__).resolve().parent.parent / "v4-main" / "sites.txt"),
+)
+
 # Site list files (used only for the optional random-site helper)
 SITE_FILE     = os.environ.get("SITE_FILE",     "site.txt")
 SITE_LOW_FILE = os.environ.get("SITE_LOW_FILE", "site_low.txt")
