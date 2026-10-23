@@ -165,7 +165,7 @@ async def _safe_answer(callback: types.CallbackQuery, text: str = "", **kw):
 
 
 # kali_api (kali_api/main.py) - mass lane
-API_BASE_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8092/shopii")
+API_BASE_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8090/shopii")
 API_KEY = os.environ.get("KALI_API_KEY", "ladle")
 
 # site source: the v7 rotation list
