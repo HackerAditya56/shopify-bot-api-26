@@ -6,6 +6,7 @@ submit (renegotiation+retries) -> poll verdict.
 Fallback transport: /checkouts/unstable/graphql with full documents.
 """
 import base64
+import concurrent.futures
 import hmac
 import html as htmllib
 import json
@@ -19,24 +20,85 @@ import urllib.parse
 from flask import Flask, request, jsonify
 from curl_cffi import requests as curl_requests
 
+import config as CFG
+
 app = Flask(__name__)
 
-PORT = int(os.environ.get("PORT", "8090"))
+HOST = CFG.HOST
+PORT = int(CFG.PORT)
 
-API_KEY   = os.environ.get("KALI_API_KEY", os.environ.get("CHECKER_API_KEY", "ladle"))
-THREADS   = int(os.environ.get("KALI_THREADS", "31"))
-SITES_FILE = os.environ.get(
-    "KALI_SITES_FILE",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "v7", "site.txt"),
-)
+import config as CFG
 
-# cap concurrent checks so a burst cannot spawn unbounded worker threads
-_SEM = threading.BoundedSemaphore(max(1, THREADS))
+API_KEYS  = list(CFG.API_KEYS)
+THREADS   = max(1, int(CFG.THREADS))
+SITES_FILE = CFG.SITES_FILE
+
+# MAX_CONCURRENCY > 0 -> hard semaphore. 0 -> no cap, but new checks are
+# refused once the box crosses LOAD_MAX_PERCENT (cpu or ram, whichever is worse).
+if int(CFG.MAX_CONCURRENCY) > 0:
+    _SEM = threading.BoundedSemaphore(int(CFG.MAX_CONCURRENCY))
+else:
+    _SEM = None
+
+_load_cache = {"ts": 0.0, "pct": 0.0}
+
+
+def _load_pct() -> float:
+    """Worst of CPU load (1m avg / cores) and RAM use, in percent."""
+    now = time.time()
+    if now - _load_cache["ts"] < int(CFG.LOAD_TTL_SECONDS):
+        return _load_cache["pct"]
+    pct = 0.0
+    try:
+        import psutil
+        pct = max(psutil.cpu_percent(interval=0.0),
+                  psutil.virtual_memory().percent)
+    except Exception:
+        try:
+            cores = os.cpu_count() or 1
+            load1 = os.getloadavg()[0]
+            cpu_pct = (load1 / cores) * 100.0
+            mem_pct = 0.0
+            with open("/proc/meminfo") as f:
+                info = {}
+                for line in f:
+                    k2, _, rest = line.partition(":")
+                    info[k2.strip()] = rest.strip().split()[0]
+            total = float(info.get("MemTotal", 1) or 1)
+            avail = float(info.get("MemAvailable", 0) or 0)
+            mem_pct = (1.0 - avail / total) * 100.0
+            pct = max(cpu_pct, mem_pct)
+        except Exception:
+            pct = 0.0
+    _load_cache.update(ts=now, pct=pct)
+    return pct
+
+
+def _acquire_slot() -> bool:
+    if _SEM is not None:
+        return _SEM.acquire(timeout=int(CFG.QUEUE_WAIT))
+    return _load_pct() < float(CFG.LOAD_MAX_PERCENT)
+
+
+def _release_slot() -> None:
+    if _SEM is not None:
+        _SEM.release()
+
+
+def _key_ok(candidate) -> bool:
+    cand = str(candidate or "")
+    return any(hmac.compare_digest(cand, str(k)) for k in API_KEYS)
+
 
 _stats = {"active": 0, "total": 0, "charged": 0, "approved": 0,
           "pending": 0, "declined": 0, "errors": 0,
           "started": time.strftime("%Y-%m-%d %H:%M:%S")}
 _stats_lock = threading.Lock()
+
+# one worker per thread; a check that blows REQUEST_TIMEOUT stops holding the
+# slot, its thread finishes in the background
+_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=THREADS,
+                                              thread_name_prefix="chk")
 
 _sites_cache = {"ts": 0.0, "sites": []}
 
@@ -2051,8 +2113,7 @@ def sh_route():
                 return str(v).strip()
         return ""
 
-    key = _p("key")
-    if not hmac.compare_digest(str(key), str(API_KEY)):
+    if not _key_ok(_p("key")):
         return jsonify({"error": "invalid or missing API key"}), 401
 
     cc    = _p("cc", "card")
@@ -2061,12 +2122,14 @@ def sh_route():
 
     if not cc:
         return _v2_err("", site, "MISSING_PARAMETERS", 400)
+    if CFG.SITE_MODE == "file" or not site:
+        picked = _pick_site()
+        if picked:
+            site = picked
     if not site:
-        site = _pick_site()
-        if not site:
-            return _v2_err(cc, "", "NO_SITES_AVAILABLE", 503)
+        return _v2_err(cc, "", "NO_SITES_AVAILABLE", 503)
 
-    if not _SEM.acquire(timeout=30):
+    if not _acquire_slot():
         return _v2_err(cc, site, "SERVER_BUSY", 503)
 
     with _stats_lock:
@@ -2075,8 +2138,16 @@ def sh_route():
     t0 = time.monotonic()
     try:
         qs = {"cc": cc, "site": site, "proxy": proxy}
-        with app.test_request_context("/shopii", method="GET", query_string=qs):
-            out = shopii_persisted()
+
+        def _run():
+            with app.test_request_context("/shopii", method="GET", query_string=qs):
+                return shopii_persisted()
+
+        try:
+            out = _EXEC.submit(_run).result(timeout=int(CFG.REQUEST_TIMEOUT))
+        except concurrent.futures.TimeoutError:
+            _stats_bump({"Response": "TIMEOUT"})
+            return _v2_err(cc, site, "TIMEOUT", 504)
         if isinstance(out, tuple):
             resp, code = out[0], out[1]
         else:
@@ -2089,7 +2160,7 @@ def sh_route():
     finally:
         with _stats_lock:
             _stats["active"] -= 1
-        _SEM.release()
+        _release_slot()
 
 
 @app.route("/stats", methods=["GET"])
@@ -2174,30 +2245,38 @@ def _handle_all(e):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("KALI_HOST", "0.0.0.0")
+    host = HOST or "0.0.0.0"
+    mode = str(CFG.SERVER).lower()
+    limit = f"MAX_CONCURRENCY={CFG.MAX_CONCURRENCY}" + (
+        "" if int(CFG.MAX_CONCURRENCY) > 0
+        else f" (load guard at {CFG.LOAD_MAX_PERCENT}%)")
+    print(f"[kali_api] {len(API_KEYS)} key(s) | {SITES_FILE} ({len(_load_sites())} sites) | "
+          f"{limit} | timeout={CFG.REQUEST_TIMEOUT}s | site_mode={CFG.SITE_MODE}", flush=True)
     try:
         # waitress: one process, THREADS worker threads — the right shape for a
         # network-bound checker (no GIL-bound CPU work to spread across cores).
+        if mode not in ("auto", "waitress"):
+            raise ImportError("waitress disabled by KALI_SERVER")
         from waitress import serve
-        print(f"[kali_api] {host}:{PORT} waitress threads={THREADS} "
-              f"sites={len(_load_sites())} key={'set' if API_KEY else 'EMPTY'}", flush=True)
+        print(f"[kali_api] waitress {host}:{PORT} threads={THREADS}", flush=True)
         serve(app, host=host, port=PORT, threads=THREADS,
               connection_limit=1000, channel_timeout=300, ident="kali_api")
     except ImportError:
         import shutil
-        gunicorn = shutil.which("gunicorn")
+        gunicorn = shutil.which("gunicorn") if mode in ("auto", "gunicorn") else None
         if gunicorn:
             # gthread gives us exactly THREADS workers in one process
             os.chdir(os.path.dirname(os.path.abspath(__file__)))
-            print(f"[kali_api] {host}:{PORT} gunicorn gthread threads={THREADS}", flush=True)
+            print(f"[kali_api] gunicorn gthread workers={CFG.WORKERS} "
+                  f"threads={THREADS} {host}:{PORT}", flush=True)
             os.execv(gunicorn, [gunicorn,
                                 "--worker-class", "gthread",
-                                "--workers", "1",
+                                "--workers", str(max(1, int(CFG.WORKERS))),
                                 "--threads", str(THREADS),
                                 "--bind", f"{host}:{PORT}",
-                                "--timeout", "300",
+                                "--timeout", str(max(60, int(CFG.REQUEST_TIMEOUT) + 30)),
                                 "--access-logfile", "-",
                                 "main:app"])
-        print(f"[kali_api] {host}:{PORT} flask dev server (pip install waitress) "
-              f"threads capped at {THREADS}", flush=True)
+        print(f"[kali_api] flask dev server {host}:{PORT} "
+              f"(pip install waitress) slots={CFG.MAX_CONCURRENCY or THREADS}", flush=True)
         app.run(host=host, port=PORT, debug=False, threaded=True, use_reloader=False)
