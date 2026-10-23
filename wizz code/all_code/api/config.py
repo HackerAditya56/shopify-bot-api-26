@@ -7,7 +7,7 @@ import os
 
 # Host/port — bind to all interfaces so the VPS public IP works
 HOST = os.environ.get("CHECKER_HOST", "0.0.0.0")
-PORT = int(os.environ.get("CHECKER_PORT", os.environ.get("PORT", "8002")))
+PORT = int(os.environ.get("CHECKER_PORT", os.environ.get("PORT", "8092")))
 
 # Per-request budget for a full checkout run
 REQUEST_TIMEOUT = int(os.environ.get("CHECKER_TIMEOUT", "120"))

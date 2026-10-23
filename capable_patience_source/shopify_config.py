@@ -11,7 +11,7 @@ _BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SHOPIFY_DIR = os.path.dirname(_BOT_DIR)  # parent dir holds site.txt / proxy.txt
 
 # Local Shopify checker API (kali_api/main.py)
-API_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8090/shopii")
+API_URL = os.environ.get("KALI_API_URL", "http://127.0.0.1:8092/shopii")
 API_KEY = os.environ.get("KALI_API_KEY", "ladle")
 
 # Site source: the v7 rotation list
