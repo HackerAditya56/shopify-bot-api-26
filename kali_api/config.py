@@ -27,10 +27,15 @@ PORT = _int("PORT", 8090)
 # "auto" -> waitress, then gunicorn, then flask dev server
 SERVER  = os.environ.get("KALI_SERVER", "auto")
 WORKERS = _int("KALI_WORKERS", 1)      # gunicorn processes (keep 1: shared caches)
-THREADS = _int("KALI_THREADS", 31)     # waitress/gunicorn worker threads
+# Server threads = how many requests can be INSIDE the process at once
+# (running + queued). Keep it >= the burst you expect; waiting is nearly free.
+THREADS = _int("KALI_THREADS", 256)
 
 # ── limits ────────────────────────────────────────────────────────────────
-# 0 = no hard cap: accept everything until the box is above LOAD_MAX_PERCENT.
+# How many checks may RUN at once.
+#   0  -> unlimited: every request is accepted and runs while the box is under
+#         LOAD_MAX_PERCENT; above it, requests WAIT (queue) instead of failing.
+#   N  -> hard cap of N running checks; extras wait for a free slot.
 MAX_CONCURRENCY = _int("KALI_MAX_CONCURRENCY", 0)
 
 # Reject new checks once measured load >= this percent (CPU or RAM, whichever
@@ -39,8 +44,12 @@ MAX_CONCURRENCY = _int("KALI_MAX_CONCURRENCY", 0)
 LOAD_MAX_PERCENT = _int("KALI_LOAD_MAX_PERCENT", 95)
 LOAD_TTL_SECONDS = _int("KALI_LOAD_TTL", 5)     # cache window for the load probe
 
-# Seconds a request may wait for a free slot before 503 SERVER_BUSY
-QUEUE_WAIT = _int("KALI_QUEUE_WAIT", 30)
+# Seconds a request may wait for a slot / for the box to cool down.
+# 0 = wait forever (the caller just stays connected). 30 = give up with 503.
+QUEUE_WAIT = _int("KALI_QUEUE_WAIT", 0)
+
+# How often a queued request re-checks the load while waiting.
+CAPACITY_POLL = _int("KALI_CAPACITY_POLL", 2)
 
 # Hard wall-clock budget per check. The running thread is not killed (python
 # can't), it simply stops holding the slot; the caller gets TIMEOUT.

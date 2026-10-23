@@ -75,9 +75,32 @@ def _load_pct() -> float:
 
 
 def _acquire_slot() -> bool:
+    """Get permission to run one check.
+
+    MAX_CONCURRENCY > 0 : wait for a free semaphore slot.
+    MAX_CONCURRENCY = 0 : wait while the box is at/above LOAD_MAX_PERCENT.
+
+    QUEUE_WAIT = 0 means "wait as long as it takes"; a positive value gives up
+    after that many seconds (-> 503 SERVER_BUSY).
+    """
+    wait = int(CFG.QUEUE_WAIT)
+    timeout = None if wait <= 0 else wait
+
     if _SEM is not None:
-        return _SEM.acquire(timeout=int(CFG.QUEUE_WAIT))
-    return _load_pct() < float(CFG.LOAD_MAX_PERCENT)
+        return _SEM.acquire(timeout=timeout)
+
+    limit = float(CFG.LOAD_MAX_PERCENT)
+    poll = max(0.25, float(CFG.CAPACITY_POLL))
+    started = time.time()
+    if _load_pct() < limit:
+        return True
+
+    # box is hot: park here until it cools, without burning cpu
+    while _load_pct() >= limit:
+        if wait > 0 and (time.time() - started) >= wait:
+            return False
+        time.sleep(poll)
+    return True
 
 
 def _release_slot() -> None:
@@ -97,8 +120,9 @@ _stats_lock = threading.Lock()
 
 # one worker per thread; a check that blows REQUEST_TIMEOUT stops holding the
 # slot, its thread finishes in the background
-_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=THREADS,
-                                              thread_name_prefix="chk")
+_EXEC = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(CFG.MAX_CONCURRENCY) if int(CFG.MAX_CONCURRENCY) > 0 else THREADS,
+    thread_name_prefix="chk")
 
 _sites_cache = {"ts": 0.0, "sites": []}
 
