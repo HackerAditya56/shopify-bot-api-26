@@ -778,3 +778,75 @@ async def myproxy_command(message: types.Message):
     except Exception as e:
         logging.error(f"DB Error: {e}")
         await safe_reply(message, f'{_tg(ID_DECLINED, "❌")} <b>𝐄𝐫𝐫𝐨𝐫.</b>', parse_mode="HTML")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# /repxycool — owner: zero every in-memory proxy cooldown
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Cooldowns live in module-level dicts inside the running process (see
+# mass_gates/msh.py, mp u/mcf/mrz, gates/mb.py).  There is nothing in Postgres
+# to reset, so this walks the modules and clears the dicts in place.
+# A restart does the same thing, this just avoids dropping every live session.
+
+_COOLDOWN_DICTS = [
+    ("mass_gates.mpu", "_proxy_paused_until"),
+    ("mass_gates.mcf", "_proxy_paused_until"),
+    ("mass_gates.mrz", "_proxy_paused_until"),
+    ("mass_gates.mrz", "_proxy_uses"),
+    ("mass_gates.mb",  "_proxy_paused_until"),
+    ("gates.pb",       "_proxy_paused_until"),
+]
+
+
+def reset_all_proxy_cooldowns():
+    """Zero every in-memory proxy cooldown. Returns (cleared, failed, bms_pool)."""
+    import importlib
+    cleared, failed = [], []
+
+    for mod_name, attr in _COOLDOWN_DICTS:
+        try:
+            mod = importlib.import_module(mod_name)
+            d = getattr(mod, attr, None)
+            if isinstance(d, dict):
+                n = len(d)
+                d.clear()
+                cleared.append(f"<code>{mod_name}.{attr}</code> {n}")
+        except Exception as e:
+            failed.append(f"{mod_name}.{attr}: {str(e)[:40]}")
+
+    # msh cooldowns live on per-session ProxyManager objects; the module keeps
+    # a WeakSet of every live one so we can zero them without a restart
+    try:
+        from mass_gates.msh import LIVE_PROXY_MANAGERS
+        managers = list(LIVE_PROXY_MANAGERS)
+        total = 0
+        for pm in managers:
+            total += len(pm.failed_proxies)
+            pm.failed_proxies.clear()
+        cleared.append(f"<code>msh.ProxyManager×{len(managers)}</code> {total}")
+    except Exception as e:
+        failed.append(f"msh managers: {str(e)[:40]}")
+
+    pool = 0
+    try:
+        from bms_proxy_pool import load_bms_proxies
+        pool = len(load_bms_proxies())
+    except Exception:
+        pass
+
+    return cleared, failed, pool
+
+
+@router.message(F.text.startswith("/repxycool"))
+async def repxycool_command(message: types.Message):
+    from database import is_owner_user
+    if not is_owner_user(message.from_user.id):
+        return
+
+    cleared, failed, pool = reset_all_proxy_cooldowns()
+
+    body = "<b>♻️ Pʀᴏxʏ ᴄᴏᴏʟᴅᴏᴡɴs ʀᴇsᴇᴛ</b>\n" + "━" * 18 + "\n"
+    body += "\n".join(cleared) if cleared else "nothing was in cooldown"
+    if failed:
+        body += "\n\n⚠️ " + "; ".join(failed[:3])
+    body += f"\n\n<b>BMS pool:</b> <code>{pool}</code> lines"
+    await message.reply(body, parse_mode="HTML")

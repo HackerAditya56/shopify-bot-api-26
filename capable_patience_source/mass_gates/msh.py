@@ -1,4 +1,5 @@
 import asyncio
+import weakref
 import aiohttp
 import threading as _threading
 import random
@@ -190,6 +191,11 @@ class MshSelCallback(CallbackData, prefix="mshsel"):
 # PROXY MANAGER CLASS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# every live ProxyManager registers here so an owner command can zero all
+# per-session cooldowns without restarting the bot
+LIVE_PROXY_MANAGERS = weakref.WeakSet()
+
+
 class ProxyManager:
     """
     Proxy Manager - Only fails on REAL proxy errors.
@@ -235,6 +241,7 @@ class ProxyManager:
 
         self.proxy_queue = deque(self.all_proxies)
         self.failed_proxies = {}
+        LIVE_PROXY_MANAGERS.add(self)
         self.success_counts = {proxy: 0 for proxy in self.all_proxies}
         self.total_uses = 0
         self.cooldown_seconds = 60

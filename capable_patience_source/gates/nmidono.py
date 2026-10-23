@@ -93,9 +93,14 @@ def full_refresh():
 
 def ensure_fresh():
     if time.time() - CONFIG['last_refresh'] > REFRESH_INTERVAL:
-        with LOCK:
+        # non-blocking: if the warm-up thread owns the lock, let it finish
+        if not LOCK.acquire(blocking=False):
+            return
+        try:
             if time.time() - CONFIG['last_refresh'] > REFRESH_INTERVAL:
                 full_refresh()
+        finally:
+            LOCK.release()
 
 def auto_refresh_loop():
     while True:
@@ -106,8 +111,19 @@ def auto_refresh_loop():
         except:
             pass
 
-# Initialize Refresh
-full_refresh()
+# Initialize Refresh — NEVER block the import path.
+# full_refresh() does two HTTP calls through a proxy (20s + 15s worst case);
+# running it at import made `python3 main.py` take ~35s before the bot even
+# started polling.  The thread warms the config in the background instead.
+def _warm_start():
+    try:
+        with LOCK:
+            full_refresh()
+    except Exception:
+        pass
+
+
+threading.Thread(target=_warm_start, daemon=True).start()
 threading.Thread(target=auto_refresh_loop, daemon=True).start()
 
 def classify_error(msg):
