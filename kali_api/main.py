@@ -963,6 +963,21 @@ def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_d
     return last_status, last_body
 
 
+_POLL_3DS_RE = re.compile(
+    r'ActionRequiredReceipt|CompletePaymentChallenge|"offsiteRedirect"'
+    r'|"actionRequired"\s*:\s*true|"authenticationRequired"\s*:\s*true'
+    r'|"threeDS(?:ecure)?"\s*:\s*true|"3DS"\s*:\s*true', re.IGNORECASE)
+
+
+def _poll_3ds(body):
+    """True only for an explicit 3-D Secure challenge.
+
+    A receipt that is still `PendingReceipt` is *not* a challenge; treating the
+    word "pending" as 3DS is what produced the false 3DS_REQUIRED flood.
+    """
+    return bool(_POLL_3DS_RE.search(body or ""))
+
+
 def _classify_verdict(body=""):
     u = (body or "").upper()
     if '"__TYPENAME":"PROCESSEDRECEIPT"' in u or '"__TYPENAME":"SUCCESSFULRECEIPT"' in u or '"__TYPENAME": "PROCESSEDRECEIPT"' in u or '"__TYPENAME": "SUCCESSFULRECEIPT"' in u:
@@ -970,8 +985,12 @@ def _classify_verdict(body=""):
     if "FAILEDRECEIPT" in u or "PAYMENTFAILED" in u:
         m = re.search(r'"processingError"\s*:\s*\{\s*"code"\s*:\s*"([^"]+)"', body, re.IGNORECASE)
         return m.group(1) if m else "CARD_DECLINED"
-    if any(k in u for k in ("ACTIONREQUIREDRECEIPT", "ACTION_REQUIRED", "ACTIONREQUIRED", "OTP_REQUIRED", "OTP",
-                            "AUTHENTICATION_REQUIRED", "COMPLETEPAYMENTCHALLENGE", "THREE_D_SECURE", "THREEDS")):
+    if ('"__TYPENAME":"ACTIONREQUIREDRECEIPT"' in u or '"__TYPENAME": "ACTIONREQUIREDRECEIPT"' in u
+            or any(k in u for k in ("ACTION_REQUIRED", "OTP_REQUIRED", '"OTP"', "ENTER_OTP",
+                                    "OTP_VERIFICATION", "ONE_TIME_PASSCODE", "AUTHENTICATION_REQUIRED",
+                                    "COMPLETEPAYMENTCHALLENGE", "THREE_D_SECURE_REQUIRED", "THREEDS_REQUIRED"))
+            or re.search(r'"actionRequired"\s*:\s*true|"authenticationRequired"\s*:\s*true'
+                         r'|"threeDS(?:ecure)?"\s*:\s*true', body, re.IGNORECASE)):
         return "3DS_REQUIRED"
     if any(k in u for k in ("INSUFFICIENT_FUNDS", "INSUFFICIENT FUNDS", "INSUFFICIENTFUNDS", "INSUFFICIENT")):
         return "INSUFFICIENT_FUNDS"
@@ -1482,7 +1501,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
 
         last_poll = ""
         generic_retried = False
-        for _ in range(10):
+        for _ in range(12):
             poll_status, poll_body = _get_retry(
                 session, f"{shop_url}/checkouts/internal/graphql/persisted?{poll_params}",
                 proxies=plist, headers=poll_headers)
@@ -1526,9 +1545,9 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                         "gate": _gateway, "amount": cur_total, "raw": poll_body[:2500] if code == "GENERIC_ERROR" else ""}
             m = re.search(r'"pollDelay"\s*:\s*(\d+)', poll_body)
             delay = int(m.group(1)) if m else 500
-            time.sleep(min(delay, 250) / 1000.0)
+            time.sleep(min(delay, 1000) / 1000.0)
 
-        if re.search(r'action|challenge|3ds|three_d_secure|pending|authentication', last_poll or "", re.IGNORECASE):
+        if _poll_3ds(last_poll):
             return {"status": "approved", "code": "3DS_REQUIRED", "receipt_id": receipt_id, "gate": _gateway}
         return {"status": "error", "code": "POLL_TIMEOUT", "receipt_id": receipt_id, "gate": _gateway}
 
