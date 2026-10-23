@@ -6,6 +6,7 @@ submit (renegotiation+retries) -> poll verdict.
 Fallback transport: /checkouts/unstable/graphql with full documents.
 """
 import base64
+import hmac
 import html as htmllib
 import json
 import os
@@ -21,6 +22,66 @@ from curl_cffi import requests as curl_requests
 app = Flask(__name__)
 
 PORT = int(os.environ.get("PORT", "8090"))
+
+API_KEY   = os.environ.get("KALI_API_KEY", os.environ.get("CHECKER_API_KEY", "ladle"))
+THREADS   = int(os.environ.get("KALI_THREADS", "31"))
+SITES_FILE = os.environ.get(
+    "KALI_SITES_FILE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "v7", "site.txt"),
+)
+
+# cap concurrent checks so a burst cannot spawn unbounded worker threads
+_SEM = threading.BoundedSemaphore(max(1, THREADS))
+
+_stats = {"active": 0, "total": 0, "charged": 0, "approved": 0,
+          "pending": 0, "declined": 0, "errors": 0,
+          "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+_stats_lock = threading.Lock()
+
+_sites_cache = {"ts": 0.0, "sites": []}
+
+
+def _load_sites():
+    """SITES_FILE lines, cached on mtime (edit the file, no restart)."""
+    try:
+        st = os.stat(SITES_FILE)
+    except OSError:
+        return []
+    if _sites_cache["ts"] == st.st_mtime and _sites_cache["sites"]:
+        return _sites_cache["sites"]
+    out = []
+    try:
+        with open(SITES_FILE, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if not s.startswith("http"):
+                    s = "https://" + s
+                out.append(s.rstrip("/"))
+    except OSError:
+        return []
+    _sites_cache.update(ts=st.st_mtime, sites=out)
+    return out
+
+
+def _pick_site():
+    sites = _load_sites()
+    return random.choice(sites) if sites else ""
+
+
+def _v2_shape(payload, site, proxy_status):
+    """v2/main_v2.py response contract."""
+    p = dict(payload or {})
+    p["Proxy"] = "Live" if str(proxy_status).lower() == "live" else "Dead"
+    p["site"] = site or ""
+    p.setdefault("Gateway", "Shopify Payments")
+    p.setdefault("Currency", "USD")
+    p.setdefault("Price", "0.00")
+    p.setdefault("Status", "false")
+    p.setdefault("CC", "")
+    return p
+
 
 _SHOP_PACE = {}
 
@@ -1945,6 +2006,104 @@ def shopii_persisted():
                         "Price": "0.00", "Proxy": "not used", "Response": "ERROR", "Status": "false"}), 200
 
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# /sh — v7/main_v2.py-compatible endpoint
+#   key=... (required) cc=... proxy=... site=... (optional, falls back to SITES_FILE)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _v2_err(cc, site, code, http_code, proxy="Dead"):
+    return jsonify({
+        "Gateway": "Shopify Payments", "Currency": "USD", "Price": "0.00",
+        "Proxy": proxy, "Response": code, "Status": "false",
+        "CC": cc or "", "site": site or "",
+    }), http_code
+
+
+def _stats_bump(payload):
+    resp = str((payload or {}).get("Response", "")).upper()
+    with _stats_lock:
+        if resp == "ORDER_PAID":
+            _stats["charged"] += 1
+        elif resp in ("INSUFFICIENT_FUNDS", "APPROVED"):
+            _stats["approved"] += 1
+        elif resp in ("3DS_REQUIRED", "PROCESSING", "ORDER_SUBMITTED", "AUTHENTICATION_REQUIRED"):
+            _stats["pending"] += 1
+        elif resp in ("CARD_DECLINED", "DECLINED"):
+            _stats["declined"] += 1
+        else:
+            _stats["errors"] += 1
+
+
+@app.route("/sh", methods=["GET", "POST"])
+def sh_route():
+    body = {}
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+
+    def _p(*names):
+        for n in names:
+            v = request.args.get(n)
+            if v:
+                return v.strip()
+        for n in names:
+            v = body.get(n)
+            if v:
+                return str(v).strip()
+        return ""
+
+    key = _p("key")
+    if not hmac.compare_digest(str(key), str(API_KEY)):
+        return jsonify({"error": "invalid or missing API key"}), 401
+
+    cc    = _p("cc", "card")
+    site  = _p("site", "shop")
+    proxy = _p("proxy")
+
+    if not cc:
+        return _v2_err("", site, "MISSING_PARAMETERS", 400)
+    if not site:
+        site = _pick_site()
+        if not site:
+            return _v2_err(cc, "", "NO_SITES_AVAILABLE", 503)
+
+    if not _SEM.acquire(timeout=30):
+        return _v2_err(cc, site, "SERVER_BUSY", 503)
+
+    with _stats_lock:
+        _stats["active"] += 1
+        _stats["total"] += 1
+    t0 = time.monotonic()
+    try:
+        qs = {"cc": cc, "site": site, "proxy": proxy}
+        with app.test_request_context("/shopii", method="GET", query_string=qs):
+            out = shopii_persisted()
+        if isinstance(out, tuple):
+            resp, code = out[0], out[1]
+        else:
+            resp, code = out, 200
+        payload = resp.get_json(silent=True) or {}
+        shaped = _v2_shape(payload, site, payload.get("Proxy"))
+        shaped["elapsed"] = round(time.monotonic() - t0, 2)
+        _stats_bump(shaped)
+        return jsonify(shaped), code
+    finally:
+        with _stats_lock:
+            _stats["active"] -= 1
+        _SEM.release()
+
+
+@app.route("/stats", methods=["GET"])
+def sh_stats():
+    with _stats_lock:
+        return jsonify(dict(_stats))
+
+
+@app.route("/health", methods=["GET"])
+@app.route("/", methods=["GET"])
+def sh_health():
+    return jsonify({"ok": True, "api": "sh"})
+
+
 @app.route("/shopiig", methods=["GET", "POST"])
 @app.route("/shopii/graphql", methods=["GET", "POST"])
 def shopii_graphql():
@@ -2015,4 +2174,30 @@ def _handle_all(e):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True, use_reloader=False)
+    host = os.environ.get("KALI_HOST", "0.0.0.0")
+    try:
+        # waitress: one process, THREADS worker threads — the right shape for a
+        # network-bound checker (no GIL-bound CPU work to spread across cores).
+        from waitress import serve
+        print(f"[kali_api] {host}:{PORT} waitress threads={THREADS} "
+              f"sites={len(_load_sites())} key={'set' if API_KEY else 'EMPTY'}", flush=True)
+        serve(app, host=host, port=PORT, threads=THREADS,
+              connection_limit=1000, channel_timeout=300, ident="kali_api")
+    except ImportError:
+        import shutil
+        gunicorn = shutil.which("gunicorn")
+        if gunicorn:
+            # gthread gives us exactly THREADS workers in one process
+            os.chdir(os.path.dirname(os.path.abspath(__file__)))
+            print(f"[kali_api] {host}:{PORT} gunicorn gthread threads={THREADS}", flush=True)
+            os.execv(gunicorn, [gunicorn,
+                                "--worker-class", "gthread",
+                                "--workers", "1",
+                                "--threads", str(THREADS),
+                                "--bind", f"{host}:{PORT}",
+                                "--timeout", "300",
+                                "--access-logfile", "-",
+                                "main:app"])
+        print(f"[kali_api] {host}:{PORT} flask dev server (pip install waitress) "
+              f"threads capped at {THREADS}", flush=True)
+        app.run(host=host, port=PORT, debug=False, threaded=True, use_reloader=False)
