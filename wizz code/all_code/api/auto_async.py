@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import html
 import random
@@ -106,6 +107,10 @@ generate_attempt_token = _auto.generate_attempt_token
 generate_page_id = _auto.generate_page_id
 
 # ── Async TLS client ──────────────────────────────────────────────────
+
+# Whole-checkout HTTP budget per request. Slow residential proxies need more
+# than curl's default; override with CHECKER_HTTP_TIMEOUT.
+HTTP_TIMEOUT = float(os.environ.get("CHECKER_HTTP_TIMEOUT", "25"))
 
 class AsyncTLSClient:
     def __init__(self, timeout=20, proxy_url=None, impersonate=None, user_agent=None):
@@ -225,7 +230,7 @@ async def warm_up_catalog_session(client: AsyncTLSClient, shop_url: str):
     if not _CATALOG_WARMUP:
         return
     try:
-        await client.get(f"{shop_url}/", timeout=10)
+        await client.get(f"{shop_url}/", timeout=HTTP_TIMEOUT)
     except Exception:
         pass
 
@@ -1492,7 +1497,7 @@ async def _persisted_checkout_for_card_async(shop_url: str, card_entry: str,
 
     email       = generate_random_email()
 
-    client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
+    client = AsyncTLSClient(timeout=HTTP_TIMEOUT, proxy_url=proxy_url)
     try:
         currency, country = await fetch_shop_currency(client, shop_url)
         result.currency = currency
@@ -1969,7 +1974,7 @@ async def legacy_checkout_async(shop_url: str, card_entry: str,
     addr = address_for_country("US")
     full_name = f"{addr.first_name} {addr.last_name}".title()
 
-    client = AsyncTLSClient(timeout=12, proxy_url=proxy_url)
+    client = AsyncTLSClient(timeout=HTTP_TIMEOUT, proxy_url=proxy_url)
     try:
         try:
             _title, _pid, _handle, variant_id, _price = await find_cheapest_product(client, shop_url)

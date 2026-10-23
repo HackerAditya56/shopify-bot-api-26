@@ -2351,6 +2351,9 @@ def parse_card_entry(card_entry: str) -> Tuple[str, int, int, str]:
 
     return number, card_month, card_year, cvv
 
+HTTP_TIMEOUT = float(os.environ.get("CHECKER_HTTP_TIMEOUT", "25"))
+
+
 def normalize_proxy(raw: str) -> str:
     """Accept every proxy shape the bot and the pools throw at us.
 
@@ -2438,6 +2441,10 @@ def normalize_proxy(raw: str) -> str:
         if _host_port(toks[1]):              # user:pass host:port  (pattern B)
             user, _, pwd = toks[0].partition(":")
             return _build(user, pwd, toks[1])
+        if toks[1].isdigit() and not toks[0].isdigit():
+            return _build("", "", f"{toks[0]}:{toks[1]}")   # host port (no colon)
+        if toks[1].isdigit() and "." in toks[0]:            # ip port, numeric-ish host
+            return _build("", "", f"{toks[0]}:{toks[1]}")
         if _host_port(toks[0]):              # host:port user:pass
             user, _, pwd = toks[1].partition(":")
             return _build(user, pwd, toks[0])
@@ -2637,7 +2644,7 @@ def legacy_checkout(shop_url: str, card_entry: str, proxy_url: str = "") -> Chec
     addr = address_for_country("US")
     full_name = f"{addr.first_name} {addr.last_name}".title()
 
-    client = TLSClient(timeout=12, proxy_url=proxy_url)
+    client = TLSClient(timeout=HTTP_TIMEOUT, proxy_url=proxy_url)
     try:
         # 0. pick a variant
         try:
