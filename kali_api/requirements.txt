@@ -1,2 +1,4 @@
-flask>=3.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
 curl_cffi>=0.7
+psutil>=5.9

