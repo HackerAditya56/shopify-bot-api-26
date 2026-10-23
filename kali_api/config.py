@@ -1,9 +1,21 @@
 """
-kali_api — configuration.
+kali_api — configuration (v7/main_v2.py-compatible names).
 
-Edit this file, then restart the service. Every value can also be overridden
-with an environment variable (the env wins), so systemd/docker can set them
-without touching the tree.
+Edit here, restart the service. Every value is also read from the environment
+(env wins), so systemd/docker can override without touching the tree.
+
+    CHECKER_HOST, CHECKER_PORT / PORT     bind address
+    CHECKER_WORKERS                       uvicorn processes   (v7: 31)
+    CHECKER_TIMEOUT                       per-check seconds   (v7: 120)
+    CHECKER_KEEP_ALIVE                    keep-alive seconds  (v7: 55)
+    CHECKER_API_KEY                       single key
+    KALI_API_KEYS                         comma separated keys (takes priority)
+
+kali-only extras (all optional, sane defaults):
+    KALI_MAX_CONCURRENCY                  0 = unlimited (load guard decides)
+    KALI_LOAD_MAX_PERCENT                 refuse/park above this load
+    KALI_QUEUE_WAIT                       0 = wait forever for a slot
+    KALI_SITE_MODE                        "request" (site from caller) | "file"
 """
 import os
 
@@ -15,58 +27,53 @@ def _int(name, default):
         return int(default)
 
 
+# ── server (v7 names) ─────────────────────────────────────────────────────
+HOST = os.environ.get("CHECKER_HOST", "0.0.0.0")
+PORT = _int("CHECKER_PORT", os.environ.get("PORT", "8080"))
+
+# uvicorn processes. each worker is a separate process with its own caches,
+# its own stats and its own concurrency budget — 31 workers means 31x that.
+WORKERS = _int("CHECKER_WORKERS", 31)
+
+# per-check wall clock
+REQUEST_TIMEOUT = _int("CHECKER_TIMEOUT", 120)
+
+# keep-alive for idle client connections
+UA_KEEP_ALIVE = _int("CHECKER_KEEP_ALIVE", 55)
+
+# ── auth ──────────────────────────────────────────────────────────────────
+CHECKER_API_KEY = os.environ.get("CHECKER_API_KEY", "ladle")
+
+
 def _keys():
-    raw = os.environ.get("KALI_API_KEYS") or os.environ.get("KALI_API_KEY") or "ladle"
+    raw = os.environ.get("KALI_API_KEYS") or CHECKER_API_KEY or ""
     return [k.strip() for k in raw.split(",") if k.strip()]
 
 
-# ── server ────────────────────────────────────────────────────────────────
-HOST = os.environ.get("KALI_HOST", "0.0.0.0")
-PORT = _int("PORT", 8090)
-
-# "auto" -> waitress, then gunicorn, then flask dev server
-SERVER  = os.environ.get("KALI_SERVER", "auto")
-WORKERS = _int("KALI_WORKERS", 1)      # gunicorn processes (keep 1: shared caches)
-# Server threads = how many requests can be INSIDE the process at once
-# (running + queued). Keep it >= the burst you expect; waiting is nearly free.
-THREADS = _int("KALI_THREADS", 3000)
-
-# ── limits ────────────────────────────────────────────────────────────────
-# How many checks may RUN at once.
-#   0  -> unlimited: every request is accepted and runs while the box is under
-#         LOAD_MAX_PERCENT; above it, requests WAIT (queue) instead of failing.
-#   N  -> hard cap of N running checks; extras wait for a free slot.
-MAX_CONCURRENCY = _int("KALI_MAX_CONCURRENCY", 0)
-
-# Reject new checks once measured load >= this percent (CPU or RAM, whichever
-# is worse). Only consulted while MAX_CONCURRENCY == 0; a positive cap always
-# uses the semaphore instead.
-LOAD_MAX_PERCENT = _int("KALI_LOAD_MAX_PERCENT", 95)
-LOAD_TTL_SECONDS = _int("KALI_LOAD_TTL", 5)     # cache window for the load probe
-
-# Seconds a request may wait for a slot / for the box to cool down.
-# 0 = wait forever (the caller just stays connected). 30 = give up with 503.
-QUEUE_WAIT = _int("KALI_QUEUE_WAIT", 0)
-
-# How often a queued request re-checks the load while waiting.
-CAPACITY_POLL = _int("KALI_CAPACITY_POLL", 2)
-
-# Hard wall-clock budget per check. The running thread is not killed (python
-# can't), it simply stops holding the slot; the caller gets TIMEOUT.
-REQUEST_TIMEOUT = _int("KALI_REQUEST_TIMEOUT", 120)
-
-# ── auth ──────────────────────────────────────────────────────────────────
-# comma separated in KALI_API_KEYS, e.g. KALI_API_KEYS="ladle,abc123"
 API_KEYS = _keys()
 
-# ── sites ─────────────────────────────────────────────────────────────────
+# ── sites (v7 names) ──────────────────────────────────────────────────────
 _DEFAULT_SITES = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "v7", "site.txt")
-SITES_FILE = os.environ.get("KALI_SITES_FILE", _DEFAULT_SITES)
 
-# "file"    -> always draw from SITES_FILE (ignores ?site=)
-# "request" -> use ?site= when given, file only as fallback
-SITE_MODE = os.environ.get("KALI_SITE_MODE", "request")
+SITE_FILE = os.environ.get("SITE_FILE", _DEFAULT_SITES)
+SITE_LOW_FILE = os.environ.get("SITE_LOW_FILE", "site_low.txt")   # v7 compat
+SITE_MID_FILE = os.environ.get("SITE_MID_FILE", "site_mid.txt")   # v7 compat
 
-# ── misc ──────────────────────────────────────────────────────────────────
+# kali aliases
+SITES_FILE = os.environ.get("KALI_SITES_FILE", SITE_FILE)
+SITE_MODE = os.environ.get("KALI_SITE_MODE", "request").lower()
+
+# ── limits (kali extras) ──────────────────────────────────────────────────
+# How many checks may RUN per worker process.
+#   0 = unlimited: run while the box is under LOAD_MAX_PERCENT, queue above it
+MAX_CONCURRENCY = _int("KALI_MAX_CONCURRENCY", 0)
+LOAD_MAX_PERCENT = _int("KALI_LOAD_MAX_PERCENT", 95)
+LOAD_TTL_SECONDS = _int("KALI_LOAD_TTL", 5)
+QUEUE_WAIT = _int("KALI_QUEUE_WAIT", 0)
+CAPACITY_POLL = _int("KALI_CAPACITY_POLL", 2)
+
+# only used when MAX_CONCURRENCY == 0: the per-process ceiling
+THREADS = _int("KALI_TASK_CAP", 1000)
+
 LOG_LEVEL = os.environ.get("KALI_LOG_LEVEL", "INFO")

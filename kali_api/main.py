@@ -2263,8 +2263,11 @@ async def shopii(request: Request, cc: str | None = Query(None), proxy: str | No
 
 
 if __name__ == "__main__":
-    print(f"[kali_api] async port | {len(API_KEYS)} key(s) | {SITES_FILE} "
-          f"({len(_load_sites())} sites) | slots={SLOTS} | load_guard={LOAD_MAX}% | "
-          f"timeout={REQUEST_TIMEOUT}s | site_mode={SITE_MODE}", flush=True)
-    uvicorn.run("main:app", host=HOST, port=PORT, workers=max(1, int(CFG.WORKERS)),
-                access_log=False, backlog=1024, timeout_keep_alive=60)
+    print(f"[kali_api] async | workers={CFG.WORKERS} | {len(API_KEYS)} key(s) | "
+          f"{SITES_FILE} ({len(_load_sites())} sites) | slots/worker={SLOTS} | "
+          f"load_guard={LOAD_MAX}% | timeout={REQUEST_TIMEOUT}s | site_mode={SITE_MODE}",
+          flush=True)
+    uvicorn.run("main:app", host=HOST, port=PORT,
+                workers=max(1, int(CFG.WORKERS)),
+                access_log=False, backlog=1024,
+                timeout_keep_alive=int(CFG.UA_KEEP_ALIVE))
