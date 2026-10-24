@@ -36,6 +36,7 @@ from telegram.ext import (
 )
 
 import proxy_manager
+import fileserver
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -587,6 +588,38 @@ async def _cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = await update.message.reply_text("⏳ Measuring live CPU...")
     text = "🖥 <b>VPS Status</b>\n" + _vps_status_text()
+
+    # ── where we live + who we are ───────────────────────────────────────
+    try:
+        cwd = os.getcwd()
+        pyv = sys.version.split()[0]
+        pid = os.getpid()
+        try:
+            import getpass
+            who = getpass.getuser()
+        except Exception:
+            who = "?"
+        text += (
+            "\n📂 <b>Runtime</b>\n"
+            f"<code>{cwd}</code>\n"
+            f"user <b>{who}</b> · python <b>{pyv}</b> · pid <b>{pid}</b>"
+        )
+    except Exception:
+        pass
+
+    # ── file browser ─────────────────────────────────────────────────────
+    try:
+        fileserver.ensure_started()
+        url = fileserver.url_for_display()
+        text += (
+            "\n\n🗂 <b>File browser</b>\n"
+            f"<code>{url}</code>\n"
+            f"<i>user</i> <code>{fileserver._USER}</code> · "
+            f"<i>pass</i> <code>{'*' * len(fileserver._PASS)}</code>"
+        )
+    except Exception as e:
+        text += f"\n\n🗂 File browser: <i>failed ({str(e)[:60]})</i>"
+
     await msg.edit_text(text, parse_mode="HTML")
 
 
