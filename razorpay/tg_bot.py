@@ -40,7 +40,7 @@ import fileserver
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8620542187:AAGsLRh6TKhFEP6XkPjYBKseTJYrJ8zC1tw")
+BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8620542187:AAGsLRh6TKhFEP6XkPJYBKseTJYrJ8zC1tw")
 OWNER_ID = int(os.environ.get("TG_OWNER_ID", "8462705169"))
 _DATA_DIR = os.environ.get("PROXY_DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(_DATA_DIR, exist_ok=True)
